@@ -1,0 +1,4 @@
+edgartools>=5.35.1
+yfinance>=1.4.1
+pandas>=3.0.1
+requests>=2.31
