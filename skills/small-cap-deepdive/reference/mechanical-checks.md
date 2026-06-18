@@ -1,7 +1,7 @@
 # Mechanical Checks — Invariant B
 
 > Five Python guards that prevent the most expensive data errors found in real production runs.
-> Each guard is tied to a specific bug in `daily-alpha/reports/smallcap/DATA_ISSUES.md`.
+> Each guard corresponds to a specific class of bug encountered during development.
 > The machine layer outputs data, never narrative. Judgment belongs to the LLM layer.
 
 ---
@@ -18,7 +18,7 @@ If a Python tool cannot determine a value from authoritative data, it outputs `n
 
 ## Guard 1 — 10-K/A Amendment Exclusion
 
-**Bug:** `discover.py` and `cheap_pass.py` were counting 10-K/A amendment filings alongside 10-K annual reports, leading to duplicate processing and inflated kill-flag counts.
+**Bug (fix #1 — from production run):** `discover.py` and `cheap_pass.py` were counting 10-K/A amendment filings alongside 10-K annual reports, leading to duplicate processing and inflated kill-flag counts.
 
 **Rule:** When fetching filings for a company, filter to `form_type == "10-K"` only. Exclude `10-K/A` (amendments), `10-KT` (transition period), and `10-K405` (legacy variant).
 
@@ -30,7 +30,7 @@ If a Python tool cannot determine a value from authoritative data, it outputs `n
 
 ## Guard 2 — Kill-Flag Full-Text Context, Not Market-Wide Count
 
-**Bug (DATA_ISSUES.md #1 + #2):** The original `cheap_pass.py` used `efts.sec.gov` with a `cik` parameter to count filings containing kill-flag keywords. Two failures:
+**Bug (fix #2 — from production run):** The original `cheap_pass.py` used `efts.sec.gov` with a `cik` parameter to count filings containing kill-flag keywords. Two failures:
 1. The `cik` filter parameter silently did not work — counts reflected the entire SEC corpus, not the specific company.
 2. Every 10-K risk section routinely mentions "going concern" in boilerplate disclaimers (e.g., "The Company does not have any going concern issues"). Counting keyword occurrences always over-reports.
 
@@ -56,7 +56,8 @@ This guard is listed separately because it is the single most impactful mechanic
 - The phrase `going concern` AND
 - The phrase `substantial doubt`
 
-in the same document, within a reasonable context window (not separated by more than ~2000 characters or different major sections).
+both present in the same 10-K filing (full text). No proximity constraint is applied in code —
+both phrases must appear anywhere in the same document for the flag to fire.
 
 **Why this matters:** Of the original kill-flag signals, going-concern had the highest false-positive rate when measured by raw keyword count. After applying the double-hit rule, false positives dropped from approximately 60% to under 10% in test runs.
 
@@ -68,7 +69,7 @@ in the same document, within a reasonable context window (not separated by more 
 
 ## Guard 4 — `concept_series` Multi-Concept Merge
 
-**Bug (DATA_ISSUES.md #4):** `deepdive_data.py` uses the EDGAR `companyconcept` endpoint to fetch XBRL financial series (e.g., `us-gaap/Revenues`). The bug: when the endpoint returns multiple time periods including both annual and quarterly data, the "most recent two periods" selection was picking stale fiscal years (e.g., FY2017 → FY2018) because the data was not sorted by fiscal year end date.
+**Bug (fix #4 — from production run):** `deepdive_data.py` uses the EDGAR `companyconcept` endpoint to fetch XBRL financial series (e.g., `us-gaap/Revenues`). The bug: when the endpoint returns multiple time periods including both annual and quarterly data, the "most recent two periods" selection was picking stale fiscal years (e.g., FY2017 → FY2018) because the data was not sorted by fiscal year end date.
 
 **Rule:** When retrieving `concept_series`, filter to:
 1. Annual periods only (`form == "10-K"`)
@@ -85,7 +86,7 @@ The output field `revenue_growth_pct` (and any other derived growth metric) must
 
 ## Guard 5 — `runway = nan` Semantic Disambiguation
 
-**Bug (DATA_ISSUES.md #5):** When `operating_cash_flow > 0` (the company is cash-flow positive and not burning cash), `runway` is mathematically undefined — you cannot divide cash on hand by a negative outflow. The original code returned `nan` in this case, which was misread as "missing data" or "company has no runway."
+**Bug (fix #5 — from production run):** When `operating_cash_flow > 0` (the company is cash-flow positive and not burning cash), `runway` is mathematically undefined — you cannot divide cash on hand by a negative outflow. The original code returned `nan` in this case, which was misread as "missing data" or "company has no runway."
 
 **Rule:** The `runway` field must carry a semantic annotation distinguishing three cases:
 
@@ -119,11 +120,11 @@ This rule deserves its own section because it is the most frequently violated in
 
 | Guard | Bug Source | Key Rule | Anchor Test |
 |---|---|---|---|
-| 1: Amendment exclusion | DATA_ISSUES #implicit | `form_type == "10-K"` only | KOP |
-| 2: Kill-flag full context | DATA_ISSUES #1, #2 | Read full text via edgartools, not FTS count | IQST |
-| 3: Going-concern double-hit | DATA_ISSUES #2 | Requires both `going concern` + `substantial doubt` | IQST |
-| 4: concept_series merge | DATA_ISSUES #4 | Filter to annual, sort by `end` date desc, annotate dates | EGAN |
-| 5: runway nan | DATA_ISSUES #5 | Annotate `ocf_positive` vs `insufficient_data` | Multiple |
+| 1: Amendment exclusion | Fix #1 (production run) | `form_type == "10-K"` only | KOP |
+| 2: Kill-flag full context | Fix #2 (production run) | Read full text via edgartools, not FTS count | IQST |
+| 3: Going-concern double-hit | Fix #2 (production run) | Requires both `going concern` + `substantial doubt` in same filing | IQST |
+| 4: concept_series merge | Fix #4 (production run) | Filter to annual, sort by `end` date desc, annotate dates | EGAN |
+| 5: runway nan | Fix #5 (production run) | Annotate `ocf_positive` vs `insufficient_data` | Multiple |
 
 ---
 

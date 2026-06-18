@@ -6,12 +6,14 @@ deepdive_data.py — Stage 1 深度尽调的数据拉取层(机械部分)
   - 稀释史(流通股 YoY)
   - Form 4 内部人交易(净买卖方向 = 最硬的管理层诚实信号)
   - 10-K 关键章节文本(business/risk factors)供判断层读
-设计:research/smallcap/02_deepdive_framework.md。
+设计依据:reference/mechanical-checks.md。
 
 判断层(护城河/管理层/估值/多空论点)由 agent 读这些数据后做,不在此脚本。
 本脚本只负责"把硬数据摆到桌上",防止 agent 凭记忆/叙事编。
 
-用法: python deepdive_data.py --ticker IQST
+用法:
+    python deepdive_data.py --ticker IQST
+    python deepdive_data.py --candidates reports/smallcap/candidates_<slug>.json
 输出: reports/smallcap/deepdive_<ticker>_<date>.json
 """
 from __future__ import annotations
@@ -22,7 +24,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
 from edgar import Company
 
 # sys.path shim so this script can be run directly from tools/
@@ -36,7 +37,7 @@ def _one_concept(cik: str, concept: str) -> list:
     """拉单个 XBRL 概念的年度序列(跨度 350-380 天 或 instant)。"""
     url = FACTS.format(cik=str(cik).zfill(10), concept=concept)
     try:
-        r = requests.get(url, headers=UA, timeout=20)
+        r = http_get(url, timeout=20)
         if r.status_code != 200:
             return []
         units = r.json().get("units", {})
@@ -92,7 +93,7 @@ def insider_trades(ticker: str) -> dict:
         try:
             # openinsider 最近交易表(精确解析 P/S transaction code)
             url = f"http://openinsider.com/screener?s={ticker}&o=&pl=&ph=&ll=&lh=&fd=730&fdr=&td=0&tdr=&fdlyl=&fdlyh=&daysago=&xp=1&xs=1&vl=&vh=&ocl=&och=&sic1=-1&sicl=100&sich=9999&grp=0&nfl=&nfh=&nil=&nih=&nol=&noh=&v2l=&v2h=&oc2l=&oc2h=&sortcol=0&cnt=100&page=1"
-            r = requests.get(url, headers=UA, timeout=20)
+            r = http_get(url, timeout=20)
             if r.status_code != 200:
                 out["error"] = f"http {r.status_code}"
                 return out
@@ -188,10 +189,35 @@ def _selftest():
     print("deepdive_data selftest PASS")
 
 
+def _pull_and_save(ticker: str, cik: str) -> None:
+    """Pull data for one ticker and write JSON to REPORTS dir."""
+    print(f"深度尽调数据拉取: {ticker} (CIK {cik})", file=sys.stderr)
+    d = pull(ticker, cik)
+    out = REPORTS / f"deepdive_{ticker}_{today()}.json"
+    out.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+    der = d["derived"]
+    print(f"\n=== {ticker} 数据摘要 ===")
+    print(f"  营收: ${(der['latest_revenue'] or 0)/1e6:.1f}M (增速 {der['revenue_growth_pct']}%)")
+    print(f"  净利: ${(der['latest_net_income'] or 0)/1e6:.1f}M | OCF: ${(der['latest_ocf'] or 0)/1e6:.1f}M")
+    print(f"  现金: ${(der['latest_cash'] or 0)/1e6:.1f}M | runway: {der['runway_periods']} 期")
+    print(f"  股本增速(稀释): {der['shares_growth_pct']}% | OCF/NI背离: {der['ocf_ni_divergence']}")
+    print(f"  内部人: {d['insider'].get('net_signal')} (买{d['insider'].get('buys')}/卖{d['insider'].get('sells')})")
+    print(f"  going concern: {d['tenk'].get('has_going_concern')} | 客户集中: {d['tenk'].get('customer_concentration_flag')}")
+    print(f"\n数据: {out}")
+
+
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--ticker")
+    ap = argparse.ArgumentParser(
+        description="deepdive_data — Stage 1 data pull. Use --ticker for single company or "
+                    "--candidates for batch mode."
+    )
+    ap.add_argument("--ticker", default="", help="单只股票 ticker")
     ap.add_argument("--cik", default="", help="留空则用 edgartools 解析")
+    ap.add_argument(
+        "--candidates",
+        default="",
+        help="candidates JSON 文件路径 (list of {ticker, cik, ...}); 批量拉取所有候选",
+    )
     ap.add_argument("--selftest", action="store_true", help="运行自检并退出")
     args = ap.parse_args()
 
@@ -199,8 +225,35 @@ def main():
         _selftest()
         return
 
+    if args.candidates:
+        # Batch mode: loop over candidates JSON
+        candidates_path = Path(args.candidates)
+        if not candidates_path.exists():
+            ap.error(f"--candidates file not found: {args.candidates}")
+        candidates = json.loads(candidates_path.read_text(encoding="utf-8"))
+        if not isinstance(candidates, list):
+            ap.error("--candidates file must contain a JSON array of {ticker, cik, ...}")
+        init_edgar()
+        for i, rec in enumerate(candidates):
+            ticker = rec.get("ticker", "")
+            cik = str(rec.get("cik", ""))
+            if not ticker:
+                print(f"  [warn] skipping record {i}: missing ticker", file=sys.stderr)
+                continue
+            if not cik:
+                try:
+                    cik = str(Company(ticker).cik)
+                except Exception as e:
+                    print(f"  [warn] cannot resolve CIK for {ticker}: {e}", file=sys.stderr)
+                    continue
+            try:
+                _pull_and_save(ticker, cik)
+            except Exception as e:
+                print(f"  [warn] {ticker}: {e}", file=sys.stderr)
+        return
+
     if not args.ticker:
-        ap.error("--ticker is required unless --selftest")
+        ap.error("--ticker or --candidates is required unless --selftest")
 
     init_edgar()
     cik = args.cik
@@ -209,19 +262,7 @@ def main():
             cik = str(Company(args.ticker).cik)
         except Exception as e:
             print(f"无法解析 CIK: {e}", file=sys.stderr); sys.exit(1)
-    print(f"深度尽调数据拉取: {args.ticker} (CIK {cik})", file=sys.stderr)
-    d = pull(args.ticker, cik)
-    out = REPORTS / f"deepdive_{args.ticker}_{today()}.json"
-    out.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
-    der = d["derived"]
-    print(f"\n=== {args.ticker} 数据摘要 ===")
-    print(f"  营收: ${(der['latest_revenue'] or 0)/1e6:.1f}M (增速 {der['revenue_growth_pct']}%)")
-    print(f"  净利: ${(der['latest_net_income'] or 0)/1e6:.1f}M | OCF: ${(der['latest_ocf'] or 0)/1e6:.1f}M")
-    print(f"  现金: ${(der['latest_cash'] or 0)/1e6:.1f}M | runway: {der['runway_periods']} 期")
-    print(f"  股本增速(稀释): {der['shares_growth_pct']}% | OCF/NI背离: {der['ocf_ni_divergence']}")
-    print(f"  内部人: {d['insider'].get('net_signal')} (买{d['insider'].get('buys')}/卖{d['insider'].get('sells')})")
-    print(f"  going concern: {d['tenk'].get('has_going_concern')} | 客户集中: {d['tenk'].get('customer_concentration_flag')}")
-    print(f"\n数据: {out}")
+    _pull_and_save(args.ticker, cik)
 
 
 if __name__ == "__main__":

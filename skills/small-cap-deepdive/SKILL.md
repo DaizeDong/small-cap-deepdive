@@ -63,8 +63,8 @@ disclosure non-filers — before any analyst time is spent.
 
 2. **Two-stage precision gate (mandatory — see next section).** Pass the raw list through
    `tools/filter_by_sic.py` (Gate 1, coarse SIC exclusion), then run the LLM theme-fit gate
-   (Gate 2) on surviving candidates to classify each as `pure_play / tangential / false_positive`.
-   Drop `false_positive`. Retain `pure_play` and `tangential` for deep-dive.
+   (Gate 2) on surviving candidates to classify each as `pure_play / partial / misrecall`.
+   Drop `misrecall`. Retain `pure_play` and `partial` for deep-dive.
 
 3. **Mechanical de-risk.** For each retained candidate, run `tools/cheap_pass.py --ticker <T>`.
    Any candidate that returns a hard kill-flag (`going_concern`, `death_spiral`, `material_weakness`
@@ -117,9 +117,9 @@ scored candidate set without re-running discovery or deep-dive.
 
 **Natural-language orchestration:**
 
-1. Locate the existing scored output (JSON or JSONL from a prior `theme` run).
-2. Run `tools/rank.py --input <file> [--weight-overrides <json>]` to produce a re-ranked table.
-3. Report the new ranking with delta from prior ranking and rationale for weight changes.
+1. Locate the existing scored output directory from a prior `theme` run.
+2. Run `tools/rank.py [--slug <slug>] [--input <dir>]` to produce a ranked table.
+3. Report the ranking with kill-flag eliminations and explicit coverage gaps.
 
 ---
 
@@ -144,8 +144,8 @@ Companies with no SIC on file: **keep** for Gate 2 — do not auto-exclude.
 
 **Gate 2 — LLM Theme-Fit Gate**
 For each Gate 1 survivor, prompt an LLM subagent with the company's 10-K business description.
-Classify: `pure_play` / `tangential` / `false_positive`. Use the prompt template in
-`reference/discovery-engine.md §Gate 2`. Drop `false_positive` before any deep-dive computation.
+Classify: `pure_play` / `partial` / `misrecall`. Use the prompt template in
+`reference/discovery-engine.md §Gate 2`. Drop `misrecall` before any deep-dive computation.
 
 Both gates are mandatory. Neither can be skipped or merged into a single pass.
 
@@ -163,11 +163,16 @@ by narrative quality or management explanation:
 | `going_concern` flag in most recent 10-K or 10-Q | **Eliminate before deep-dive** (cheap_pass gate) |
 | `death_spiral` convertible detected | **Dim 1 capped at 1**, composite max = 2 |
 | `material_weakness` in ICFR | **Dim 5 capped at 2** |
-| Net income driven by deferred tax release (not OCF) | **Score on OCF only** for Dim 1 |
-| AR growing faster than revenue | **Red flag note** required in Dim 1 |
-| Insider net-sell > 3× net-buy (L12M by value) | **Dim 4 capped at 2** |
-| S-3 shelf / ATM program active with <4Q runway | **Dim 1 score = 1** |
-| Composite score ≤ 2 after hard ceilings | **Do not include in shortlist** |
+| Net income driven by deferred tax release (not OCF) | **Score Dim 1 on OCF only**; note the driver |
+| AR growing faster than revenue | **Required red flag note** in Dim 1 basis |
+| S-3 shelf / ATM program active with < 4Q runway | **Dim 1 score = 1** |
+| Single customer > 40% of revenue | **Dim 3 capped at 2** |
+| `insider_net_sell` strongly negative AND dilution rate high | **Dim 4 capped at 2** |
+| Critical data unavailable (runway, revenue, insider trades all null) | **Confidence capped at 40%** |
+| Company has no current theme revenue (pure concept-playing) | **Theme-fit dimension capped at 2**; cannot rate BUY |
+| Rating is AVOID OR kill-flag count ≥ 3 | **Sinks to bottom of ranking** |
+
+Full hard-rule source of truth: `reference/judgment-rubric.md §Rating Hard-Rules`.
 
 Composite score = weighted average of 7 dimensions (weights in `reference/judgment-rubric.md`).
 Final composite is reported as 1–5 with one decimal. Ties broken by Dimension 1 (financial quality).

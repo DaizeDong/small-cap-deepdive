@@ -23,7 +23,7 @@ const REPORT_SCHEMA = {
     confidence: { type: 'integer', minimum: 0, maximum: 100 },
     one_liner: { type: 'string', description: 'one-sentence thesis' },
     is_misrecall: { type: 'boolean', description: 'true if the company is NOT actually in the theme (theme keyword was incidental)' },
-    theme_fit: { type: 'string', enum: ['pure_play', 'partial', 'incidental_misrecall'], description: 'how well it fits the theme' },
+    theme_fit: { type: 'string', enum: ['pure_play', 'partial', 'misrecall'], description: 'how well it fits the theme' },
     top_long: { type: 'string', description: 'strongest falsifiable bull point + trigger' },
     top_short: { type: 'string', description: 'strongest falsifiable bear point + trigger' },
     killflag_notes: { type: 'string', description: 'kill-flag recheck: going concern / death spiral / material weakness / dilution' },

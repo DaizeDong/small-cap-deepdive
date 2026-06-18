@@ -78,7 +78,7 @@ SEC full-text search does not reliably match multi-word exact phrases. "DOT-117 
 
 **Rule 2: Zero-hit guard is mandatory.**
 
-If all keywords for a theme return zero filing hits, `discover.py` must write a placeholder result and exit cleanly — not crash with KeyError or attempt to proceed with an empty DataFrame. The zero-hit guard was added after a live crash (Issue #9 in DATA_ISSUES.md).
+If all keywords for a theme return zero filing hits, `discover.py` must write a placeholder result and exit cleanly — not crash with KeyError or attempt to proceed with an empty DataFrame. The zero-hit guard was added after a live crash encountered during development.
 
 **Rule 3: Never sample — process full results.**
 

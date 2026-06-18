@@ -3,14 +3,14 @@ cheap_pass.py — Stage 0 机械体检 + kill-flag 扫描(无定性叙事)
 
 把发现阶段的小盘候选机械打分,kill-flag>=3 或财务硬伤直接淘汰,把 N 家砍到少数进 deep dive。
 体现"agent 优势=规模化机械纪律"(对抗调研结论):不讲故事,只数硬信号。
-设计依据:research/smallcap/02_deepdive_framework.md §五 Stage 0。
+设计依据:reference/mechanical-checks.md。
 
 数据:SEC EDGAR(companyfacts XBRL + 全文检索 kill-flag) + yfinance(流通股稀释)。
 kill-flag(成簇出现≈几乎必暴雷):going concern / material weakness / 重述 /
   death-spiral 可转债(variable conversion) / 审计师更换 / 反向拆股。
 
-用法: python cheap_pass.py --universe reports/smallcap/universe_AI_agents_2026-06-18.csv
-输出: reports/smallcap/cheappass_<date>.csv
+用法: python cheap_pass.py --universe universe_<slug>_<date>.csv
+输出: reports/smallcap/cheappass_<slug>_<date>.csv
 """
 from __future__ import annotations
 import argparse
@@ -21,14 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-import requests
 from edgar import Company
 
 # Import _common exports
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import init_edgar, REPORTS, slug, today, CFG
+from _common import init_edgar, REPORTS, slug, today, CFG, http_get
 
 FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json"
 
@@ -69,8 +68,7 @@ def get_concept_series(cik: str, concept: str) -> list:
     """拉某 XBRL 概念的时间序列(取 USD 单位的全部值)。"""
     url = FACTS.format(cik=str(cik).zfill(10), concept=concept)
     try:
-        ua = {"User-Agent": CFG["sec_user_agent"]}
-        r = requests.get(url, headers=ua, timeout=20)
+        r = http_get(url, timeout=20)
         if r.status_code != 200:
             return []
         units = r.json().get("units", {})
@@ -156,12 +154,28 @@ def score(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _selftest():
-    """Selftest with known anchor IQST (must have kf_going_concern==1 AND kf_substantial_doubt==1)."""
+    """Selftest:
+    1. IQST — must flag going_concern + substantial_doubt (Guard 2/3: full-text double-hit).
+    2. KOP  — amendments=False must NOT return a 10-K/A as the latest filing (Guard 1).
+    """
     init_edgar()
+    # Test 1: IQST going-concern double-hit
     r = killflag_scan("IQST")
-    assert r["kf_going_concern"] == 1 and r["kf_substantial_doubt"] == 1, \
-        f"IQST must flag going concern (amendments=False fix), got kf_going_concern={r['kf_going_concern']} kf_substantial_doubt={r['kf_substantial_doubt']}"
-    print("cheap_pass selftest PASS")
+    assert r["kf_going_concern"] == 1 and r["kf_substantial_doubt"] == 1, (
+        f"IQST must flag going concern (amendments=False fix), "
+        f"got kf_going_concern={r['kf_going_concern']} kf_substantial_doubt={r['kf_substantial_doubt']}"
+    )
+    # Test 2: KOP amendment exclusion — latest filing must be 10-K, not 10-K/A
+    from edgar import Company
+    kop = Company("KOP")
+    fl = kop.get_filings(form="10-K", amendments=False)
+    f = fl.latest(1) if fl is not None and len(fl) else None
+    assert f is not None, "KOP: no 10-K found (amendments=False)"
+    form_type = str(getattr(f, "form", "") or getattr(f, "form_type", "")).strip()
+    assert form_type != "10-K/A", (
+        f"KOP: amendments=False must not return a 10-K/A, got form_type={form_type!r}"
+    )
+    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion)")
 
 
 def main():
