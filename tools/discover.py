@@ -1,7 +1,7 @@
 """
 discover.py — 主题驱动的小盘候选公司发现
 SEC EDGAR 全文检索(实测端点) → 提取 ticker/CIK/SIC → yfinance 市值+流动性过滤 → 去噪。
-设计依据:research/smallcap/01_discovery_engine.md。
+设计依据:reference/discovery-engine.md。
 
 用法:
     python discover.py --theme "AI agents" --max-mcap 2e9
@@ -37,19 +37,12 @@ def fts_search(phrase: str, forms: str, startdt: str, enddt: str,
         q = urllib.parse.quote(f'"{phrase}"')
         url = f"{FTS}?q={q}&forms={forms}&startdt={startdt}&enddt={enddt}&from={page*100}"
         d = None
-        for attempt in range(4):  # SEC 限流重试(指数退避)
-            try:
-                r = http_get(url, timeout=25)
-                if r.status_code == 500 or r.status_code == 429:
-                    time.sleep(2 ** attempt * 2)
-                    continue
-                r.raise_for_status()
-                d = r.json()
-                break
-            except Exception as e:
-                if attempt == 3:
-                    print(f"  [warn] FTS page {page} ({phrase}): {e}", file=sys.stderr)
-                time.sleep(2 ** attempt * 2)
+        try:
+            r = http_get(url, timeout=25)
+            r.raise_for_status()
+            d = r.json()
+        except Exception as e:
+            print(f"  [warn] FTS page {page} ({phrase}): {e}", file=sys.stderr)
         if d is None:
             break
         hits = d.get("hits", {}).get("hits", [])

@@ -22,18 +22,25 @@
 - SC 13D/13G significant ownership disclosures
 
 **Rate limit discipline (mandatory):**
-- Maximum 10 requests/second across all EDGAR endpoints from a single IP
+- Maximum 10 requests/second across all EDGAR endpoints from a single IP (SEC policy)
 - Every request must include `User-Agent: <name> <email>` header — omission causes 403 errors
-- Target ~150ms between requests in normal operation
-- On 429 response: exponential backoff starting at 2 seconds, maximum 4 retries
-- Never parallelize more than 5 concurrent EDGAR requests from a single session
+- Target ~150ms between requests: each `tools/*.py` script sleeps between consecutive EDGAR calls
+- On 429/500 response: exponential backoff via `_common.http_get` (start 1.5s × 2^attempt, 4 retries)
 
-**Tools:** `edgartools` (MIT license) is the primary wrapper. It handles authentication, retry, and XBRL parsing. Do not build a direct `requests`-based EDGAR client without adding the rate discipline that `edgartools` already provides.
+**Implementation:** `_common.http_get` provides the UA header + retry/backoff wrapper for all
+EDGAR `requests.get` calls in the data layer. Every `tools/*.py` script must route EDGAR HTTP
+calls through `http_get`, not raw `requests.get`. Per-tool `time.sleep` between calls adds
+a second layer of inter-request spacing. There is no semaphore or central rate limiter —
+discipline is maintained via per-tool sleep + `http_get` retry.
+
+**Tools:** `edgartools` (MIT license) is the primary wrapper for structured parsing (XBRL,
+Form 4, full-text). Do not build a direct `requests`-based EDGAR client without adding the
+rate discipline above.
 
 **Blind spots:**
 - No real-time data; filings have typical 1–4 day lag after company submits
 - XBRL data quality varies by company size — micro-caps often have incomplete or malformed concept tags
-- Form 4 direction parsing in `edgartools` was found unreliable in production (DATA_ISSUES #3); use `openinsider` as the primary Form 4 source (see below)
+- Form 4 direction parsing in `edgartools` was found unreliable in production (fix #3); use `openinsider` as the primary Form 4 source (see below)
 
 ### openinsider.com — Insider Trades, Public Tables
 
@@ -152,13 +159,14 @@ This table summarizes the rate discipline from the "Primary Free Sources" sectio
 
 | Rule | Value | Enforcement |
 |---|---|---|
-| Max requests/sec | 10 (total, all endpoints) | `_common.py` rate limiter |
-| Required header | `User-Agent: <name> <email>` | `_common.py` default headers |
-| Target inter-request delay | ~150ms | `_common.py` sleep between calls |
-| Retry on 429 | Exponential backoff, start 2s, max 4 retries | `_common.py` retry wrapper |
-| Max parallel requests | 5 concurrent | Semaphore in `_common.py` |
+| Max requests/sec | 10 (total, all endpoints) | Per-tool `time.sleep` |
+| Required header | `User-Agent: <name> <email>` | `_common.UA` dict in all http_get calls |
+| Target inter-request delay | ~150ms | `time.sleep(0.15)` in each tool |
+| Retry on 429/500 | Exponential backoff, start 1.5s, max 4 retries | `_common.http_get` |
 
-Every `tools/*.py` script must use `_common.py`'s EDGAR session object. Direct `requests.get()` to EDGAR endpoints without the rate discipline is forbidden — it risks IP blocking that would affect all concurrent tool invocations.
+Every `tools/*.py` script must route EDGAR `requests.get` calls through `_common.http_get`.
+Direct `requests.get()` to EDGAR endpoints without the UA header and retry wrapper is
+forbidden — it risks IP blocking.
 
 ---
 
