@@ -15,8 +15,8 @@ the data layer, all prevented from contaminating judgment output by the architec
 
 **Tools (deterministic data layer)**
 
-- `tools/_common.py` — shared config loader, EDGAR session with rate discipline (10 req/s
-  max, 150ms inter-request, exponential backoff on 429, 5-concurrent semaphore), retry wrapper.
+- `tools/_common.py` — shared config loader, EDGAR session with rate discipline (per-tool
+  sleep ~150ms inter-request, exponential backoff on 429 via http_get retry wrapper).
 - `tools/discover.py` — EDGAR FTS universe enumeration with zero-hit guard and FTS retry.
 - `tools/filter_by_sic.py` — Gate 1 SIC coarse exclusion with per-theme override support.
 - `tools/cheap_pass.py` — mechanical kill-flags: going-concern (double-confirmation required),
@@ -34,7 +34,7 @@ Five methodology invariant documents in `skills/small-cap-deepdive/reference/`:
 - `discovery-engine.md` — FTS over-recall design, two-stage precision gate, 10 production
   cautionary cases (including the `refractory`-oncology failure mode).
 - `mechanical-checks.md` — 5 Python guards corresponding to patched production bugs.
-- `judgment-rubric.md` — 7-dimension scorecard, evidence tier definitions (T1–T5), hard
+- `judgment-rubric.md` — 7-dimension scorecard, evidence tier definitions (T1–T3), hard
   ceiling rules, output template.
 - `disclosure-discipline.md` — base-rate anchoring, forced disconfirmation, halo de-biasing,
   evidence tier usage, and 9 disclosure disciplines.

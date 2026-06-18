@@ -33,13 +33,13 @@
 
 1. **枚举 SEC 全库**：用 EDGAR 全文检索（FTS）按主题拉取候选。过召回是设计意图——后续精度门负责清场。
 
-2. **两阶段精度门（强制）**：门 1（`filter_by_sic.py`）：基于 SIC 行业码粗排除明显无关行业。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / tangential / false_positive`。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司。缺少这两道门会把错误的候选送进后续尽调。
+2. **两阶段精度门（强制）**：门 1（`filter_by_sic.py`）：基于 SIC 行业码粗排除明显无关行业。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / partial / misrecall`。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司。缺少这两道门会把错误的候选送进后续尽调。
 
 3. **机械避雷**（`cheap_pass.py`）：直接读 SEC 申报的硬红线——持续经营审计段、死亡螺旋可转债、内控重大缺陷。触发的公司不进入判断，无论叙事质量如何。
 
 4. **取数**（`deepdive_data.py`）：XBRL 财务序列、Form 4 内部人交易、货架/ATM 状态、稀释历史、重大事件时间线。
 
-5. **强制反方判断**：评分前先锚定基准概率，对每个候选强制反方 WebSearch，7 维评分卡配硬上限规则。证据按 Tier 标注（T1 第一方 SEC 申报 → T5 推断）；T3 证据不得作为买入支撑。
+5. **强制反方判断**：评分前先锚定基准概率，对每个候选强制反方 WebSearch，7 维评分卡配硬上限规则。证据按 Tier 标注（T1 第一方 SEC 申报 / T2 独立第三方 / T3 公司自述）；T3 证据不得作为买入支撑。
 
 6. **排序**（`rank.py`）：按综合分排列幸存候选，附漏斗计数、淘汰原因、显式数据盲区。
 
@@ -129,8 +129,9 @@ ln -s "$(pwd)/skills/small-cap-deepdive" "$HOME/.claude/skills/small-cap-deepdiv
 不重跑发现和尽调，对已有输出换权重或重排：
 
 ```bash
-python tools/rank.py --scores-dir reports/railcar_scores/ --out ranked.md
-python tools/rank.py --scores-dir reports/railcar_scores/ --weight-overrides '{"dim1":0.35,"dim4":0.25,...}'
+python tools/rank.py
+python tools/rank.py --slug railcar
+python tools/rank.py --input reports/railcar_scores/
 ```
 
 完整步骤：**[runbooks/batch-rank.md](runbooks/batch-rank.md)**
@@ -143,7 +144,7 @@ python tools/rank.py --scores-dir reports/railcar_scores/ --weight-overrides '{"
 
 ```
 取数层（确定性 Python，只摆数据，永不做投资判断）
-  tools/_common.py       — 配置、EDGAR session、速率限制、重试退避
+  tools/_common.py       — 配置、EDGAR session、per-tool sleep + http_get 重试退避
   tools/discover.py      — EDGAR FTS 全库枚举
   tools/filter_by_sic.py — 门 1：SIC 粗排除
   tools/cheap_pass.py    — 机械避雷硬红线
@@ -181,13 +182,13 @@ python tools/rank.py --scores-dir reports/railcar_scores/ --weight-overrides '{"
 
 **openinsider 脆弱性：** 默认 `insider_source` 配置使用 `openinsider.com` 解析 Form 4 买卖方向。该第三方服务无明确的自动访问条款。工具在 openinsider 不可用时自动回退到直接 EDGAR Form 4 解析，并在报告中标注数据来源。
 
-推荐生产和公开部署使用 EDGAR 模式：
+如需去除 openinsider 依赖，可配置 EDGAR 模式（**注意：此模式为路线图存根，尚未实现**，设置后返回 `available: false`；已测试的默认为 openinsider）：
 
 ```json
 "insider_source": "edgar"
 ```
 
-该模式使用 `edgartools` Form 4 检索 + 自定义方向解析器（`transactionCode` 字段：`P`=购买，`S`=出售）。
+详见 `reference/data-sources.md` 中 openinsider 不可用时的降级处理。
 
 **workflow .js 文件为可选项：** `workflows/theme-fit-gate.js` 和 `workflows/deepdive-fanout.js` 在 Claude Code 会话中有 Workflow 工具时可加速并行步骤。它们不是必要依赖——`SKILL.md` 中的自然语言编排是主路径，任意 Claude Code 会话均可运行。
 

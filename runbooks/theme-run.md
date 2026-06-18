@@ -26,19 +26,40 @@ This is the only required field — all other keys have defaults.
 
 ---
 
+## Recommended: One-Command Theme Run
+
+The easiest way to run the full mechanical pipeline (discover → cheap_pass → SIC filter):
+
+```bash
+python tools/run_theme.py --theme "railcar,railcar leasing" --slug railcar
+```
+
+This runs Steps 1–3 below automatically and prints the "Next steps" handoff.
+Use `--micro` flag to apply the micro-cap ($500M) ceiling instead of the default small-cap ($2B).
+
+---
+
 ## Step 1 — Universe Enumeration
 
 ```bash
-python tools/discover.py --theme "railcar leasing" --out reports/railcar_raw.json
+python tools/discover.py --theme "railcar leasing" --out-slug railcar
 ```
+
+Output: `reports/smallcap/universe_railcar_<date>.csv`
 
 Expected output:
 
 ```
-[discover] FTS query: "railcar leasing"
-[discover] Raw hits: 214 candidates
-[discover] After dedup/filing-type filter: 187 unique tickers
-[discover] Written → reports/railcar_raw.json
+[1/3] SEC FTS 召回 (主题: ['railcar leasing'], forms: 10-K,10-Q)...
+  'railcar leasing': 214 家
+  去重后 187 家
+[2/3] yfinance 补市值+流动性...
+[3/3] 过滤去噪...
+
+=== 发现结果 ===
+总召回 187 家 | 小盘候选 42 家 (市值<$2.0B, 已剔SPAC/低流动性)
+...
+清单: reports/smallcap/universe_railcar_<date>.csv
 ```
 
 **What to expect:** Over-recall is intentional. 150–300 candidates for a niche theme;
@@ -53,20 +74,13 @@ Expected output:
 
 ## Step 2 — Gate 1: SIC Coarse Exclusion
 
+Gate 1 is applied automatically by `run_theme.py` (via `filter_by_sic.sic_ok`).
+`filter_by_sic.py` is a library module, not a standalone pipeline step.
+
+To verify the SIC logic:
+
 ```bash
-python tools/filter_by_sic.py \
-  --input reports/railcar_raw.json \
-  --out reports/railcar_gate1.json
-```
-
-Expected output:
-
-```
-[filter_by_sic] Input: 187 tickers
-[filter_by_sic] Hard-excluded (SIC match): 89 tickers
-  pharma/biotech: 52, finance: 21, retail: 10, software: 6
-[filter_by_sic] No SIC on file (kept for Gate 2): 4 tickers
-[filter_by_sic] Survivors: 98 tickers → reports/railcar_gate1.json
+python tools/filter_by_sic.py --selftest
 ```
 
 **What it does:** Drops companies whose SIC code definitively places them outside plausible
@@ -74,50 +88,80 @@ theme membership. Companies with no SIC on file are kept, not dropped — do not
 
 **Token magnitude:** Negligible — deterministic lookup against SEC company data.
 
-**Per-theme SIC override:** Add `sic_exclusion_blocks` to `config.json` if defaults are
-too aggressive for your theme (e.g., a theme that spans both pharma and industrial sectors).
+---
+
+## Step 3 — Mechanical De-Risk (cheap_pass)
+
+```bash
+python tools/cheap_pass.py --universe reports/smallcap/universe_railcar_<date>.csv \
+  --out-slug railcar
+```
+
+Output: `reports/smallcap/cheappass_railcar_<date>.csv`
+
+Expected output:
+
+```
+对 42 家小盘候选做机械体检...
+...
+=== Cheap pass 结果 ===
+体检 42 家 | 淘汰 8 家 | 幸存 34 家
+...
+清单: reports/smallcap/cheappass_railcar_<date>.csv
+```
+
+**What it checks (hard kill-flags):**
+
+| Flag | Trigger | Action |
+|---|---|---|
+| `going_concern` | Both "going concern" + "substantial doubt" in most recent 10-K | Eliminate |
+| `death_spiral` | Variable-rate convertible in most recent filings | Eliminate |
+| `material_weakness` | ICFR material weakness in most recent annual filing | Eliminate if killflag_count >= 2 |
+
+**Do not deepdive eliminated candidates.** The kill-flag verdict stands.
+
+**Token magnitude:** Negligible for deterministic guards.
 
 ---
 
-## Step 3 — Gate 2: LLM Theme-Fit Classification
+## Step 4 — Gate 2: LLM Theme-Fit Classification
+
+After `run_theme.py` writes `reports/smallcap/candidates_<slug>.json`, run the theme-fit gate.
 
 **Natural-language path (works in any Claude Code session):**
 
 In your Claude Code session, instruct the agent:
 
 ```
-For each ticker in reports/railcar_gate1.json, read the company's most recent 10-K
+For each ticker in reports/smallcap/candidates_railcar.json, read the company's most recent 10-K
 business description from EDGAR and classify it as:
   pure_play   — primary business is directly in the theme
-  tangential  — theme exposure is real but not primary
-  false_positive — incidental keyword match, no real theme exposure
+  partial     — theme exposure is real but not primary
+  misrecall   — incidental keyword match, no real theme exposure
 
 Use the prompt template in reference/discovery-engine.md §Gate 2.
-Write results to reports/railcar_gate2.json (include ticker, cik, name, classification,
-one-sentence rationale). Drop all false_positives before the next step.
+Write results to reports/smallcap/railcar_gate2.json (include ticker, cik, name, classification,
+one-sentence rationale). Drop all misrecalls before the next step.
 ```
 
 **Optional accelerator:** If the Workflow tool is available in your session, run:
 
 ```bash
-node workflows/theme-fit-gate.js \
-  --input reports/railcar_gate1.json \
-  --out reports/railcar_gate2.json \
-  --theme "railcar leasing"
+node workflows/theme-fit-gate.js candidates_railcar.json
 ```
 
 Expected output (either path):
 
 ```
-Gate 2 complete: 98 evaluated
-  pure_play:      8
-  tangential:     14
-  false_positive: 76
-Retained for deep-dive: 22 tickers → reports/railcar_gate2.json
+Gate 2 complete: 34 evaluated
+  pure_play:  8
+  partial:    14
+  misrecall:  12
+Retained for deep-dive: 22 tickers
 ```
 
 **Token magnitude:** ~800–1 200 tokens per candidate (10-K business section read + classification).
-For 98 candidates expect ~90k–120k tokens of input, ~10k output. Budget ~$0.10–0.20 at Sonnet pricing.
+For 34 candidates expect ~30k–40k tokens of input, ~4k output. Budget ~$0.05 at Sonnet pricing.
 
 **Why this gate is mandatory:** The canonical failure: keyword `refractory` for a railcar insulation
 theme swept the entire oncology biotech sector (zero railcar companies among them). See
@@ -125,76 +169,25 @@ theme swept the entire oncology biotech sector (zero railcar companies among the
 
 ---
 
-## Step 4 — Mechanical De-Risk (cheap_pass)
-
-```bash
-python tools/cheap_pass.py \
-  --input reports/railcar_gate2.json \
-  --out reports/railcar_alive.json
-```
-
-Or run per-ticker:
-
-```bash
-python tools/cheap_pass.py --ticker RAIL
-```
-
-Expected output:
-
-```
-[cheap_pass] Processing 22 candidates...
-  GATO — going_concern detected → ELIMINATED
-  MRGN — death_spiral convertible → ELIMINATED
-  XYZ  — material_weakness (ICFR) → ELIMINATED
-[cheap_pass] Eliminated: 3 | Surviving: 19
-[cheap_pass] Written → reports/railcar_alive.json
-```
-
-**What it checks (hard kill-flags):**
-
-| Flag | Trigger | Action |
-|---|---|---|
-| `going_concern` | Auditor going-concern paragraph in most recent 10-K or 10-Q | Eliminate |
-| `death_spiral` | Variable-rate convertible note with no floor in most recent filings | Eliminate |
-| `material_weakness` | ICFR material weakness disclosed in most recent annual filing | Dim 5 capped; continues |
-
-**Do not deepdive eliminated candidates.** The kill-flag verdict stands.
-
-**Token magnitude:** Negligible for deterministic guards. If the agent re-reads full 10-K text
-to confirm a going-concern paragraph, budget ~2k tokens per confirmation.
-
----
-
 ## Step 5 — Deep-Dive Data Pull
 
 ```bash
-python tools/deepdive_data.py \
-  --input reports/railcar_alive.json \
-  --out reports/railcar_deepdive_data.json
+python tools/deepdive_data.py --candidates reports/smallcap/candidates_railcar.json
 ```
 
 Or per-ticker:
 
 ```bash
-python tools/deepdive_data.py --ticker RAIL --out reports/RAIL_data.json
+python tools/deepdive_data.py --ticker RAIL
 ```
 
-Expected output:
-
-```
-[deepdive_data] 19 tickers to process
-  RAIL — OK (financials: 12Q, insider: 23 transactions, filings: 31)
-  GBX  — OK (financials: 8Q, insider: 9 transactions, filings: 18)
-  ...
-[deepdive_data] Warnings: 2 tickers had partial XBRL (logged)
-[deepdive_data] Written → reports/railcar_deepdive_data.json
-```
+Output: `reports/smallcap/deepdive_<ticker>_<date>.json` (one file per ticker)
 
 **What it pulls:** Revenue/OCF/EV series (XBRL), Form 4 insider trades (12-month net
 buy/sell), S-3 / ATM shelf status, dilution history, 8-K material events.
 
 **Token magnitude:** Negligible — deterministic EDGAR + yfinance fetch, no LLM calls.
-Runtime 5–20 minutes for 19 tickers (EDGAR rate discipline: ~150ms between requests).
+Runtime 5–20 minutes for 22 tickers (EDGAR rate discipline: ~150ms between requests).
 
 ---
 
@@ -203,52 +196,34 @@ Runtime 5–20 minutes for 19 tickers (EDGAR rate discipline: ~150ms between req
 In your Claude Code session:
 
 ```
-For each candidate in reports/railcar_deepdive_data.json, spawn one Agent.
+For each pure_play/partial company in reports/smallcap/railcar_gate2.json, spawn one Agent.
 Each Agent must:
 1. Open reference/cognitive-priors.md and state the base-rate priors for this company class.
 2. Run a disconfirmation WebSearch: "<company name> fraud lawsuit SEC investigation short seller".
 3. Check data staleness: is the most recent filing period within 90 days?
 4. Apply the 7-dimension scorecard from reference/judgment-rubric.md.
 5. Apply all Rating Hard-Rules from SKILL.md.
-6. Write the score JSON (dimensions + composite + kill-flag detail + evidence tiers +
-   disconfirmation findings) to reports/railcar_scores/<TICKER>.json.
+6. Write the full report to reports/smallcap/report_<TICKER>.md.
 ```
 
 **Optional accelerator:** If the Workflow tool is available:
 
 ```bash
-node workflows/deepdive-fanout.js \
-  --input reports/railcar_deepdive_data.json \
-  --scores-dir reports/railcar_scores/ \
-  --theme "railcar leasing"
+node workflows/deepdive-fanout.js candidates_railcar.json
 ```
 
 **Token magnitude:** ~8k–15k tokens per candidate (data read + rubric application +
-disconfirmation search). For 19 candidates: ~150k–280k tokens total. Budget ~$0.15–0.30.
+disconfirmation search). For 22 candidates: ~180k–330k tokens total. Budget ~$0.20–0.35.
 
 ---
 
 ## Step 7 — Rank
 
 ```bash
-python tools/rank.py \
-  --scores-dir reports/railcar_scores/ \
-  --out reports/railcar_ranked.md
+python tools/rank.py --slug railcar
 ```
 
-Expected output:
-
-```
-Rank  Ticker  Composite  Dim1  Dim2  Dim3  Dim4  Dim5  Dim6  Dim7  Kill-flags
-1     GBX     4.1        4     5     4     3     4     4     4     none
-2     RAIL    3.8        4     4     3     4     4     3     4     none
-...
-12    XCC     2.1        2     2     3     2     2     2     2     material_weakness
----
-Gate survival: 187 → 98 (Gate 1) → 22 (Gate 2) → 19 (cheap_pass) → 19 (deep-dive) → 19 ranked
-Kill-flag eliminations: 3 (going_concern: 1, death_spiral: 1, material_weakness+eliminate: 1)
-Coverage gaps: 2 tickers had partial XBRL — Dim 1 confidence capped at 40%
-```
+Expected output: `reports/smallcap/RANKING.md`
 
 **Token magnitude:** Negligible — deterministic sort + Markdown table generation.
 
@@ -258,13 +233,13 @@ Coverage gaps: 2 tickers had partial XBRL — Dim 1 confidence capped at 40%
 
 | Phase | Time | Tokens | Cost (est.) |
 |---|---|---|---|
-| discover + filter_by_sic | 3–8 min | ~0 LLM | $0.00 |
-| theme-fit gate (Gate 2) | 15–40 min | ~100k | ~$0.10 |
+| discover + SIC filter | 3–8 min | ~0 LLM | $0.00 |
+| theme-fit gate (Gate 2) | 15–40 min | ~40k | ~$0.05 |
 | cheap_pass (deterministic) | 8–25 min | ~0 LLM | $0.00 |
 | deepdive_data pull | 10–30 min | ~0 LLM | $0.00 |
 | deep-dive judgment | 20–60 min | ~200k | ~$0.20 |
 | rank | <1 min | ~0 LLM | $0.00 |
-| **Total** | **~1–3 hr** | **~300k** | **~$0.30** |
+| **Total** | **~1–3 hr** | **~240k** | **~$0.25** |
 
 Costs shown at Claude Sonnet input-token pricing. Actual cost depends on candidate count
 and filing length. Large themes (500+ raw candidates) scale linearly with Gate 2 + judgment.

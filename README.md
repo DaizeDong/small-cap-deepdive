@@ -48,7 +48,7 @@ narrative generator.
 
 2. **Two-stage precision gate (mandatory).** Gate 1 (`filter_by_sic.py`): coarse SIC-code
    exclusion of definitively off-theme sectors. Gate 2 (LLM): reads each company's 10-K
-   business description and classifies it as `pure_play / tangential / false_positive`. The
+   business description and classifies it as `pure_play / partial / misrecall`. The
    canonical failure mode without this gate: keyword `refractory` for a railcar insulation
    theme swept the entire oncology biotech sector. Zero railcar companies.
 
@@ -61,7 +61,7 @@ narrative generator.
 
 5. **Forced-disconfirmation judgment**: base-rate priors anchored before scoring, mandatory
    disconfirmation WebSearch for each candidate, 7-dimension scorecard with hard ceiling rules.
-   Evidence is tier-tagged (T1 first-party SEC → T5 inference); T3 evidence cannot support
+   Evidence is tier-tagged (T1 first-party SEC filings / T2 independent third-party / T3 company-sourced); T3 evidence cannot support
    a buy recommendation.
 
 6. **Rank** (`rank.py`): scored candidates sorted by composite, with funnel counts,
@@ -155,8 +155,9 @@ Expected token budget: ~10k–15k tokens per company, <$0.02.
 To re-sort or re-weight a prior run's outputs without re-running discovery:
 
 ```bash
-python tools/rank.py --scores-dir reports/railcar_scores/ --out ranked.md
-python tools/rank.py --scores-dir reports/railcar_scores/ --weight-overrides '{"dim1":0.35,"dim4":0.25,...}'
+python tools/rank.py
+python tools/rank.py --slug railcar
+python tools/rank.py --input reports/railcar_scores/
 ```
 
 Full step-by-step: **[runbooks/batch-rank.md](runbooks/batch-rank.md)**
@@ -169,7 +170,7 @@ Expected token budget: Zero — deterministic, no LLM calls.
 
 ```
 bundled data layer (deterministic Python — never makes investment judgments)
-  tools/_common.py     — config, EDGAR session, rate limiter, retry backoff
+  tools/_common.py     — config, EDGAR session, per-tool sleep + http_get retry/backoff
   tools/discover.py    — EDGAR FTS universe enumeration
   tools/filter_by_sic.py — Gate 1 coarse SIC exclusion
   tools/cheap_pass.py  — mechanical kill-flags from SEC filings
@@ -223,9 +224,9 @@ To default to EDGAR Form 4 from the start (no openinsider dependency):
 "insider_source": "edgar"
 ```
 
-The `edgar` mode uses `edgartools` Form 4 retrieval with a custom direction parser (the
-`transactionCode` field: `P`=purchase, `S`=sale). This is the recommended setting for
-production and public deployments.
+The `edgar` mode is a **roadmap stub — not yet implemented** (returns `available: false`).
+The tested default is `openinsider`. See `reference/data-sources.md` for the fallback
+behaviour when openinsider is unavailable.
 
 **workflow .js files are optional:** `workflows/theme-fit-gate.js` and
 `workflows/deepdive-fanout.js` accelerate fan-out steps when Claude Code's Workflow tool is

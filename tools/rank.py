@@ -4,10 +4,14 @@ rank.py — 聚合 deep dive 报告,产出主题级排序
 读 reports/smallcap/report_*.md,提取评级/置信度,结合 cheap pass 体检分 +
 deepdive JSON 的硬数据,产出排序表。AVOID/kill-flag>=2 一律沉底(不靠高分捞回)。
 
-用法: python tools/rank.py
+用法:
+    python tools/rank.py
+    python tools/rank.py --slug railcar
+    python tools/rank.py --input /path/to/reports/
 输出: reports/smallcap/RANKING.md
 """
 from __future__ import annotations
+import argparse
 import glob
 import json
 import re
@@ -82,9 +86,31 @@ def compute_funnel_stats() -> tuple[int, int]:
 
 
 def main():
-    reports = glob.glob(str(REPORTS / "report_*.md"))
+    ap = argparse.ArgumentParser(
+        description="rank.py — aggregate deep-dive reports and produce a ranked shortlist."
+    )
+    ap.add_argument(
+        "--slug", default="",
+        help="Optional theme slug: if set, only report_<slug>_*.md files are included "
+             "(gracefully ignored if no slug-scoped files exist, falling back to all report_*.md).",
+    )
+    ap.add_argument(
+        "--input", default="",
+        help="Optional path to the reports directory (default: REPORTS from config).",
+    )
+    args = ap.parse_args()
+
+    reports_dir = Path(args.input) if args.input else REPORTS
+
+    # Slug-scoped pattern: prefer report_<slug>_*.md; fall back to all report_*.md
+    if args.slug:
+        scoped = glob.glob(str(reports_dir / f"report_{args.slug}_*.md"))
+        report_files = scoped if scoped else glob.glob(str(reports_dir / "report_*.md"))
+    else:
+        report_files = glob.glob(str(reports_dir / "report_*.md"))
+
     rows = []
-    for rp in sorted(reports):
+    for rp in sorted(report_files):
         ticker = Path(rp).stem.replace("report_", "")
         md = Path(rp).read_text(encoding="utf-8")
         rec = {"ticker": ticker}
@@ -98,12 +124,15 @@ def main():
     df["combined"] = df["rating_score"] * (df["confidence"].fillna(50) / 100)
     df = df.sort_values(["sink", "combined"], ascending=[True, False])
 
-    # Compute actual funnel numbers
-    universe_count, deepdive_count = compute_funnel_stats()
+    # Compute actual funnel numbers from the selected reports_dir
+    report_all = glob.glob(str(reports_dir / "report_*.md"))
+    deepdive_all = glob.glob(str(reports_dir / "deepdive_*.json"))
+    universe_count, deepdive_count = len(report_all), len(deepdive_all)
 
     date = today()
-    lines = [f"# AI agent 主题 — 小盘深度调研排序 — {date}", "",
-             f"> 主题=AI agent/agentic。漏斗:{universe_count} 召回 → {deepdive_count} 小盘候选 → cheap pass 幸存 {len(df)} →",
+    slug_label = f" [{args.slug}]" if args.slug else ""
+    lines = [f"# 小盘深度调研排序{slug_label} — {date}", "",
+             f"> 漏斗:{universe_count} 召回 → {deepdive_count} 小盘候选 → cheap pass 幸存 {len(df)} →",
              f"> {len(df)} 家微盘逐一 deep dive。AVOID/kill-flag≥2 一律沉底。**研究输出,非投资建议。**", "",
              "## 排序", "",
              "| 排名 | 代码 | 评级 | 置信 | 营收 | 净利 | OCF | 增速 | 稀释 | 内部人 | kill-flag |",
@@ -128,7 +157,7 @@ def main():
               f"- **沉底(避开/kill-flag≥2):** {df['sink'].sum()} 家", "",
               "各家完整尽调见 `report_<ticker>.md`(含可证伪多空论点+pre-mortem+反方)。"]
 
-    out = REPORTS / "RANKING.md"
+    out = reports_dir / "RANKING.md"
     out.write_text("\n".join(lines), encoding="utf-8")
     print(df[["ticker", "rating", "confidence", "killflags", "sink", "combined"]].to_string())
     print(f"\n排序: {out}")
