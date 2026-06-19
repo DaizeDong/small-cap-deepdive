@@ -77,6 +77,68 @@ Brier scoring above as a prerequisite).
 
 ---
 
+## Run-3 audit synthesis (2026-06-18) — prioritized
+
+Four parallel audits (recall / rubric-calibration / hunting-grounds / pipeline) on the
+4-theme run. Prioritized; the first is a **bug**, the rest are improvements. Honest caveat
+up front: three runs / ~40 deep dives produced **0 BUY**; part is genuine market efficiency,
+part is the calibration gap below. None of this is guaranteed to surface a BUY.
+
+**P1 — Mechanical data-correctness bug (highest; this is a defect, not a feature).**
+`concept_series`'s 350-380-day annual window mis-handles fiscal-year≠calendar-year filers →
+wrong revenue anchors in run-3 (BUKS revenue stuck at FY2018 $48M vs real ~$84M; WLFC unit
+leakage 730 vs real $569M; LNN $659M vs $676M). Agents caught these via WebSearch but should
+not have to. Fix: use XBRL `fp`/`frame` (fiscal period) not a day-count window; recompute `fy`
+from `end`; add **BUKS + WLFC regression selftests** (current selftest only covers EGAN, which
+passes while these fail); shares fallback chain (`CommonStockSharesOutstanding` →
+`dei:EntityCommonStockSharesOutstanding` → diluted WANSO); pass discover's `avg_dollar_vol`
+through to the deepdive JSON (`liquidity_adv`). ~1 day, single file (`deepdive_data.py`).
+
+**P2 — Valuation module (`tools/valuation.py`).** Mechanical layer emits no valuation, so
+agents hand-compute multiples with inconsistent conventions. Add reverse-DCF (implied growth
+from current EV + correct revenue/OCF — depends on P1), EV/EBITDA·FCF multiples, and same-
+industry percentile. For cyclicals, force normalized/trough EBITDA (the UAN report already
+demonstrates this reasoning). This is the prerequisite for P3.
+
+**P3 — Symmetric BUY trigger + catalyst axis (calibration fix).** The rubric has downward
+hard-ceilings but no upward BUY rule, so even valuation-4/5 + zero-kill-flag names default to
+WATCH. Add: `margin of safety ≥ 30% (vs conservative intrinsic-value band) + 0 kill-flag + no
+T3-load-bearing → BUY` (confidence capped by valuation robustness). Add a catalyst /
+forced-trading dimension so a "fairly priced today but with an un-priced catalyst" name can
+score BUY. Guardrails: BUY must rest on T1 valuation only; cyclicals use trough EBITDA; still
+requires pre-mortem + forced reverse-search. WLFC and CSV are the run-3 likely false-negatives
+to re-test once this lands.
+
+**P4 — Recall improvements (several cheap).** (a) FTS window → 2yr + `max_pages` deeper
+(run-3 likely missed ASLE — same SIC/cap/theme as survivor WLFC, pure keyword/window miss);
+(b) add `20-F`/`40-F` forms (foreign-filer blind spot — see discovery-engine Coverage Caveat);
+(c) SIC hard-exclude → **downgrade-to-partial-review, not drop**, when a 5xxx/6xxx company hits
+theme keywords (would have rescued TITN SIC-5990, SNFCA SIC-6199); (d) dual market-cap band
+(<$2B deep-dive + $2-5B lightweight watch — captures flagships UNF/VSEC without polluting the
+small-cap ranking); (e) per-theme keyword sets (run-3 `crop inputs` too academic → missed
+LXU/IPI/AVD; `facility services`/`engine` too broad → noise).
+
+**P5 — Event-driven discovery pivot (strategic; biggest build, best shot at a real BUY).**
+The hunting-grounds audit's core finding: theme/industry hunting in the >$200M band is
+efficiently priced; capturable mispricing is overwhelmingly event-driven. Add discovery axes
+that enumerate by EDGAR **form type** (structurally high-precision, no keyword over-recall, no
+theme-fit gate needed): **spinoffs** (Form `10-12B`) and **cluster open-market insider buys**
+(Form 4, 3+ insiders / 30d / incl. ≥1 independent director, opportunistic not routine). Keep
+the deep-dive engine unchanged. Honest caveat: index-effect and PEAD anomalies are largely
+arbitraged away; spinoff + insider signals persist but are decaying and liquidity eats much of
+the gross edge — validate with track-forward before believing any edge.
+
+**P6 — material_weakness false-positive fix.** 4/4 flagged True in run-3 were boilerplate
+keyword collisions the agent overturned every time. Tighten to Item 9A section match, or
+downgrade to a hint that does not count as a kill-flag.
+
+**P7 — theme-fit gate redundancy.** `run_theme.py` candidates JSON omits `json_path`, so the
+gate always WebSearches, then deepdive re-judges `theme_fit` anyway. Either pass `json_path`
+through, or fold theme-fit into the deep-dive and drop the separate gate for the single-pass
+path.
+
+---
+
 ## Triggered Work (deferred, gated by external conditions)
 
 ### edgartools XBRL coverage improvement
