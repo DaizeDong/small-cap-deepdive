@@ -100,6 +100,15 @@ theme to event is a candidate next direction (ROADMAP), with the honest caveat t
 anomalies are decaying and liquidity eats much of the gross edge — so 0 BUY may still be the
 correct output even after the pivot.
 
+---
+
+## Calibration Loop
+
+Whether the conservatism in prior runs is *correct* (market efficient) or *miscalibrated* (rubric
+too strict) cannot be resolved by argument — only by forward tracking. The calibration feedback
+loop lives in `reference/track-forward.md`. See `tools/track_forward.py` for the implementation.
+Do not tune this rubric based on narrative inspection — wait for scored verdicts.
+
 **Practical implication:** Do not ask the skill to MANUFACTURE a BUY rating — BUY fires only when the mechanical margin-of-safety conditions are met. Ask it to produce the most disciplined ranking available from the data. Use the ranking as a triage for further human review, not as a trading signal.
 
 ---

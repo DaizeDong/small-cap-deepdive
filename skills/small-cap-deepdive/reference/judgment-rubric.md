@@ -313,6 +313,16 @@ T3 evidence may be used as a lead for investigation. It may not be the load-bear
 
 ---
 
+## Calibration Loop
+
+Every verdict produced by this rubric must be logged via `python tools/track_forward.py --record`.
+Rubric calibration (whether verdicts are systematically too conservative or too aggressive) can
+only be evaluated after verdicts mature against realized returns. Full methodology in
+`reference/track-forward.md`. **Do not tune the rubric thresholds until ≥~20 verdicts have
+matured and the Brier/calibration table has been reviewed.**
+
+---
+
 ## Cross-references
 
 - `disclosure-discipline.md` — mandatory disciplines that govern how this rubric is applied (base-rate-first, forced disconfirmation, halo de-bias, pre-mortem procedure, honest data-gap)

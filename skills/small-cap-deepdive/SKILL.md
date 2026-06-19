@@ -291,3 +291,40 @@ Full routing guide, rate-limit discipline, blind spots, and anti-recursion rule:
 
 - **yfinance / openinsider:** convenience layers for market data and insider trades respectively.
   Both are free but fragile — label sources accordingly in reports.
+
+---
+
+## Track-forward (Phase 6 — Calibration Feedback Loop)
+
+After any deep-dive run, log all verdicts so they can be scored against realized returns when
+the horizon matures. This is the only way to determine if the rubric is correctly calibrated.
+
+**Operational steps:**
+
+1. **After each deep-dive run:** record verdicts from the output JSON:
+   ```bash
+   python tools/track_forward.py --record reports/smallcap/deepdive_verdicts.json
+   ```
+   Or record a single verdict via CLI flags:
+   ```bash
+   python tools/track_forward.py --record --ticker EGAN --rating 观察 --theme aeromro \
+       --mos-pct null --mos-basis abstain --catalyst null
+   ```
+
+2. **Monthly (or ad hoc):** score matured verdicts (horizon elapsed) against realized prices:
+   ```bash
+   python tools/track_forward.py --score
+   ```
+
+3. **Generate calibration scorecard:**
+   ```bash
+   python tools/track_forward.py --scorecard   # writes metrics/scorecard.md
+   python tools/track_forward.py --status      # quick count summary
+   ```
+
+4. **Tune the rubric ONLY when ≥~20 verdicts have matured.** Before that threshold the
+   calibration table is statistically meaningless. See `reference/track-forward.md` for
+   the full Brier / calibration methodology and the benchmark choice rationale (IWM, not SPY).
+
+**Note:** Verdicts from 2026-06 runs mature in 2027-06. The correct scorecard state until then
+is "0 scored, N pending — calibration unknown." This is not a bug; it is the honest state.
