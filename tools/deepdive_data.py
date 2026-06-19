@@ -33,6 +33,7 @@ from _common import init_edgar, UA, REPORTS, today, CFG, http_get
 
 FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json"
 DEI_FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/dei/{concept}.json"
+SEC_COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 
 # Non-open-market transaction codes to exclude (RSU grants, option exercises, gifts, etc.)
 _EXCLUDE_CODES = {"A", "M", "G", "D", "F", "I", "J", "L", "U", "W", "X", "Z"}
@@ -50,9 +51,15 @@ REVENUE_CONCEPTS = [
 # Debt concepts: prefer split long-term current/noncurrent; fallback to LongTermDebt aggregate;
 # final fallback to total Liabilities (flags this in derived.debt_fallback).
 # Empirical: WLFC uses only LongTermDebt (no split); LNN uses both split concepts.
+# C1a: additional concepts in the cascade to reduce debt truncation (FTAI uses SeniorNotes/TermLoans)
 DEBT_CONCEPTS_PRIMARY = ["LongTermDebtNoncurrent", "LongTermDebtCurrent"]
 DEBT_CONCEPT_FALLBACK1 = "LongTermDebt"
+DEBT_CONCEPT_FALLBACK1B = "LongTermDebtAndCapitalLeaseObligations"
+DEBT_CONCEPT_FALLBACK1C = "DebtLongtermAndShorttermCombinedAmount"
 DEBT_CONCEPT_FALLBACK2 = "Liabilities"
+
+# C1: 18-month threshold for debt staleness (in days)
+_DEBT_STALE_DAYS = 548  # 18 months ≈ 548 days
 
 # D&A concepts in priority order: DepreciationDepletionAndAmortization is most common;
 # DepreciationAndAmortization is a widely-used alternative (LNN uses this, WLFC uses both).
@@ -168,6 +175,170 @@ def pct_growth(series: list) -> float | None:
     return round((vals[-1] / vals[-2] - 1) * 100, 1)
 
 
+# C1 — company_tickers.json cache (fetched once per process; keyed by ticker uppercase)
+_sec_tickers_cache: dict | None = None
+
+
+def _get_sec_tickers() -> dict:
+    """Fetch and cache SEC company_tickers.json (ticker→{cik, title}).
+
+    Returns dict keyed by UPPER-CASE ticker symbol.
+    On network failure returns empty dict (caller treats as inconclusive).
+    """
+    global _sec_tickers_cache
+    if _sec_tickers_cache is not None:
+        return _sec_tickers_cache
+    try:
+        r = http_get(SEC_COMPANY_TICKERS_URL, timeout=20)
+        if r.status_code != 200:
+            _sec_tickers_cache = {}
+            return {}
+        raw = r.json()
+        # raw is { "0": {cik_str, ticker, title}, "1": ... }
+        result: dict = {}
+        for entry in raw.values():
+            t = str(entry.get("ticker", "")).upper()
+            if t:
+                result[t] = {
+                    "cik": str(entry.get("cik_str", "")).zfill(10),
+                    "title": entry.get("title", ""),
+                }
+        _sec_tickers_cache = result
+        return result
+    except Exception:
+        _sec_tickers_cache = {}
+        return {}
+
+
+def _validate_ticker_entity(ticker: str, resolved_cik: str, rev_series: list, shares_series: list, ni_series: list) -> tuple[bool, str | None]:
+    """C1b wrong-entity guard.
+
+    Returns (wrong_entity_suspected, reason_str).
+
+    Heuristics:
+    1. Ticker absent from SEC company_tickers.json → suspected wrong entity.
+    2. shares_outstanding < 1000 → suspiciously small (sub-entity or wrong CIK).
+    3. |net_income| / revenue > 2.0 for the latest period → structurally impossible
+       for an operating company (indicates wrong-entity or unit anomaly).
+    4. revenue is present but absurdly small given any available context (below $1000,
+       indicating a unit-of-1 mis-tag or the wrong subsidiary).
+
+    Returns (False, None) when no issue detected.
+    Returns (True, reason) when any heuristic fires.
+    """
+    reasons = []
+
+    # Heuristic 1: ticker→CIK cross-check
+    if ticker:
+        tickers_map = _get_sec_tickers()
+        if tickers_map:  # only validate when we successfully fetched the map
+            canonical = tickers_map.get(ticker.upper())
+            if canonical is None:
+                reasons.append(f"ticker_absent_from_sec_company_tickers")
+            else:
+                canonical_cik = canonical["cik"].lstrip("0")
+                resolved_stripped = str(resolved_cik).lstrip("0")
+                if canonical_cik and resolved_stripped and canonical_cik != resolved_stripped:
+                    reasons.append(
+                        f"cik_mismatch:sec_canonical={canonical_cik},resolved={resolved_stripped}"
+                    )
+
+    # Heuristic 2: shares < 1000
+    if shares_series:
+        latest_shares = shares_series[-1]["val"]
+        if latest_shares is not None and latest_shares < 1000:
+            reasons.append(f"shares_lt_1000:{latest_shares:.0f}")
+
+    # Heuristic 3: |net_income| / revenue > 2.0
+    latest_ni = ni_series[-1]["val"] if ni_series else None
+    latest_rev = rev_series[-1]["val"] if rev_series else None
+    if latest_ni is not None and latest_rev is not None and latest_rev > 0:
+        ratio = abs(latest_ni) / latest_rev
+        if ratio > 2.0:
+            reasons.append(f"ni_to_revenue_ratio_absurd:{ratio:.1f}")
+
+    # Heuristic 4: revenue absurdly low (below $1000 = unit mis-tag)
+    if latest_rev is not None and 0 < latest_rev < 1000:
+        reasons.append(f"revenue_absurdly_low:{latest_rev:.0f}")
+
+    if reasons:
+        return True, ";".join(reasons)
+    return False, None
+
+
+def _check_debt_quality(
+    debt_series: list,
+    assets_series: list,
+    equity_series: list,
+    liabilities_series: list,
+) -> tuple[bool, bool, str | None]:
+    """C1a debt truncation + staleness guard.
+
+    Returns (debt_truncation_suspected, debt_stale, detail_str).
+
+    debt_truncation_suspected: reported total_debt < 0.5 * implied_debt
+      where implied_debt = total_liabilities - stockholders_equity
+      (or total_assets - stockholders_equity when liabilities absent).
+
+    debt_stale: latest debt end-date is >18 months older than latest assets/revenue end-date.
+    """
+    if not debt_series:
+        return False, False, None
+
+    latest_debt_entry = debt_series[-1]
+    latest_debt_val = latest_debt_entry["val"]
+    latest_debt_date = latest_debt_entry["end"]
+
+    # Staleness check: compare debt end-date with assets end-date
+    debt_stale = False
+    if assets_series:
+        latest_assets_date = assets_series[-1]["end"]
+        try:
+            from datetime import date as _date
+            d_debt = _date.fromisoformat(latest_debt_date)
+            d_assets = _date.fromisoformat(latest_assets_date)
+            lag_days = (d_assets - d_debt).days
+            if lag_days > _DEBT_STALE_DAYS:
+                debt_stale = True
+        except Exception:
+            pass
+
+    # Debt truncation check: reported_debt vs implied_debt
+    debt_truncation_suspected = False
+    detail = None
+
+    # Try to compute implied_debt = Liabilities - Equity
+    implied_debt: float | None = None
+    if liabilities_series and equity_series:
+        # Match by end date; use latest matching pair
+        liab_map = {v["end"]: v["val"] for v in liabilities_series}
+        eq_map = {v["end"]: v["val"] for v in equity_series}
+        common = sorted(set(liab_map) & set(eq_map))
+        if common:
+            latest_end = common[-1]
+            implied_debt = liab_map[latest_end] - eq_map[latest_end]
+
+    # Fallback: Assets - Equity when Liabilities absent
+    if implied_debt is None and assets_series and equity_series:
+        asset_map = {v["end"]: v["val"] for v in assets_series}
+        eq_map = {v["end"]: v["val"] for v in equity_series}
+        common = sorted(set(asset_map) & set(eq_map))
+        if common:
+            latest_end = common[-1]
+            implied_debt = asset_map[latest_end] - eq_map[latest_end]
+
+    if implied_debt is not None and implied_debt > 0 and latest_debt_val is not None:
+        if latest_debt_val < 0.5 * implied_debt:
+            debt_truncation_suspected = True
+            detail = (
+                f"reported_total_debt={latest_debt_val/1e6:.1f}M, "
+                f"implied_debt(liab-equity)={implied_debt/1e6:.1f}M, "
+                f"ratio={latest_debt_val/implied_debt:.2f}"
+            )
+
+    return debt_truncation_suspected, debt_stale, detail
+
+
 def _debt_series(cik: str, n: int = 8) -> tuple[list, str]:
     """Pull total debt series using a three-level fallback chain.
 
@@ -206,6 +377,20 @@ def _debt_series(cik: str, n: int = 8) -> tuple[list, str]:
     if lt_debt:
         series = [{"end": v["end"], "val": v["val"]} for v in lt_debt]
         return series[-n:], "LongTermDebt"
+
+    # Level 2b: LongTermDebtAndCapitalLeaseObligations (C1a: catches FTAI-style filers)
+    lt_debt_lease = _one_concept(cik, DEBT_CONCEPT_FALLBACK1B)
+    time.sleep(0.15)
+    if lt_debt_lease:
+        series = [{"end": v["end"], "val": v["val"]} for v in lt_debt_lease]
+        return series[-n:], "LongTermDebtAndCapitalLeaseObligations"
+
+    # Level 2c: DebtLongtermAndShorttermCombinedAmount (C1a: catches combined reporters)
+    lt_debt_combined = _one_concept(cik, DEBT_CONCEPT_FALLBACK1C)
+    time.sleep(0.15)
+    if lt_debt_combined:
+        series = [{"end": v["end"], "val": v["val"]} for v in lt_debt_combined]
+        return series[-n:], "DebtLongtermAndShorttermCombinedAmount"
 
     # Level 3: total Liabilities (proxy; note this in derived)
     liabilities = _one_concept(cik, DEBT_CONCEPT_FALLBACK2)
@@ -517,6 +702,25 @@ def pull(ticker: str, cik: str) -> dict:
     goodwill = concept_series(cik, "Goodwill"); time.sleep(0.2)
     intangibles = concept_series(cik, "IntangibleAssetsNetExcludingGoodwill"); time.sleep(0.2)
 
+    # C1a: liabilities series for debt-truncation cross-check (Liabilities - Equity = implied debt)
+    # Also serves as fallback for Assets when Assets concept is empty (C1c balance-sheet identity)
+    print(f"  拉 Liabilities 序列(用于 C1 债务截断检验)...", file=sys.stderr)
+    liabilities = concept_series(cik, "Liabilities"); time.sleep(0.2)
+    # C1c: if Assets is empty, try LiabilitiesAndStockholdersEquity as fallback
+    if not assets:
+        assets = concept_series(cik, "LiabilitiesAndStockholdersEquity"); time.sleep(0.2)
+
+    # C1: pull SIC from EDGAR company metadata for financial-sector guard (C2)
+    sic_code: str | None = None
+    try:
+        sic_url = f"https://data.sec.gov/submissions/CIK{cik.zfill(10)}.json"
+        sic_r = http_get(sic_url, timeout=20)
+        if sic_r.status_code == 200:
+            sic_code = str(sic_r.json().get("sic", "") or "")
+    except Exception:
+        pass
+    time.sleep(0.2)
+
     # Derive EBITDA = EBIT + D&A (matching end dates; use latest available pair)
     def _latest_paired_sum(s1: list, s2: list) -> float | None:
         """Sum latest matching end-date pair, or fallback to latest of each independently."""
@@ -557,6 +761,8 @@ def pull(ticker: str, cik: str) -> dict:
         # NAV inputs
         "goodwill": goodwill,
         "intangibles": intangibles,
+        # C1: liabilities series for debt-truncation cross-check
+        "liabilities": liabilities,
     }
     # M5 — data-quality anomaly detection: flag implausible net_income (XBRL unit anomaly).
     # If |net_income| > revenue * 50 (e.g. $32B net income vs $32M revenue), the XBRL
@@ -572,6 +778,16 @@ def pull(ticker: str, cik: str) -> dict:
             f"revenue ({_latest_rev/1e6:.1f}M) — possible XBRL unit mis-tag; "
             f"treat net_income with caution; valuation uses OCF which is unaffected."
         )
+
+    # C1a: debt truncation + staleness check
+    _debt_truncation_suspected, _debt_stale, _debt_trunc_detail = _check_debt_quality(
+        debt, assets, equity, liabilities
+    )
+
+    # C1b: wrong-entity guard (ticker→CIK cross-check + financial sanity)
+    _wrong_entity_suspected, _wrong_entity_reason = _validate_ticker_entity(
+        ticker, cik, rev, shares, ni
+    )
 
     d["derived"] = {
         "revenue_growth_pct": pct_growth(rev),
@@ -597,6 +813,15 @@ def pull(ticker: str, cik: str) -> dict:
         # NAV inputs
         "latest_goodwill": goodwill[-1]["val"] if goodwill else None,
         "latest_intangibles": intangibles[-1]["val"] if intangibles else None,
+        # C1a: debt quality flags
+        "debt_truncation_suspected": _debt_truncation_suspected,
+        "debt_truncation_detail": _debt_trunc_detail,
+        "debt_stale": _debt_stale,
+        # C1b: wrong-entity flags
+        "wrong_entity_suspected": _wrong_entity_suspected,
+        "wrong_entity_reason": _wrong_entity_reason,
+        # C2: SIC code for financial-sector routing in valuation
+        "sic": sic_code,
     }
     print(f"  拉内部人交易...", file=sys.stderr)
     # A1: insider_trades queries openinsider by ticker; if no ticker, skip gracefully
@@ -690,6 +915,37 @@ def _selftest():
         _warn = f"latest_net_income is implausibly large relative to revenue — possible XBRL unit mis-tag"
     assert _warn is not None, "M5 data_quality_warn: failed to fire for |NI|>rev*50 (unit test broken)"
     print(f"  M5 data_quality_warn: fires correctly for implausible NI/rev ratio  OK")
+
+    # --- C1a: debt truncation guard unit test ---
+    # Simulate: reported_debt=11M, implied_debt(liab-equity)=4500M → ratio=0.002 < 0.5 → truncation
+    _test_debt = [{"end": "2024-12-31", "val": 11_000_000}]
+    _test_assets = [{"end": "2024-12-31", "val": 8_000_000_000}]
+    _test_equity = [{"end": "2024-12-31", "val": 3_500_000_000}]
+    _test_liab = [{"end": "2024-12-31", "val": 4_500_000_000}]
+    _trunc, _stale, _detail = _check_debt_quality(_test_debt, _test_assets, _test_equity, _test_liab)
+    assert _trunc, f"C1a: debt_truncation_suspected must fire when reported<0.5*implied (detail={_detail})"
+    assert not _stale, "C1a: debt_stale must NOT fire when dates match"
+    print(f"  C1a debt_truncation_suspected: fires correctly for HRI-like scenario  OK")
+
+    # Staleness test: debt date 2020, assets date 2024 → stale
+    _test_debt_stale = [{"end": "2020-12-31", "val": 11_000_000}]
+    _test_assets_recent = [{"end": "2024-12-31", "val": 8_000_000_000}]
+    _, _stale2, _ = _check_debt_quality(_test_debt_stale, _test_assets_recent, _test_equity, _test_liab)
+    assert _stale2, "C1a: debt_stale must fire when debt date is >18m behind assets date"
+    print(f"  C1a debt_stale: fires correctly for stale-debt scenario  OK")
+
+    # --- C1b: wrong-entity guard unit test ---
+    # Simulate a company with shares < 1000 (sub-entity)
+    _fake_shares = [{"end": "2024-12-31", "val": 200}]
+    _we, _we_reason = _validate_ticker_entity("", "0000000001", [], _fake_shares, [])
+    assert _we, f"C1b: wrong_entity_suspected must fire for shares<1000 (reason={_we_reason})"
+    print(f"  C1b wrong_entity_suspected: fires for shares<1000 scenario  OK")
+
+    # Normal company with reasonable shares should not fire (no ticker check when ticker empty)
+    _normal_shares = [{"end": "2024-12-31", "val": 50_000_000}]
+    _we2, _ = _validate_ticker_entity("", "0000000001", [], _normal_shares, [])
+    assert not _we2, "C1b: wrong_entity_suspected must NOT fire for normal shares count"
+    print(f"  C1b wrong_entity_suspected: does NOT fire for normal company  OK")
 
     print("deepdive_data selftest PASS")
 
