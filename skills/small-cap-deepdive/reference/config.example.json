@@ -6,5 +6,12 @@
   "min_dollar_vol": 100000,
   "sic_hard_exclude": ["2833","2834","2835","2836","3826","3841","3842","3843","3845","8000","8011","8060","8062","8071","8090","807","806","805","80","7372","7370","7371","7373","7374","7389","737","6021","6022","6199","6200","6211","6300","6311","6411","6500","6512","6770","60","61","62","63","64","65","67","5912","5944","5651","5712","5731","5990","59","58","5812","3944"],
   "python_cmd": "python",
-  "insider_source": "openinsider"
+  "insider_source": "openinsider",
+
+  "_valuation_comment": "Phase 2 valuation module defaults. All overridable in config.json.",
+  "wacc": 0.10,
+  "cap_rate_low": 0.09,
+  "cap_rate_high": 0.12,
+  "normalize_years": 5,
+  "cyclical_cv_threshold": 0.25
 }

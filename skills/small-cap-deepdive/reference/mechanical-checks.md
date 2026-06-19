@@ -169,3 +169,4 @@ This rule deserves its own section because it is the most frequently violated in
 - `discovery-engine.md` — Gate 2 reads full 10-K text; same edgartools retrieval pipeline used here.
 - `judgment-rubric.md` — kill-flag counts from Guard 2/3 feed directly into the rubric's kill-flag hard-rules (≥2 → avoid, ≥3 → forced bottom of ranking).
 - `disclosure-discipline.md` — runway null disambiguation (Guard 5) is explicitly called out as a required honest data-gap disclosure.
+- `valuation.md` — Phase 2 valuation module; consumes the financial series produced by `deepdive_data.py` and applies the same data-only contract (no narrative, no buy/sell rating).
