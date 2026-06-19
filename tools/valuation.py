@@ -241,6 +241,16 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     if _financial_sic:
         _financial_sic_forced_unsuitable = True
         dq.append(f"financial_sic_fcf_unsuitable:sic={sic_code}")
+    elif not sic_code:
+        # C2-fallback: SEC submissions sometimes omit the top-level SIC (observed on
+        # several BDCs / closed-end funds, e.g. WHF). Detect the investment-company
+        # signature — NO GAAP revenue but operating cash flow present (loan/portfolio
+        # cash flows) — and treat it as financial-structure: FCF-cap is unsuitable.
+        if latest_revenue is None and latest_ocf is not None:
+            _financial_sic_forced_unsuitable = True
+            dq.append("financial_structure_suspected_no_sic:revenue_absent_ocf_present")
+        else:
+            dq.append("sic_unavailable_cannot_confirm_nonfinancial")
 
     ebit_series = fin.get("ebit", [])
     da_series = fin.get("dep_amort", [])
@@ -890,6 +900,48 @@ def _selftest():
         f"C2: fcf_cap_model_unsuitable must be True for financial SIC"
     )
     print("  C2 financial-SIC exclusion: BDC SIC 6726 routes to nav/abstain  OK")
+
+    # --- C2-fallback: SIC absent + BDC signature (no revenue, OCF present) — real WHF case ---
+    _dd_no_sic_bdc = {
+        "ticker": "TEST_BDC_NO_SIC",
+        "derived": {
+            "latest_cash": 20_000_000,
+            "latest_total_debt": 300_000_000,
+            "latest_revenue": None,          # BDC: no GAAP revenue
+            "latest_net_income": 40_000_000,
+            "latest_ocf": 77_000_000,        # portfolio cash flow present
+            "latest_ebit": None,
+            "latest_dep_amort": None,
+            "latest_capex": None,
+            "latest_ebitda": None,
+            "latest_fcf": 77_000_000,
+            "fcf_is_ocf_proxy": True,
+            "latest_goodwill": 0,
+            "latest_intangibles": 0,
+            "sic": None,                     # SEC omitted SIC (real WHF behaviour)
+            "debt_truncation_suspected": False,
+            "debt_stale": False,
+            "wrong_entity_suspected": False,
+            "data_quality_warn": None,
+            "debt_source": "LongTermDebt",
+        },
+        "financials": {
+            "assets": [{"end": "2024-12-31", "val": 700_000_000}],
+            "equity": [{"end": "2024-12-31", "val": 380_000_000}],
+            "ocf": [{"end": "2024-12-31", "val": 77_000_000}],
+            "revenue": [],                   # empty revenue series
+            "shares_outstanding": [{"end": "2024-12-31", "val": 20_000_000}],
+        },
+    }
+    _block_no_sic = compute_valuation(_dd_no_sic_bdc, 280_000_000, cfg)
+    assert any("financial_structure_suspected_no_sic" in f for f in _block_no_sic.get("data_quality", [])), (
+        f"C2-fallback: BDC with no SIC must flag financial_structure_suspected_no_sic, "
+        f"got dq={_block_no_sic.get('data_quality')}"
+    )
+    assert _block_no_sic.get("mos_basis") in ("nav", "abstain"), (
+        f"C2-fallback: SIC-less BDC must route nav/abstain not fcf_cap, got {_block_no_sic.get('mos_basis')!r}"
+    )
+    print("  C2-fallback: SIC-less BDC (no revenue + OCF) routes to nav/abstain  OK")
 
     # --- G1: extreme MoS defense unit test ---
     # Simulate a case where FCF MoS would be >100% (e.g., CISS-like scenario)
