@@ -4,7 +4,7 @@
 > Verdicts file: `metrics/verdicts.jsonl`
 > Benchmark: IWM (Russell 2000 small-cap ETF)
 
-## Status: 0 Scored / 40 Pending
+## Status: 0 Scored / 41 Pending
 
 **Calibration unknown until verdicts mature.**
 
@@ -58,3 +58,4 @@ This is the correct honest state. The epistemic spine of the skill (market-effic
 | VSTS | uniform | 观察 | 0.50 | 2026-06-18 | 2027-06-18 |
 | WLFC | aeromro | 观察 | 0.50 | 2026-06-18 | 2027-06-18 |
 | BUKS | aeromro | 观察 | 0.50 | 2026-06-18 | 2027-06-18 |
+| SNFCA | funeral | 观察 | 0.50 | 2026-06-19 | 2027-06-19 |
