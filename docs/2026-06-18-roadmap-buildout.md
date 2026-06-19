@@ -12,8 +12,8 @@
 | 3 | BUY 扳机+催化剂轴 | P3 安全边际≥30% 对称买入硬规则 + catalyst 维度 + 护栏 | ✅ done | 801e16b |
 | 4 | 召回改进 | P4 20-F/40-F + SIC降级不drop + 双市值带 + per-theme关键词 | ✅ done | fc3d932 |
 | 5 | 事件驱动发现 | P5 spinoff(10-12B)+ cluster insider(Form4)发现轴 + events 入口 | ✅ done | 9f5a978 |
-| 6 | track-forward | metrics/verdicts.jsonl + track_forward.py(Brier 记分) | 🔄 in-progress | |
-| 7 | 终集成+全审+版本 | 端到端测试 + 全 skill 对抗审查 + README/SKILL/CHANGELOG/版本 v0.2.0 | ⬜ pending | |
+| 6 | track-forward | metrics/verdicts.jsonl + track_forward.py(Brier 记分) | ✅ done | 8c2b9d8 |
+| 7 | 终集成+全审+版本 | 端到端测试 + 全 skill 对抗审查 + README/SKILL/CHANGELOG/版本 v0.2.0 | 🔄 in-progress | |
 
 ## 每阶段质量门(no corners)
 1. 实现 subagent(带 selftest/验证)
