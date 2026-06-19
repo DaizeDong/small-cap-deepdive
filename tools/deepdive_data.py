@@ -47,6 +47,25 @@ REVENUE_CONCEPTS = [
     "RevenueFromContractWithCustomerExcludingAssessedTax",
 ]
 
+# Debt concepts: prefer split long-term current/noncurrent; fallback to LongTermDebt aggregate;
+# final fallback to total Liabilities (flags this in derived.debt_fallback).
+# Empirical: WLFC uses only LongTermDebt (no split); LNN uses both split concepts.
+DEBT_CONCEPTS_PRIMARY = ["LongTermDebtNoncurrent", "LongTermDebtCurrent"]
+DEBT_CONCEPT_FALLBACK1 = "LongTermDebt"
+DEBT_CONCEPT_FALLBACK2 = "Liabilities"
+
+# D&A concepts in priority order: DepreciationDepletionAndAmortization is most common;
+# DepreciationAndAmortization is a widely-used alternative (LNN uses this, WLFC uses both).
+# DepreciationAmortizationAndAccretionNet: rare, used by financial services firms.
+DA_CONCEPTS = [
+    "DepreciationAndAmortization",
+    "DepreciationAmortizationAndAccretionNet",
+    "DepreciationDepletionAndAmortization",
+]
+
+# CapEx: standard XBRL concept; present for WLFC and LNN.
+CAPEX_CONCEPT = "PaymentsToAcquirePropertyPlantAndEquipment"
+
 
 def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap") -> list:
     """拉单个 XBRL 概念的年度序列。
@@ -147,6 +166,80 @@ def pct_growth(series: list) -> float | None:
     if len(vals) < 2 or vals[-2] == 0:
         return None
     return round((vals[-1] / vals[-2] - 1) * 100, 1)
+
+
+def _debt_series(cik: str, n: int = 8) -> tuple[list, str]:
+    """Pull total debt series using a three-level fallback chain.
+
+    Level 1: sum LongTermDebtNoncurrent + LongTermDebtCurrent (per-date sum).
+             Used when at least one of the two split concepts is available.
+    Level 2: LongTermDebt aggregate (single concept).
+             Used when split concepts both return empty.
+    Level 3: Liabilities (total liabilities as proxy).
+             Used only when both Level 1 and Level 2 return empty.
+
+    Returns (series, fallback_label) where fallback_label documents which level was used.
+    Series entries: {"end": date_str, "val": amount}.
+
+    Empirical notes:
+    - WLFC (CIK 1018164): only LongTermDebt available (no split), Level 2 applies.
+    - LNN (CIK 836157): both split concepts available, Level 1 applies.
+    """
+    # Level 1: try split concepts
+    noncurrent = _one_concept(cik, "LongTermDebtNoncurrent")
+    time.sleep(0.15)
+    current = _one_concept(cik, "LongTermDebtCurrent")
+    time.sleep(0.15)
+    if noncurrent or current:
+        # Merge by end date: sum both components where available
+        merged: dict = {}
+        for v in noncurrent:
+            merged[v["end"]] = merged.get(v["end"], 0) + v["val"]
+        for v in current:
+            merged[v["end"]] = merged.get(v["end"], 0) + v["val"]
+        series = [{"end": k, "val": v} for k, v in sorted(merged.items())]
+        return series[-n:], "LongTermDebtNoncurrent+LongTermDebtCurrent"
+
+    # Level 2: LongTermDebt aggregate
+    lt_debt = _one_concept(cik, DEBT_CONCEPT_FALLBACK1)
+    time.sleep(0.15)
+    if lt_debt:
+        series = [{"end": v["end"], "val": v["val"]} for v in lt_debt]
+        return series[-n:], "LongTermDebt"
+
+    # Level 3: total Liabilities (proxy; note this in derived)
+    liabilities = _one_concept(cik, DEBT_CONCEPT_FALLBACK2)
+    time.sleep(0.15)
+    if liabilities:
+        series = [{"end": v["end"], "val": v["val"]} for v in liabilities]
+        return series[-n:], "Liabilities_proxy"
+
+    return [], "unavailable"
+
+
+def _da_series(cik: str, n: int = 8) -> tuple[list, str]:
+    """Pull depreciation & amortization series using multi-concept merge.
+
+    Priority chain (later overrides earlier for same end date):
+    1. DepreciationAndAmortization
+    2. DepreciationAmortizationAndAccretionNet
+    3. DepreciationDepletionAndAmortization
+
+    Returns (series, fallback_label) describing which concepts provided data.
+    Empirical: WLFC has both DA and DDA; LNN has only DA.
+    """
+    seen: dict = {}
+    found_concepts: list = []
+    for concept in DA_CONCEPTS:
+        entries = _one_concept(cik, concept)
+        time.sleep(0.15)
+        if entries:
+            found_concepts.append(concept)
+            for v in entries:
+                seen[v["end"]] = {"end": v["end"], "val": v["val"]}
+    series = sorted(seen.values(), key=lambda x: x["end"])[-n:]
+    label = "+".join(found_concepts) if found_concepts else "unavailable"
+    return series, label
 
 
 def insider_trades(ticker: str) -> dict:
@@ -369,20 +462,76 @@ def pull(ticker: str, cik: str) -> dict:
     assets = concept_series(cik, "Assets"); time.sleep(0.2)
     equity = concept_series(cik, "StockholdersEquity"); time.sleep(0.2)
 
+    # Phase 2 additions: valuation inputs
+    print(f"  拉估值输入序列(债务/EBIT/D&A/CapEx)...", file=sys.stderr)
+    debt, debt_source = _debt_series(cik)
+    time.sleep(0.2)
+    ebit = concept_series(cik, "OperatingIncomeLoss"); time.sleep(0.2)
+    da, da_source = _da_series(cik)
+    time.sleep(0.2)
+    capex_raw = concept_series(cik, CAPEX_CONCEPT); time.sleep(0.2)
+    # CapEx from XBRL is a cash outflow stored as a positive number in PaymentsTo... concept.
+    # We keep it positive (absolute value of spend) in the series for transparency.
+    capex = capex_raw
+
+    # Derive EBITDA = EBIT + D&A (matching end dates; use latest available pair)
+    def _latest_paired_sum(s1: list, s2: list) -> float | None:
+        """Sum latest matching end-date pair, or fallback to latest of each independently."""
+        if not s1 or not s2:
+            return None
+        # Try end-date alignment (preferred)
+        ends1 = {v["end"]: v["val"] for v in s1}
+        ends2 = {v["end"]: v["val"] for v in s2}
+        common = sorted(set(ends1) & set(ends2))
+        if common:
+            latest_end = common[-1]
+            return ends1[latest_end] + ends2[latest_end]
+        # Fallback: just sum the respective latest entries (may be different fiscal ends)
+        return s1[-1]["val"] + s2[-1]["val"]
+
+    latest_ebitda = _latest_paired_sum(ebit, da)
+    latest_ocf_val = ocf[-1]["val"] if ocf else None
+    latest_capex = capex[-1]["val"] if capex else None
+    # FCF = OCF - CapEx; if capex unavailable, use OCF as proxy with flag
+    if latest_ocf_val is not None and latest_capex is not None:
+        latest_fcf = latest_ocf_val - latest_capex
+        fcf_is_ocf_proxy = False
+    elif latest_ocf_val is not None:
+        latest_fcf = latest_ocf_val
+        fcf_is_ocf_proxy = True
+    else:
+        latest_fcf = None
+        fcf_is_ocf_proxy = False
+
     d["financials"] = {
         "revenue": rev, "net_income": ni, "ocf": ocf, "cash": cash,
         "shares_outstanding": shares, "assets": assets, "equity": equity,
+        # Phase 2 additions
+        "total_debt": debt,
+        "ebit": ebit,
+        "dep_amort": da,
+        "capex": capex,
     }
     d["derived"] = {
         "revenue_growth_pct": pct_growth(rev),
         "shares_growth_pct": pct_growth(shares),  # 正=稀释
         "latest_revenue": rev[-1]["val"] if rev else None,
         "latest_net_income": ni[-1]["val"] if ni else None,
-        "latest_ocf": ocf[-1]["val"] if ocf else None,
+        "latest_ocf": latest_ocf_val,
         "latest_cash": cash[-1]["val"] if cash else None,
         "ocf_ni_divergence": (ni and ocf and ni[-1]["val"] > 0 and ocf[-1]["val"] < 0),
         "runway_periods": (round(cash[-1]["val"] / abs(ocf[-1]["val"]), 1)
                            if (cash and ocf and ocf[-1]["val"] < 0) else None),
+        # Phase 2 additions
+        "latest_total_debt": debt[-1]["val"] if debt else None,
+        "debt_source": debt_source,
+        "latest_ebit": ebit[-1]["val"] if ebit else None,
+        "latest_dep_amort": da[-1]["val"] if da else None,
+        "da_source": da_source,
+        "latest_capex": latest_capex,
+        "latest_ebitda": latest_ebitda,
+        "latest_fcf": latest_fcf,
+        "fcf_is_ocf_proxy": fcf_is_ocf_proxy,
     }
     print(f"  拉内部人交易...", file=sys.stderr)
     d["insider"] = insider_trades(ticker); time.sleep(0.3)
