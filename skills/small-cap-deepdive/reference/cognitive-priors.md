@@ -74,15 +74,23 @@ WATCH — clean, fairly-priced cyclicals. Across all three runs the BUY count wa
 The first-order takeaway: better theme selection buys you a *cleaner* candidate set (less
 garbage to wade through), not more buys.
 
-**But "0 BUY" is not yet proven to be fully honest — part of it is a calibration gap.** A
-post-run audit found that while ~70-75% of WATCH ratings are genuinely correct (efficiently
-priced cyclicals, no margin of safety), the rubric currently has **no symmetric BUY trigger**:
-it has downward hard-ceilings but no "margin of safety ≥ X% → BUY" rule, and the
-"cyclical turn not yet realized in T1" reasoning becomes a perpetual veto (cheap = not-yet-
-realized = WATCH; realized = no-longer-cheap = WATCH). This plausibly mis-rated genuinely
-cheap names (e.g. an engine-lessor at P/E 7-11x) down to WATCH. The fix is tracked in
-ROADMAP (intrinsic-value band + margin-of-safety threshold + a catalyst axis), not asserted
-here as settled — do not treat "all WATCH" as automatically vindicated until that trigger exists.
+**The run-3 calibration gap has been closed (Phase 3).** A post-run audit found that while
+~70-75% of WATCH ratings were genuinely correct (efficiently priced cyclicals, no margin of
+safety), the rubric had **no symmetric BUY trigger** — only downward hard-ceilings — and the
+"cyclical turn not yet realized in T1" reasoning became a perpetual veto. Phase 3 adds the
+symmetric BUY trigger: `margin_of_safety_pct ≥ 30%` (FCF-cap basis) or `nav_margin_of_safety_pct ≥ 30%`
+(NAV basis), both with zero kill-flags and no T3 load-bearing thesis. A catalyst modifier
+(T1-evidenced forced-trading event with dated trigger) can also reach BUY at MoS < 30%.
+The perpetual-veto ("cyclical turn not yet realized") is now explicitly prohibited when
+static MoS ≥ 30% — normalized FCF already accounts for cycle conservatism.
+
+**However, buys remain rare and market efficiency means most names are still WATCH.** The
+BUY trigger is correctly conservative: it requires the conservative intrinsic value band
+(12% cap rate) to exceed market cap by ≥30% — a high bar. Most clean, fairly-priced
+cyclicals will still not clear it. "0 BUY" on a given run may still be the honest result;
+it is no longer automatically a calibration artifact, but it is also not evidence the trigger
+is broken. Do not expect the BUY rate to jump materially — the goal was to eliminate false
+negatives on genuinely cheap names, not to manufacture buys on fairly-priced ones.
 
 **Where buys actually live (if anywhere):** the same audit found theme/industry hunting is
 efficiently priced in the >$200M band; the mispricing that small capital can still capture is
