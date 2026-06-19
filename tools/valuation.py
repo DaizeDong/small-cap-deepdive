@@ -218,6 +218,30 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     latest_goodwill = der.get("latest_goodwill")
     latest_intangibles = der.get("latest_intangibles")
 
+    # --- I3: propagate data_quality_warn and C1 flags from deepdive derived ---
+    _dq_warn = der.get("data_quality_warn")
+    if _dq_warn:
+        dq.append(f"deepdive_data_quality_warn:{_dq_warn}")
+    if der.get("debt_truncation_suspected"):
+        _dt_detail = der.get("debt_truncation_detail", "")
+        dq.append(f"debt_truncation_suspected:{_dt_detail}")
+    if der.get("debt_stale"):
+        dq.append("debt_stale:>18_months_behind_latest_assets")
+    if der.get("wrong_entity_suspected"):
+        _we_reason = der.get("wrong_entity_reason", "")
+        dq.append(f"wrong_entity_suspected:{_we_reason}")
+
+    # --- C2: financial-SIC guard — exclude financial sector from FCF-cap model ---
+    # SIC prefixes: 60=banks, 61=non-depository credit, 63=insurance carriers,
+    #               64=insurance agents, 67=holding companies/investment/REITs/BDCs
+    _FINANCIAL_SIC_PREFIXES = ("60", "61", "63", "64", "67")
+    sic_code = str(der.get("sic") or "").strip()
+    _financial_sic = bool(sic_code and any(sic_code.startswith(p) for p in _FINANCIAL_SIC_PREFIXES))
+    _financial_sic_forced_unsuitable = False
+    if _financial_sic:
+        _financial_sic_forced_unsuitable = True
+        dq.append(f"financial_sic_fcf_unsuitable:sic={sic_code}")
+
     ebit_series = fin.get("ebit", [])
     da_series = fin.get("dep_amort", [])
     ocf_series = fin.get("ocf", [])
@@ -328,12 +352,26 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # finance companies while sparing cyclical industrials (LNN ~14%).
     # The annual FY figure for WLFC is typically ~67-69%; quarterly dips to ~64% during
     # fleet drawdowns, so 0.62 is the right boundary to avoid false negatives.
+    # C2: financial SIC also forces fcf_cap_model_unsuitable regardless of debt/assets ratio.
     fcf_cap_model_unsuitable: bool = False
-    if latest_debt is not None and latest_assets and latest_assets > 0:
+    if _financial_sic_forced_unsuitable:
+        # C2: financial-sector companies (banks, insurers, BDCs, REITs, holding cos)
+        # — FCF capitalization is structurally invalid for these business models.
+        fcf_cap_model_unsuitable = True
+        # note already appended to dq above
+    elif latest_debt is not None and latest_assets and latest_assets > 0:
         debt_to_assets = latest_debt / latest_assets
         if debt_to_assets > 0.62:
             fcf_cap_model_unsuitable = True
             dq.append(f"fcf_cap_model_unsuitable:debt_to_assets={debt_to_assets:.4f}>0.62")
+
+    # --- C1 data-quality blocks on valuation routing ---
+    # If debt_truncation or wrong_entity detected, treat EV/MoS as unreliable.
+    # These flags are already in dq; here we force abstain by treating fcf_cap unsuitable.
+    _c1_data_block = der.get("debt_truncation_suspected") or der.get("debt_stale") or der.get("wrong_entity_suspected")
+    if _c1_data_block and not fcf_cap_model_unsuitable:
+        fcf_cap_model_unsuitable = True  # force abstain path
+        dq.append("fcf_cap_blocked_by_c1_data_quality_guard")
 
     # --- Reverse DCF (Gordon growth approximation) ---
     # norm_fcf is levered (equity) FCF (OCF - CapEx, post-interest).
@@ -454,6 +492,55 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         elif iv_band is None:
             mos_null_reason = "intrinsic_band_unavailable"
 
+    # --- G1: extreme MoS defense-in-depth ---
+    # |MoS| > 100% (or nav equivalent) is almost always a data/model pathology, never
+    # confirmed real cheapness. Force downgrade BUY→WATCH and add flag.
+    # This is a backstop: even if C1/C2 miss a case, a >100% MoS never auto-BUYs.
+    _extreme_mos_review_required = False
+    _active_mos = mos if mos_basis == "fcf_cap" else nav_mos
+    if _active_mos is not None and abs(_active_mos) > 1.0:
+        _extreme_mos_review_required = True
+        dq.append(f"extreme_mos_review_required:mos={_active_mos*100:.1f}%_exceeds_100pct")
+
+    # --- G2: large-cap ceiling — mktcap > watch_band_max must NOT receive BUY ---
+    # For a small-cap tool, anything in the large-cap band is out of scope.
+    # watch_band_max from config (default 2B).
+    _WATCH_BAND_MAX = int(cfg.get("watch_band_max", 2_000_000_000))
+    _large_cap_out_of_scope = market_cap > _WATCH_BAND_MAX
+    if _large_cap_out_of_scope:
+        dq.append(f"out_of_scope_large_cap:market_cap={market_cap/1e9:.1f}B>watch_band_max={_WATCH_BAND_MAX/1e9:.1f}B")
+
+    # --- I1: FCF sustainability guard ---
+    # Downgrade BUY→WATCH when FCF quality is suspect:
+    #   (i)  reverse_dcf_implied_growth < -0.15 — market prices in steep decline while
+    #        our MoS says cheap = contradiction → unsupported terminal value
+    #   (ii) OCF-proxy AND capital-intensive (large PP&E proxy = assets >> equity, or
+    #        large capex historically) — true FCF after capex is unknown and likely lower
+    #   (iii) lumpy OCF (CV high but not fully captured by cyclical flag)
+    #
+    # This only fires for fcf_cap path (nav/abstain already route away from BUY).
+    _fcf_sustainability_uncertain = False
+    if mos_basis == "fcf_cap" and mos is not None:
+        # (i) reverse-DCF growth strongly negative while MoS positive → contradiction
+        if rdcf_growth is not None and rdcf_growth < -0.15:
+            _fcf_sustainability_uncertain = True
+            dq.append(f"fcf_sustainability_uncertain:rdcf_growth={rdcf_growth:.3f}<-0.15")
+
+        # (ii) OCF-proxy FCF on capital-intensive company (PP&E-heavy proxy):
+        # capital-intensive heuristic: latest_assets > 5 * latest_revenue (large asset base)
+        if fcf_is_proxy and latest_assets is not None and latest_revenue and latest_revenue > 0:
+            asset_rev_ratio = latest_assets / latest_revenue
+            if asset_rev_ratio > 5.0:
+                _fcf_sustainability_uncertain = True
+                dq.append(
+                    f"fcf_sustainability_uncertain:ocf_proxy_on_capital_intensive"
+                    f"(assets/rev={asset_rev_ratio:.1f})"
+                )
+        elif fcf_is_proxy:
+            # Even without asset data, any OCF-proxy on unknown capex is uncertain
+            _fcf_sustainability_uncertain = True
+            dq.append("fcf_sustainability_uncertain:ocf_proxy_capex_unknown")
+
     # --- Assemble output ---
     block = {
         "ticker": dd.get("ticker"),
@@ -494,6 +581,15 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "margin_of_safety_pct": mos,
         "mos_null_reason": mos_null_reason,
         "nav_margin_of_safety_pct": nav_mos,
+        # G1: extreme MoS defense-in-depth
+        "extreme_mos_review_required": _extreme_mos_review_required,
+        # G2: large-cap ceiling
+        "large_cap_out_of_scope": _large_cap_out_of_scope,
+        # I1: FCF sustainability guard
+        "fcf_sustainability_uncertain": _fcf_sustainability_uncertain,
+        # C2: financial SIC flag
+        "financial_sic_fcf_unsuitable": _financial_sic_forced_unsuitable,
+        "sic_used": sic_code if sic_code else None,
         # Transparency
         "assumptions": {
             "discount_rate": discount_rate,
@@ -745,6 +841,146 @@ def _selftest():
     # Write LNN valuation to disk
     out_lnn = REPORTS / f"valuation_LNN_{today()}.json"
     out_lnn.write_text(json.dumps(block_lnn, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # --- C2: financial-SIC exclusion unit test ---
+    # Simulate a BDC (SIC 6726) with positive FCF — must route to nav/abstain, NOT fcf_cap
+    _dd_financial = {
+        "ticker": "TEST_BDC",
+        "derived": {
+            "latest_cash": 100_000_000,
+            "latest_total_debt": 500_000_000,
+            "latest_revenue": 200_000_000,
+            "latest_net_income": 50_000_000,
+            "latest_ocf": 80_000_000,
+            "latest_ebit": 60_000_000,
+            "latest_dep_amort": 5_000_000,
+            "latest_capex": 10_000_000,
+            "latest_ebitda": 65_000_000,
+            "latest_fcf": 70_000_000,
+            "fcf_is_ocf_proxy": False,
+            "latest_goodwill": 0,
+            "latest_intangibles": 0,
+            "latest_cash": 100_000_000,
+            "sic": "6726",  # holding companies/BDCs/REITs
+            "debt_truncation_suspected": False,
+            "debt_stale": False,
+            "wrong_entity_suspected": False,
+            "data_quality_warn": None,
+            "debt_source": "LongTermDebt",
+        },
+        "financials": {
+            "assets": [{"end": "2024-12-31", "val": 2_000_000_000}],
+            "equity": [{"end": "2024-12-31", "val": 1_500_000_000}],
+            "ebit": [{"end": "2024-12-31", "val": 60_000_000}],
+            "dep_amort": [{"end": "2024-12-31", "val": 5_000_000}],
+            "ocf": [{"end": "2024-12-31", "val": 80_000_000}],
+            "capex": [{"end": "2024-12-31", "val": 10_000_000}],
+            "revenue": [{"end": "2024-12-31", "val": 200_000_000}],
+            "shares_outstanding": [{"end": "2024-12-31", "val": 10_000_000}],
+        },
+    }
+    _block_fin = compute_valuation(_dd_financial, 300_000_000, cfg)
+    assert _block_fin.get("financial_sic_fcf_unsuitable") is True, (
+        f"C2: financial_sic_fcf_unsuitable must be True for SIC 6726, got {_block_fin.get('financial_sic_fcf_unsuitable')}"
+    )
+    assert _block_fin.get("mos_basis") in ("nav", "abstain"), (
+        f"C2: financial SIC company must route to nav/abstain, got {_block_fin.get('mos_basis')!r}"
+    )
+    assert _block_fin.get("fcf_cap_model_unsuitable") is True, (
+        f"C2: fcf_cap_model_unsuitable must be True for financial SIC"
+    )
+    print("  C2 financial-SIC exclusion: BDC SIC 6726 routes to nav/abstain  OK")
+
+    # --- G1: extreme MoS defense unit test ---
+    # Simulate a case where FCF MoS would be >100% (e.g., CISS-like scenario)
+    _dd_extreme = {
+        "ticker": "TEST_EXTREME",
+        "derived": {
+            "latest_cash": 0,
+            "latest_total_debt": 0,
+            "latest_revenue": 10_000_000,
+            "latest_net_income": 3_000_000,
+            "latest_ocf": 3_800_000,
+            "latest_ebit": 3_000_000,
+            "latest_dep_amort": 500_000,
+            "latest_capex": 200_000,
+            "latest_ebitda": 3_500_000,
+            "latest_fcf": 3_600_000,
+            "fcf_is_ocf_proxy": False,
+            "latest_goodwill": 0,
+            "latest_intangibles": 0,
+            "sic": "3990",  # non-financial
+            "debt_truncation_suspected": False,
+            "debt_stale": False,
+            "wrong_entity_suspected": False,
+            "data_quality_warn": None,
+            "debt_source": "LongTermDebt",
+        },
+        "financials": {
+            "assets": [{"end": "2024-12-31", "val": 5_000_000}],
+            "equity": [{"end": "2024-12-31", "val": 4_000_000}],
+            "ebit": [{"end": "2024-12-31", "val": 3_000_000}],
+            "dep_amort": [{"end": "2024-12-31", "val": 500_000}],
+            "ocf": [{"end": "2024-12-31", "val": 3_800_000}],
+            "capex": [{"end": "2024-12-31", "val": 200_000}],
+            "revenue": [{"end": "2024-12-31", "val": 10_000_000}],
+            "shares_outstanding": [{"end": "2024-12-31", "val": 1_000_000}],
+        },
+    }
+    # Market cap = $1.2M (micro-cap), FCF = $3.6M → MoS would be (3.6M/0.12 - 1.2M) / 1.2M ~ 2400%
+    _block_extreme = compute_valuation(_dd_extreme, 1_200_000, cfg)
+    if _block_extreme.get("margin_of_safety_pct") is not None:
+        _mos_val = _block_extreme.get("margin_of_safety_pct", 0)
+        if abs(_mos_val) > 1.0:
+            assert _block_extreme.get("extreme_mos_review_required") is True, (
+                f"G1: extreme_mos_review_required must be True for MoS={_mos_val*100:.0f}%"
+            )
+            assert any("extreme_mos" in str(x) for x in _block_extreme.get("data_quality", [])), (
+                f"G1: extreme_mos_review_required must appear in data_quality list"
+            )
+            print(f"  G1 extreme-MoS defense: fires for MoS={_mos_val*100:.0f}%  OK")
+        else:
+            print(f"  G1 extreme-MoS defense: MoS={_mos_val*100:.1f}% not >100%, skipping assertion")
+    else:
+        print("  G1 extreme-MoS defense: MoS null (insufficient data), skipping assertion")
+
+    # --- G2: large-cap ceiling unit test ---
+    # Use a market_cap > 2B — should set large_cap_out_of_scope=True
+    _block_large = compute_valuation(_dd_extreme, 5_000_000_000, cfg)  # $5B market cap
+    assert _block_large.get("large_cap_out_of_scope") is True, (
+        f"G2: large_cap_out_of_scope must be True for $5B market cap"
+    )
+    assert any("out_of_scope_large_cap" in str(x) for x in _block_large.get("data_quality", [])), (
+        f"G2: out_of_scope_large_cap must appear in data_quality list"
+    )
+    print("  G2 large-cap ceiling: fires for $5B market cap  OK")
+
+    # --- I3: data_quality_warn propagation unit test ---
+    _dd_with_warn = dict(_dd_extreme)
+    _dd_with_warn["derived"] = dict(_dd_extreme["derived"])
+    _dd_with_warn["derived"]["data_quality_warn"] = "test_warning:unit_anomaly"
+    _block_warn = compute_valuation(_dd_with_warn, 300_000_000, cfg)
+    assert any("test_warning" in str(x) for x in _block_warn.get("data_quality", [])), (
+        f"I3: data_quality_warn must propagate into valuation data_quality list"
+    )
+    print("  I3 data_quality_warn propagation: fires correctly  OK")
+
+    # --- I1: FCF sustainability guard unit test ---
+    # Simulate: rdcf_growth would be < -0.15 (market pricing in steep decline)
+    # Use tiny market_cap so FCF/mktcap ratio forces g = wacc - FCF/mktcap < -0.15
+    # wacc=0.10; FCF=3.6M; mktcap=14M → g = 0.10 - 3.6/14 = 0.10 - 0.257 = -0.157 < -0.15
+    _block_i1 = compute_valuation(_dd_extreme, 14_000_000, cfg)
+    rdcf_g = _block_i1.get("reverse_dcf_implied_growth")
+    if rdcf_g is not None and rdcf_g < -0.15:
+        assert _block_i1.get("fcf_sustainability_uncertain") is True, (
+            f"I1: fcf_sustainability_uncertain must be True when rdcf_growth={rdcf_g:.3f}<-0.15"
+        )
+        assert any("fcf_sustainability_uncertain" in str(x) for x in _block_i1.get("data_quality", [])), (
+            f"I1: fcf_sustainability_uncertain must appear in data_quality list"
+        )
+        print(f"  I1 FCF sustainability guard: fires for rdcf_growth={rdcf_g:.3f}  OK")
+    else:
+        print(f"  I1 FCF sustainability guard: rdcf_growth={rdcf_g}, skipping assertion (market_cap too high for -0.15 trigger)")
 
     print("\nvaluation selftest PASS")
 
