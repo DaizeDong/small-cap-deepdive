@@ -50,7 +50,7 @@ disclosure non-filers — before any analyst time is spent.
 
 ---
 
-## Three Entry Workflows
+## Four Entry Workflows
 
 ### Entry 1 — `theme <主题>` (thematic universe screen)
 
@@ -230,12 +230,12 @@ by narrative quality or management explanation:
 |---|---|
 | `going_concern` flag in most recent 10-K or 10-Q | **Eliminate before deep-dive** (cheap_pass gate) |
 | `death_spiral` convertible detected | **Dim 1 capped at 1**, composite max = 2 |
-| `material_weakness` in ICFR | **Dim 5 capped at 2** |
+| `material_weakness` in ICFR | **Dim 1 (financial quality) capped at 2** |
 | Net income driven by deferred tax release (not OCF) | **Score Dim 1 on OCF only**; note the driver |
 | AR growing faster than revenue | **Required red flag note** in Dim 1 basis |
 | S-3 shelf / ATM program active with < 4Q runway | **Dim 1 score = 1** |
 | Single customer > 40% of revenue | **Dim 3 capped at 2** |
-| `insider_net_sell` strongly negative AND dilution rate high | **Dim 4 capped at 2** |
+| `insider_net_sell` strongly negative AND dilution rate ≥ 15%/yr | **Dim 4 capped at 2** |
 | Critical data unavailable (runway, revenue, insider trades all null) | **Confidence capped at 40%** |
 | Company has no current theme revenue (pure concept-playing) | **Theme-fit dimension capped at 2**; cannot rate BUY |
 | Rating is AVOID OR kill-flag count ≥ 3 | **Sinks to bottom of ranking** |
@@ -256,10 +256,12 @@ Before running any tool, complete setup once:
 pip install -r tools/requirements.txt
 
 # 2. Configure the tool
+# A fresh clone has NO config.json — copy the example and fill in your details:
 cp skills/small-cap-deepdive/reference/config.example.json skills/small-cap-deepdive/reference/config.json
-# Edit config.json: set "sec_user_agent" to your name and email address.
+# Edit config.json: set "sec_user_agent" to your real name and email address.
 # EDGAR requires a valid User-Agent header on every request (format: "Name email@domain.com").
 # Omission causes 403 errors. This is the only required config field.
+# config.json is gitignored — it stays local and is never committed to the repo.
 ```
 
 The `sec_user_agent` field is the only hard requirement. All other config keys have defaults

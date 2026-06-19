@@ -1,5 +1,27 @@
 # Roadmap
 
+## v0.2.0 — Phase 2–7 buildout (2026-06-19) ✓ SHIPPED
+
+- **P2 ✓** Valuation engine (`tools/valuation.py`): reverse-DCF, EV/EBITDA multiples,
+  cyclical-trough EBITDA normalization, asset-heavy NAV path.
+- **P3 ✓** Symmetric BUY trigger (MoS ≥ 30% + 0 kill-flags + no T3) + closed-list catalyst
+  axis (four qualifying forced-trading categories) + cyclical-turn perpetual-veto prohibition.
+- **P4 ✓** 20-F/40-F fallback, SIC review-tier (downgrade not drop), dual market-cap band,
+  per-theme keyword guidance.
+- **P5 ✓** Event-driven discovery (`discover_events.py`): spinoffs (Form 10-12B) +
+  cluster insider buys (openinsider). Four entry modes: theme / ticker / rank / events.
+  CIK-first processing for pre-listing spinoffs.
+- **P6 ✓** Track-forward calibration (`tools/track_forward.py`): `metrics/verdicts.jsonl`,
+  Brier scoring vs IWM, 40 seeded verdicts (none mature until 2027-06 — calibration unknown).
+- **P7 integration fixes ✓** (see CHANGELOG v0.2.0 for detail):
+  - C1: config.json gitignored + setup instructions clarified.
+  - C2: material_weakness → Dim 1 ceiling fix (was incorrectly capping Dim 5).
+  - I1: cheap_pass.py JSON input branch for event-mode candidates.
+  - I2: discover_events.py --min-insiders default = 2 (rubric floor).
+  - M1/M3/M4/M5: SKILL/rubric/rank/deepdive_data minor fixes.
+
+---
+
 ## v0.1.0 — Initial release (2026-06-18)
 
 - Hybrid architecture: deterministic `tools/*.py` data layer + thin LLM judgment layer.
@@ -31,23 +53,12 @@ edgar` and deprecate the openinsider path.
 **Trigger for landing:** 3 production runs with `insider_source: edgar` produce no direction
 parsing errors.
 
-### Track-forward Brier scoring of verdicts
+### Track-forward Brier scoring of verdicts ✓ DONE (v0.2.0 / P6)
 
-**Status:** The skill produces ranked verdicts (score 1–5 with dimension breakdown) but there
-is no mechanism to track whether verdicts are predictive.
-
-**Work:** Implement a lightweight track-forward loop:
-
-1. At verdict time, write `metrics/verdicts.jsonl` (ticker, composite, dimension scores,
-   kill-flags, run date, theme).
-2. At review time (90d / 180d / 1Y), pull the subsequent price performance and fundamental
-   updates (next 10-K/10-Q XBRL pull), and compute a Brier-style score comparing the
-   predicted directional outcome (score-4+ = positive) to the realized outcome.
-3. Aggregate by dimension: which of the 7 dimensions has the best predictive validity?
-   Which is anti-predictive (suggests removing it or inverting it)?
-
-This is the only honest mechanism for improving the rubric — empirical feedback, not
-subjective intuition.
+`tools/track_forward.py` ships in v0.2.0. Verdicts logged to `metrics/verdicts.jsonl`;
+`--score` pulls realized prices at maturity; `--scorecard` writes `metrics/scorecard.md`.
+Benchmark: IWM (not SPY). 40 seeded verdicts from 2026-06 runs; none mature until 2027-06.
+Rubric tuning gated on ≥20 matured verdicts — see `reference/track-forward.md`.
 
 ### More themes and sector-specific precision gates
 
@@ -94,48 +105,26 @@ passes while these fail); shares fallback chain (`CommonStockSharesOutstanding` 
 `dei:EntityCommonStockSharesOutstanding` → diluted WANSO); pass discover's `avg_dollar_vol`
 through to the deepdive JSON (`liquidity_adv`). ~1 day, single file (`deepdive_data.py`).
 
-**P2 — Valuation module (`tools/valuation.py`).** Mechanical layer emits no valuation, so
-agents hand-compute multiples with inconsistent conventions. Add reverse-DCF (implied growth
-from current EV + correct revenue/OCF — depends on P1), EV/EBITDA·FCF multiples, and same-
-industry percentile. For cyclicals, force normalized/trough EBITDA (the UAN report already
-demonstrates this reasoning). This is the prerequisite for P3.
+**P2 ✓ DONE (v0.2.0)** — Valuation engine (`tools/valuation.py`): reverse-DCF, EV/EBITDA,
+cyclical-trough EBITDA, NAV path.
 
-**P3 — Symmetric BUY trigger + catalyst axis (calibration fix).** The rubric has downward
-hard-ceilings but no upward BUY rule, so even valuation-4/5 + zero-kill-flag names default to
-WATCH. Add: `margin of safety ≥ 30% (vs conservative intrinsic-value band) + 0 kill-flag + no
-T3-load-bearing → BUY` (confidence capped by valuation robustness). Add a catalyst /
-forced-trading dimension so a "fairly priced today but with an un-priced catalyst" name can
-score BUY. Guardrails: BUY must rest on T1 valuation only; cyclicals use trough EBITDA; still
-requires pre-mortem + forced reverse-search. WLFC and CSV are the run-3 likely false-negatives
-to re-test once this lands.
+**P3 ✓ DONE (v0.2.0)** — Symmetric BUY trigger (MoS ≥ 30%) + closed-list catalyst axis
+(four forced-trading categories) + perpetual-veto prohibition.
 
-**P4 — Recall improvements (several cheap).** (a) FTS window → 2yr + `max_pages` deeper
-(run-3 likely missed ASLE — same SIC/cap/theme as survivor WLFC, pure keyword/window miss);
-(b) add `20-F`/`40-F` forms (foreign-filer blind spot — see discovery-engine Coverage Caveat);
-(c) SIC hard-exclude → **downgrade-to-partial-review, not drop**, when a 5xxx/6xxx company hits
-theme keywords (would have rescued TITN SIC-5990, SNFCA SIC-6199); (d) dual market-cap band
-(<$2B deep-dive + $2-5B lightweight watch — captures flagships UNF/VSEC without polluting the
-small-cap ranking); (e) per-theme keyword sets (run-3 `crop inputs` too academic → missed
-LXU/IPI/AVD; `facility services`/`engine` too broad → noise).
+**P4 ✓ DONE (v0.2.0)** — 20-F/40-F fallback, SIC downgrade-to-review (not drop), dual
+market-cap band, per-theme keyword guidance.
 
-**P5 — Event-driven discovery pivot (strategic; biggest build, best shot at a real BUY).**
-The hunting-grounds audit's core finding: theme/industry hunting in the >$200M band is
-efficiently priced; capturable mispricing is overwhelmingly event-driven. Add discovery axes
-that enumerate by EDGAR **form type** (structurally high-precision, no keyword over-recall, no
-theme-fit gate needed): **spinoffs** (Form `10-12B`) and **cluster open-market insider buys**
-(Form 4, 3+ insiders / 30d / incl. ≥1 independent director, opportunistic not routine). Keep
-the deep-dive engine unchanged. Honest caveat: index-effect and PEAD anomalies are largely
-arbitraged away; spinoff + insider signals persist but are decaying and liquidity eats much of
-the gross edge — validate with track-forward before believing any edge.
+**P5 ✓ DONE (v0.2.0)** — Event-driven discovery: spinoffs (Form 10-12B) + cluster insider
+buys (openinsider). Four entry modes: theme / ticker / rank / events. CIK-first for
+pre-listing spinoffs.
 
-**P6 — material_weakness false-positive fix.** 4/4 flagged True in run-3 were boilerplate
-keyword collisions the agent overturned every time. Tighten to Item 9A section match, or
-downgrade to a hint that does not count as a kill-flag.
+**P6 ✓ DONE (v0.2.0)** — material_weakness false-positive fix: affirmative ICFR finding
+required; bare risk-factor boilerplate does not fire the flag.
 
-**P7 — theme-fit gate redundancy.** `run_theme.py` candidates JSON omits `json_path`, so the
+**P7 (theme-fit gate redundancy)** — run_theme.py candidates JSON omits `json_path`, so the
 gate always WebSearches, then deepdive re-judges `theme_fit` anyway. Either pass `json_path`
 through, or fold theme-fit into the deep-dive and drop the separate gate for the single-pass
-path.
+path. (Deferred to future release.)
 
 ---
 
