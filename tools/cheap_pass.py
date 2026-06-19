@@ -42,11 +42,50 @@ KILL_PHRASES = {
 }
 
 
+def _extract_business_blurb(txt: str, max_chars: int = 2000) -> str:
+    """Extract Item 1 Business section blurb from 10-K full text.
+
+    Searches for the 'Item 1' / 'Business' heading and returns the first
+    max_chars characters after it. Returns empty string if not found.
+    """
+    import re as _re
+    low = txt.lower()
+    # Try to find "item 1" followed shortly by "business" heading patterns.
+    # Match variations: "item 1.", "item 1 -", "item 1\nbusiness", "item 1. business"
+    patterns = [
+        r"item\s+1[\.\-\s]+business",   # "item 1. business" or "item 1 business"
+        r"item\s+1\b",                   # bare "item 1" fallback
+    ]
+    idx = -1
+    for pat in patterns:
+        m = _re.search(pat, low)
+        if m:
+            idx = m.end()
+            break
+    if idx < 0:
+        return ""
+    # Skip past a short heading line (newlines / table-of-contents artifacts)
+    # and grab the actual content
+    blurb = txt[idx:idx + max_chars + 200].strip()
+    # Remove leading whitespace/newlines
+    blurb = blurb.lstrip("\r\n\t ")
+    return blurb[:max_chars]
+
+
 def killflag_scan(ticker: str) -> dict:
     """读最新 10-K 全文,判定各 kill-flag 短语是否真实出现。
-    going_concern + substantial_doubt 同时命中 = 强信号(真持续经营疑虑)。"""
+    going_concern + substantial_doubt 同时命中 = 强信号(真持续经营疑虑)。
+
+    material_weakness: requires affirmative ICFR finding (identified/not-effective),
+    not bare risk-factor boilerplate ("our failure to maintain effective controls...").
+    This prevents the 4/4 false-positive pattern seen in the audit run.
+
+    Also extracts business_blurb (Item 1 first ~2000 chars) for theme-fit gate reuse,
+    avoiding redundant WebSearch in theme-fit-gate.js.
+    """
     out = {f"kf_{k}": 0 for k in KILL_PHRASES}
     out["kf_scanned"] = False
+    out["business_blurb"] = ""
     try:
         c = Company(ticker)
         # amendments=False:10-K/A 修正件是部分文件,常缺 going-concern 全文
@@ -55,10 +94,26 @@ def killflag_scan(ticker: str) -> dict:
         f = fl.latest(1) if fl is not None and len(fl) else None
         if f is None:
             return out
-        txt = (f.text() if hasattr(f, "text") else str(f.obj())).lower()
+        txt = f.text() if hasattr(f, "text") else str(f.obj())
+        low = txt.lower()
         for name, phrase in KILL_PHRASES.items():
-            out[f"kf_{name}"] = 1 if phrase in txt else 0
+            if name == "material_weakness":
+                # Affirmative-finding rule: "material weakness" must co-occur with
+                # an affirmative finding phrase to fire the flag.
+                # Risk-factor boilerplate alone ("if we fail to maintain...") does NOT count.
+                _mw_affirmative = (
+                    "identified a material weakness" in low
+                    or "identified material weakness" in low
+                    or "were not effective" in low
+                    or "was not effective" in low
+                    or "have identified" in low
+                )
+                out["kf_material_weakness"] = 1 if (phrase in low and _mw_affirmative) else 0
+            else:
+                out[f"kf_{name}"] = 1 if phrase in low else 0
         out["kf_scanned"] = True
+        # Extract business blurb for theme-fit gate (Fix 3)
+        out["business_blurb"] = _extract_business_blurb(txt)
     except Exception as e:
         print(f"  [warn] killflag {ticker}: {e}", file=sys.stderr)
     return out
@@ -120,6 +175,8 @@ def health_check(row) -> dict:
     # --- kill-flag 全文扫描(edgartools 读 10-K 全文,精准判定)---
     flags = killflag_scan(row["ticker"])
     out.update(flags)
+    # business_blurb carried forward from killflag_scan (Fix 3: theme-fit gate reuse)
+    out["business_blurb"] = flags.get("business_blurb", "")
     # 计数:going_concern+substantial_doubt 同时命中才算"持续经营"1票(避免例行提及误报)
     has_going_concern = (flags.get("kf_going_concern") and flags.get("kf_substantial_doubt"))
     going = 1 if has_going_concern else 0
@@ -157,6 +214,9 @@ def _selftest():
     """Selftest:
     1. IQST — must flag going_concern + substantial_doubt (Guard 2/3: full-text double-hit).
     2. KOP  — amendments=False must NOT return a 10-K/A as the latest filing (Guard 1).
+    3. EGAN — must NOT flag has_material_weakness (FP fix: bare boilerplate phrase
+               in risk factors must not fire; requires affirmative ICFR finding).
+    4. business_blurb — must be non-empty for a valid filer (e.g. EGAN).
     """
     init_edgar()
     # Test 1: IQST going-concern double-hit
@@ -165,6 +225,8 @@ def _selftest():
         f"IQST must flag going concern (amendments=False fix), "
         f"got kf_going_concern={r['kf_going_concern']} kf_substantial_doubt={r['kf_substantial_doubt']}"
     )
+    print(f"  IQST: going_concern={r['kf_going_concern']} substantial_doubt={r['kf_substantial_doubt']}  OK")
+
     # Test 2: KOP amendment exclusion — latest filing must be 10-K, not 10-K/A
     from edgar import Company
     kop = Company("KOP")
@@ -175,7 +237,27 @@ def _selftest():
     assert form_type != "10-K/A", (
         f"KOP: amendments=False must not return a 10-K/A, got form_type={form_type!r}"
     )
-    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion)")
+    print(f"  KOP: form_type={form_type!r} (not 10-K/A)  OK")
+
+    # Test 3: EGAN no-material-weakness FP fix
+    # EGAN (eGain Corp) is a healthy filer that should NOT have an actual ICFR material weakness.
+    # The old bare-phrase rule would fire on boilerplate risk-factor language; the new
+    # affirmative-finding rule must return False for a company with no actual ICFR finding.
+    egan_r = killflag_scan("EGAN")
+    assert egan_r["kf_material_weakness"] == 0, (
+        f"EGAN: kf_material_weakness must be 0 under affirmative-finding rule "
+        f"(bare boilerplate must not fire), got {egan_r['kf_material_weakness']}"
+    )
+    print(f"  EGAN: kf_material_weakness={egan_r['kf_material_weakness']} (FP fix verified)  OK")
+
+    # Test 4: business_blurb extracted (Fix 3)
+    blurb = egan_r.get("business_blurb", "")
+    assert len(blurb) > 100, (
+        f"EGAN: business_blurb should be >100 chars (Item 1 extraction), got len={len(blurb)}"
+    )
+    print(f"  EGAN: business_blurb length={len(blurb)} chars  OK")
+
+    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb)")
 
 
 def main():
