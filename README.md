@@ -7,7 +7,7 @@ runs falsifiable deep-dive due diligence with forced disconfirmation, and ranks 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Depends on](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
-[![Version](https://img.shields.io/badge/version-0.1.0-purple?style=flat)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0-purple?style=flat)](CHANGELOG.md)
 
 [English](README.md) | [中文版](README_CN.md)
 
@@ -59,12 +59,17 @@ narrative generator.
 4. **Deep-dive data pull** (`deepdive_data.py`): XBRL financials, Form 4 insider trades,
    shelf/ATM status, dilution history, material event timeline.
 
-5. **Forced-disconfirmation judgment**: base-rate priors anchored before scoring, mandatory
+5. **Valuation** (`valuation.py`): reverse-DCF (normalized FCF), EV/EBITDA multiples,
+   cyclical-trough EBITDA, and asset-heavy NAV path. Symmetric BUY trigger: margin of
+   safety ≥ 30% + 0 kill-flags + no T3 thesis → BUY (confidence weighted by valuation
+   robustness). Closed-list catalyst modifier for forced-trading events.
+
+6. **Forced-disconfirmation judgment**: base-rate priors anchored before scoring, mandatory
    disconfirmation WebSearch for each candidate, 7-dimension scorecard with hard ceiling rules.
    Evidence is tier-tagged (T1 first-party SEC filings / T2 independent third-party / T3 company-sourced); T3 evidence cannot support
    a buy recommendation.
 
-6. **Rank** (`rank.py`): scored candidates sorted by composite, with funnel counts,
+7. **Rank** (`rank.py`): scored candidates sorted by composite, with funnel counts,
    kill-flag eliminations, and explicit coverage gaps.
 
 ---
@@ -117,7 +122,7 @@ ln -s "$(pwd)/skills/small-cap-deepdive" "$HOME/.claude/skills/small-cap-deepdiv
 
 ---
 
-## Three Entry Modes
+## Four Entry Modes
 
 ### 1. Theme run — full universe screen
 
@@ -163,6 +168,30 @@ python tools/rank.py --input reports/railcar_scores/
 Full step-by-step: **[runbooks/batch-rank.md](runbooks/batch-rank.md)**
 
 Expected token budget: Zero — deterministic, no LLM calls.
+
+### 4. Event-driven discovery — spinoffs or insider clusters
+
+For theme-independent discovery via structural catalysts (forced trading):
+
+```bash
+# Enumerate recent spinoff registrations (Form 10-12B)
+python tools/discover_events.py --spinoffs
+
+# Enumerate cluster open-market insider buys (openinsider)
+python tools/discover_events.py --insider-clusters
+```
+
+Spinoff catalyst: passive index-fund holders of the parent are forced to sell the spun-off
+child if it falls outside their index mandate — temporary supply overhang, no natural buyer.
+
+Insider-cluster catalyst: multiple insiders purchasing at market price with personal capital
+is the strongest available management-conviction signal (Form 4, open-market cash only).
+
+No theme-fit gate needed — form-type enumeration is structurally precise. Kill-flag scan
+still mandatory (`cheap_pass.py --universe <candidates_event_*.json>`). Pre-listing spinoffs
+(no ticker yet) are processed via CIK, in the `band="unknown"` cohort.
+
+Expected token budget: ~300k tokens for a full event-mode run with deep-dives.
 
 ---
 

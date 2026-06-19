@@ -122,7 +122,14 @@ The page is already filtered to cluster events — every row represents a compan
 `discover_events.py --insider-clusters` parses this HTML table using the same
 `HTMLParser` pattern as `deepdive_data.insider_trades` and filters to:
 - Trade Type "P - Purchase" (open-market only; no grants, option exercises, or RSU vesting)
-- `Ins` column ≥ min_insiders (default 3; rubric category (b) lower bound)
+- `Ins` column ≥ min_insiders (tool default = **2**, the rubric floor)
+
+Note on the openinsider table: every row in the `/latest-cluster-buys` page represents a
+company where openinsider has observed at least one insider buy in their raw aggregation;
+the `Ins` column shows the cluster count. The tool applies `--min-insiders 2` (default)
+to enumerate at the rubric floor — the `n_insiders` field is surfaced per record so the
+deep-dive agent or human analyst can prefer clusters of 3+ for higher conviction.
+Set `--min-insiders 3` if you want the tool itself to pre-filter to the higher bar.
 
 ### Why Cluster Insider Buys Signal Mis-Pricing
 

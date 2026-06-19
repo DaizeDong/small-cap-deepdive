@@ -288,7 +288,7 @@ def _parse_int(s: str) -> int:
 
 
 def discover_insider_clusters(
-    min_insiders: int = 3,
+    min_insiders: int = 2,
     enrich_mktcap: bool = True,
 ) -> list[dict]:
     """Enumerate cluster open-market insider buys from openinsider /latest-cluster-buys.
@@ -513,9 +513,10 @@ def main() -> None:
     ap.add_argument(
         "--min-insiders",
         type=int,
-        default=3,
+        default=2,
         help="Insider-clusters: minimum number of distinct insiders buying "
-             "(default 3; rubric category (b) lower bound). "
+             "(default 2; rubric category (b) floor — enumerate at the rubric floor "
+             "so the deep-dive/human can prefer 3+ for higher conviction). "
              "Page already filters to cluster events.",
     )
     ap.add_argument(
