@@ -291,12 +291,12 @@ These rules override scorecard totals. A high aggregate score does not rescue a 
 | Any key claim rests solely on T3 evidence | Cannot rate BUY |
 | Any kill-flag present (`going_concern`, `death_spiral`, or `material_weakness`) | **Blocks BUY** — zero-tolerance, no adjudication escape hatch. `kill-flag count ≥ 2` → Default AVOID. |
 | `death_spiral` convertible detected | Dim 1 capped at 1; composite max = 2 |
-| `material_weakness` in ICFR | Dim 5 (theme fit / timing) capped at 2 |
+| `material_weakness` in ICFR | Dim 1 (financial quality) capped at 2 |
 | Net income driven by deferred tax release (not OCF) | Score Dim 1 on OCF only; note the driver |
 | AR growing faster than revenue | Required red flag note in Dim 1 basis |
 | S-3 shelf / ATM program active with < 4 quarters of runway | Dim 1 score = 1 |
 | Single customer > 40% of revenue | Dim 3 (growth / unit economics) capped at 2 |
-| `insider_net_sell` strongly negative AND dilution rate high | Dim 4 (management) capped at 2 |
+| `insider_net_sell` strongly negative AND dilution rate ≥ 15%/yr | Dim 4 (management) capped at 2 |
 | Critical data unavailable (runway, revenue, insider trades all null) | Confidence capped at 40% |
 | Company has no current revenue from the stated theme (pure concept-playing) | Theme-fit dimension capped at 2; cannot rate BUY solely on theme story |
 | Rating is AVOID OR kill-flag count ≥ 3 | Company sinks to bottom of ranking regardless of aggregate score |

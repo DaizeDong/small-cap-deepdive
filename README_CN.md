@@ -5,7 +5,7 @@
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![依赖](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
-[![版本](https://img.shields.io/badge/version-0.1.0-purple?style=flat)](CHANGELOG.md)
+[![版本](https://img.shields.io/badge/version-0.2.0-purple?style=flat)](CHANGELOG.md)
 
 [English](README.md) | [中文版](README_CN.md)
 
@@ -39,9 +39,11 @@
 
 4. **取数**（`deepdive_data.py`）：XBRL 财务序列、Form 4 内部人交易、货架/ATM 状态、稀释历史、重大事件时间线。
 
-5. **强制反方判断**：评分前先锚定基准概率，对每个候选强制反方 WebSearch，7 维评分卡配硬上限规则。证据按 Tier 标注（T1 第一方 SEC 申报 / T2 独立第三方 / T3 公司自述）；T3 证据不得作为买入支撑。
+5. **估值**（`valuation.py`）：反向 DCF（标准化 FCF）、EV/EBITDA 倍数、周期底部 EBITDA 标准化，以及重资产 NAV 路径。对称买入触发器：安全边际 ≥ 30% + 零 kill-flag + 无 T3 核心论据 → 买入（置信度由估值稳健性加权）。催化剂修正：封闭枚举的强制交易事件列表。
 
-6. **排序**（`rank.py`）：按综合分排列幸存候选，附漏斗计数、淘汰原因、显式数据盲区。
+6. **强制反方判断**：评分前先锚定基准概率，对每个候选强制反方 WebSearch，7 维评分卡配硬上限规则。证据按 Tier 标注（T1 第一方 SEC 申报 / T2 独立第三方 / T3 公司自述）；T3 证据不得作为买入支撑。
+
+7. **排序**（`rank.py`）：按综合分排列幸存候选，附漏斗计数、淘汰原因、显式数据盲区。
 
 ---
 
@@ -90,7 +92,7 @@ ln -s "$(pwd)/skills/small-cap-deepdive" "$HOME/.claude/skills/small-cap-deepdiv
 
 ---
 
-## 三种入口模式
+## 四种入口模式
 
 ### 1. 主题跑——全库筛选
 
@@ -137,6 +139,30 @@ python tools/rank.py --input reports/railcar_scores/
 完整步骤：**[runbooks/batch-rank.md](runbooks/batch-rank.md)**
 
 预计 token 预算：零——纯确定性计算，无 LLM 调用。
+
+### 4. 事件驱动发现——分拆或内部人集群
+
+用结构性催化剂（强制交易）而非主题关键词来发现被误定价的小盘股：
+
+```bash
+# 枚举近期分拆注册（Form 10-12B）
+python tools/discover_events.py --spinoffs
+
+# 枚举集群公开市场内部人买入（openinsider）
+python tools/discover_events.py --insider-clusters
+```
+
+分拆催化剂：母公司的被动指数基金持有人被迫卖出子公司股票（不在指数范围内），
+产生短暂供给过剩、无自然接盘者。
+
+内部人集群催化剂：多名内部人在公开市场用个人资金买入，是可获取的最硬管理层
+信心信号（Form 4，公开市场现金购买，不含期权行权）。
+
+无需主题适配门——表单类型枚举本身即为精确过滤器。Kill-flag 扫描仍然强制执行
+（`cheap_pass.py --universe <candidates_event_*.json>`）。未上市的分拆子公司（暂无
+ticker）通过 CIK 处理，归入 `band="unknown"` 队列。
+
+预计 token 预算：含全量尽调约 30 万 token。
 
 ---
 

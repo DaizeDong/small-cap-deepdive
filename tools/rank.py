@@ -61,9 +61,18 @@ def load_hard_data(ticker: str) -> dict:
     der = d.get("derived", {})
     tk = d.get("tenk", {})
     ins = d.get("insider", {})
-    kf = sum([1 if (tk.get("has_going_concern")) else 0,
-              1 if tk.get("has_material_weakness") else 0,
-              1 if tk.get("has_death_spiral") else 0])
+    # M4: read killflag_count if present (resilient to new kill-flag types added in future);
+    # fall back to summing the three boolean flags if the field is absent.
+    _kfc = d.get("killflag_count")
+    if _kfc is not None:
+        try:
+            kf = int(_kfc)
+        except (TypeError, ValueError):
+            kf = 0
+    else:
+        kf = sum([1 if (tk.get("has_going_concern")) else 0,
+                  1 if tk.get("has_material_weakness") else 0,
+                  1 if tk.get("has_death_spiral") else 0])
     return {"revenue_M": round((der.get("latest_revenue") or 0) / 1e6, 1),
             "net_income_M": round((der.get("latest_net_income") or 0) / 1e6, 1),
             "ocf_M": round((der.get("latest_ocf") or 0) / 1e6, 1),
