@@ -28,6 +28,12 @@ A popular investment theme is, by definition, widely known. Stocks connected to 
 (a) Obscure industrial niches with no retail attention (railcar retrofits, specialty chemicals, industrial refractory) — genuine neglect; or
 (b) Large, well-known themes where the skill's value is separating the few true beneficiaries from the many concept-players.
 
+A good theme is also **non-financial** (financials are SIC-excluded by Gate 1) and
+**US-10-K-native** (foreign 20-F filers are invisible to discovery — see
+`discovery-engine.md` Coverage Caveat). Precise, low-collision keywords matter too:
+prefer specific terms (`cremation`, `aircraft engine`) over generic ones that sweep
+unrelated industries.
+
 **What this does not mean:** Avoid all "hot" themes entirely. A hot theme can still contain mis-priced companies — especially when the theme narrative has swept in companies with zero actual revenue from the theme. The skill's precision gate (see `discovery-engine.md`) is designed to find those.
 
 ### 3. Real Theme Members Are Often Fairly-Priced Cyclicals
@@ -59,6 +65,32 @@ Any part of the output that relies on narrative synthesis should be treated with
 This skill does not identify the next ten-bagger. It identifies which companies in a theme have the fewest structural red flags and the most credible fundamental cases — relative to each other.
 
 A batch ranking that produces "0 BUY, 3 WATCH, 7 AVOID" is not a failed run. It is the honest result when the theme quality is low. The absence of BUY candidates on bad batches is the strongest proof that the skill is not in the business of generating bullish stories.
+
+**Empirical regularity (3 real runs, ~40 deep dives):** theme quality correlates with
+*survivor cleanliness*, not with buy count. A hot, crowded theme (AI-agent) yielded many
+AVOIDs (going-concern / death-spiral garbage). Well-chosen boring, neglected themes
+(industrials, deathcare, ag, uniforms, aerospace aftermarket) yielded ~0 AVOIDs and mostly
+WATCH — clean, fairly-priced cyclicals. Across all three runs the BUY count was **0**.
+The first-order takeaway: better theme selection buys you a *cleaner* candidate set (less
+garbage to wade through), not more buys.
+
+**But "0 BUY" is not yet proven to be fully honest — part of it is a calibration gap.** A
+post-run audit found that while ~70-75% of WATCH ratings are genuinely correct (efficiently
+priced cyclicals, no margin of safety), the rubric currently has **no symmetric BUY trigger**:
+it has downward hard-ceilings but no "margin of safety ≥ X% → BUY" rule, and the
+"cyclical turn not yet realized in T1" reasoning becomes a perpetual veto (cheap = not-yet-
+realized = WATCH; realized = no-longer-cheap = WATCH). This plausibly mis-rated genuinely
+cheap names (e.g. an engine-lessor at P/E 7-11x) down to WATCH. The fix is tracked in
+ROADMAP (intrinsic-value band + margin-of-safety threshold + a catalyst axis), not asserted
+here as settled — do not treat "all WATCH" as automatically vindicated until that trigger exists.
+
+**Where buys actually live (if anywhere):** the same audit found theme/industry hunting is
+efficiently priced in the >$200M band; the mispricing that small capital can still capture is
+overwhelmingly *event-driven / forced-trading* (spinoffs — Form 10-12B; cluster open-market
+insider buys — Form 4), not static "cheap neglected value." Pivoting the discovery axis from
+theme to event is a candidate next direction (ROADMAP), with the honest caveat that these
+anomalies are decaying and liquidity eats much of the gross edge — so 0 BUY may still be the
+correct output even after the pivot.
 
 **Practical implication:** Do not ask the skill to produce a BUY rating. Ask it to produce the most disciplined ranking available from the data. Use the ranking as a triage for further human review, not as a trading signal.
 
