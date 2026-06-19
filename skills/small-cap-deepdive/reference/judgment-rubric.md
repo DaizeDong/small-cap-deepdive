@@ -16,6 +16,7 @@ Before touching the 7-dim scorecard, the subagent must complete these in order:
 1. **Base rate anchor** — state the reference class and its base rates (see `cognitive-priors.md`)
 2. **Disconfirmation search** — run WebSearch for `<company> short report OR fraud OR dilution OR lawsuit OR going concern`; record what was found or explicitly state "searched, nothing found"
 3. **Data staleness check** — if any mechanical field has `data_may_be_stale: true`, use WebSearch to verify current values before scoring
+4. **Valuation & margin of safety** — run `python tools/valuation.py --json <deepdive_json> --ticker <T>` (or read the pre-merged `valuation` block if already present in the deepdive JSON). Record `mos_basis`, `margin_of_safety_pct`, `nav_margin_of_safety_pct`, `ev_sales`, `ev_ebitda`, `reverse_dcf_implied_growth`, and any `data_quality` flags. These become mandatory inputs to the BUY trigger logic below; do not proceed to rating without them.
 
 Only then open the 7-dim scorecard.
 
@@ -182,9 +183,12 @@ Disconfirmation search: [results or "searched, nothing found"]
 - customer_concentration_flag: [True/False] — <one line on largest customer %>
 
 ## 6. Valuation: implied assumptions
-Current EV/Sales: __x   Peer median: __x
+Current EV/Sales: __x   EV/EBITDA: __x   Peer median EV/Sales: __x
 Reverse DCF implied growth (5-yr): __%   Actual trailing growth: __%
 Assessment: <credible / stretched / heroic>
+MoS basis: <fcf_cap / nav / abstain>   MoS: __%   [NAV MoS: __%]   data_quality flags: <list or none>
+Catalyst: <one sentence with dated trigger, or "none">
+BUY trigger fires: <YES — state basis | NO — state which condition fails>
 
 ## 7. Monitor triggers (which 8-Ks / data points change the rating)
 - <trigger 1: e.g., "next earnings: if gross margin < X%, WATCH → AVOID">
@@ -197,12 +201,80 @@ Assessment: <credible / stretched / heroic>
 
 ---
 
+## Symmetric BUY Trigger (Phase 3)
+
+> This section is the single source of truth for when a BUY rating is mechanically permitted.
+> The trigger is based entirely on T1 valuation data from `tools/valuation.py`.
+> Scorecard aggregate alone cannot produce a BUY; the MoS threshold must also clear.
+
+### Three-Way `mos_basis` Decision Tree
+
+#### `mos_basis = "fcf_cap"` — Normal operating company
+
+**BUY requires ALL of the following:**
+1. `margin_of_safety_pct ≥ 30%` (conservative intrinsic value band low-end exceeds market cap by ≥30%)
+2. **Zero effective kill-flags** (kill-flag count = 0 from `cheap_pass.py` / `deepdive_data.py`; one kill-flag of modest severity may be noted but must be explicitly adjudicated T1-evidenced before the BUY stands)
+3. **No T3-load-bearing thesis** — the primary BUY argument must rest on T1 evidence (audited financials, Form 4, 10-K); T3-only claims (management guidance, PR) may not be load-bearing for the rating
+4. Confidence is capped by valuation `data_quality` robustness: each data-quality flag that is load-bearing for the MoS computation (e.g., `capex_unavailable_fcf_uses_ocf_proxy`, `normalized_fcf_unavailable`) reduces confidence by 10 percentage points each, floor 30%
+
+If `margin_of_safety_pct < 30%`, the company **cannot be rated BUY on MoS** — it is WATCH if fundamentals are clean, AVOID if kill-flags are present. The "cyclical turn not yet realized in T1" reasoning must NOT be used to veto a BUY when static MoS is already ≥30% — that perpetual-veto was the run-3 calibration bug; the threshold already uses conservative normalized FCF, so a realized turn that lifts MoS to ≥30% is sufficient.
+
+#### `mos_basis = "nav"` — Asset-heavy company (finance, lessor, etc.)
+
+**BUY requires ALL of the following:**
+1. `nav_margin_of_safety_pct ≥ 30%`
+2. Zero effective kill-flags
+3. No T3-load-bearing thesis
+4. Confidence weight = 0.6 (NAV basis inherently carries accounting-convention and collateral-haircut uncertainty)
+5. Surface in the report explicitly as: "**Asset-heavy / NAV basis — human NAV judgment advised**"
+
+EV/EBITDA and EV/Sales should be reported alongside for relative comparison. Do NOT use `margin_of_safety_pct` (FCF MoS) for these companies; it will be null with `mos_null_reason = "fcf_cap_model_unsuitable_use_nav"`.
+
+#### `mos_basis = "abstain"` — Asset-heavy but NAV cannot be computed
+
+**Do NOT apply a BUY or AVOID trigger on MoS.** Rank only on EV/EBITDA and EV/Sales relative to peers. Never penalize the ranking for the model mismatch — a company that is asset-heavy is not automatically bad. Do not report either `margin_of_safety_pct` or `nav_margin_of_safety_pct` as meaningful signals.
+
+---
+
+## Catalyst / Forced-Trading Modifier
+
+A fairly-priced company (MoS < 30%) may reach BUY if a specific, T1-evidenced, un-priced catalyst is identified. This is not a narrative override — it is an additional evidence dimension.
+
+**Requirements to apply the catalyst modifier:**
+1. **T1-evidenced catalyst:** the catalyst must be documented in a T1 source (SEC filing, court record, exchange notice) — e.g., a filed Form 10-12B (spinoff), an 8-K announcing a special distribution, a Form 4 cluster of open-market insider purchases at market prices within the past 90 days
+2. **Dated trigger:** a specific expected resolution date or filing deadline must be recorded (e.g., "spinoff effective Q3 2026 per 10-12B filing dated 2026-03-15")
+3. **Forced-trading or information-diffusion mechanism:** name the mechanism by which the catalyst creates the mis-pricing (forced selling by index funds that cannot hold the spinoff; information gap because the Form 10-12B has had < 30 days of market exposure; etc.)
+4. **Catalyst field populated:** the `catalyst` field in the output schema must be filled with a one-sentence description of the catalyst and dated trigger; null if no catalyst applies
+
+**Catalyst modifier logic:** if all four requirements are met, the MoS threshold is waived and BUY is permissible even at MoS < 30%, subject to the same zero-kill-flag and no-T3-load-bearing-thesis guardrails.
+
+**Anti-gaming guardrail:** "management expects revenue growth" is NOT a catalyst. A catalyst is an identifiable external event with a dated trigger that changes the information set or the forced-trading balance — not an extrapolation of the existing trend.
+
+---
+
+## BUY-Rating Guardrails (All Apply Regardless of Path)
+
+These apply to every BUY outcome, whether reached via MoS threshold or catalyst modifier:
+
+1. **T1 valuation only.** MoS is computed from SEC/XBRL inputs (T1). Market cap from yfinance is acceptable (labeled T2-adjacent; override with `--mktcap` for audit reproducibility). No T3 data may be substituted.
+2. **Cyclicals use normalized EBITDA/FCF.** `tools/valuation.py` enforces this in code; the judgment layer must not un-normalize.
+3. **BUY still requires pre-mortem + forced disconfirmation.** The anti-story protections (Disciplines 2 and 6 of `disclosure-discipline.md`) are not relaxed for BUY candidates. A BUY report with no pre-mortem section is invalid.
+4. **Perpetual-veto prohibition.** The argument "cyclical turn not yet realized in T1 → cannot buy" is explicitly prohibited as a veto when `margin_of_safety_pct ≥ 30%`. Normalized FCF already accounts for cycle conservatism. Applying an additional qualitative veto on top of the conservative metric defeats the mechanical trigger and recreates the run-3 calibration gap.
+
+---
+
 ## Rating Hard-Rules
 
 These rules override scorecard totals. A high aggregate score does not rescue a report from a hard-rule violation.
 
 | Condition | Hard consequence |
 |---|---|
+| `mos_basis="fcf_cap"` AND `margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | **BUY permitted** (full weight 1.0); confidence adjusted by data_quality flags |
+| `mos_basis="nav"` AND `nav_margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | **BUY permitted** at reduced confidence (weight 0.6); surface as "asset-heavy / NAV basis" |
+| `mos_basis="abstain"` | No BUY or AVOID on MoS; rank on EV/EBITDA and EV/Sales only; never penalize for model mismatch |
+| T1-evidenced catalyst with dated trigger (spinoff/forced-selling/etc.) AND kill-flags = 0 | **Catalyst BUY permitted** even at MoS < 30%; `catalyst` field must be populated |
+| `margin_of_safety_pct < 30%` with no catalyst | Cannot rate BUY on MoS basis |
+| "Cyclical turn not yet realized in T1" used as veto when MoS ≥ 30% | **Prohibited** — perpetual-veto; normalized FCF already accounts for cycle conservatism |
 | Any key claim rests solely on T3 evidence | Cannot rate BUY |
 | `kill-flag count ≥ 2` (going concern, death spiral, or material weakness) | Default AVOID |
 | `death_spiral` convertible detected | Dim 1 capped at 1; composite max = 2 |

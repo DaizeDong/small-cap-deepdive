@@ -154,6 +154,23 @@ Both gates are mandatory. Neither can be skipped or merged into a single pass.
 ## Rating Hard-Rules Quick Reference
 
 > Full scoring rubric, evidence-tier definitions, and output template: `reference/judgment-rubric.md`.
+> Authoritative source for all rules below is `reference/judgment-rubric.md`; this section is a navigational subset.
+
+### Symmetric BUY Trigger (Phase 3) — three-way `mos_basis` handling
+
+Run `python tools/valuation.py` before rating; read `mos_basis`, `margin_of_safety_pct`, `nav_margin_of_safety_pct`.
+
+| `mos_basis` | BUY condition | Notes |
+|---|---|---|
+| `fcf_cap` | `margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | Full confidence weight 1.0; capped by data_quality flags |
+| `nav` | `nav_margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | Reduced weight 0.6; surface as "asset-heavy / NAV basis" |
+| `abstain` | No MoS BUY/AVOID trigger; rank on EV/EBITDA + EV/Sales only | Never penalize for model mismatch |
+
+**Catalyst modifier:** T1-evidenced catalyst (e.g., filed Form 10-12B spinoff, Form 4 cluster buys) with dated trigger → BUY permitted even at MoS < 30%, subject to same zero-kill-flag and no-T3 guardrails. Populate `catalyst` field.
+
+**Perpetual-veto prohibition:** "cyclical turn not yet realized in T1" may NOT veto a BUY when MoS ≥ 30%. Normalized FCF already accounts for cycle conservatism.
+
+### Downward Hard-Ceilings
 
 These are hard ceilings and floors — they override dimension scores and cannot be argued away
 by narrative quality or management explanation:
