@@ -242,7 +242,7 @@ def _da_series(cik: str, n: int = 8) -> tuple[list, str]:
     return series, label
 
 
-def insider_trades(ticker: str) -> dict:
+def insider_trades(ticker: str, cik: str = "") -> dict:
     """内部人交易净方向(最硬的管理层诚实信号)。
     源由 CFG["insider_source"] 控制,默认 openinsider(已测试路径)。
 
@@ -409,7 +409,7 @@ def insider_trades(ticker: str) -> dict:
         return {"available": False, "error": f"unknown insider_source: {CFG['insider_source']}"}
 
 
-def tenk_sections(ticker: str) -> dict:
+def tenk_sections(ticker: str, cik: str = "") -> dict:
     """取最新年报的关键文本片段(business + risk factors 节选)供判断层读。
 
     Phase 4 — 20-F / 40-F graceful fallback:
@@ -418,10 +418,17 @@ def tenk_sections(ticker: str) -> dict:
     Going-concern/material-weakness language is structurally similar in 20-F.
     XBRL concept_series (us-gaap companyfacts) already works for foreign filers.
     Sets out["filing_form"] to the form type actually read.
+
+    A1 — CIK fallback: when ticker is absent but cik is present, construct Company
+    from int(cik) directly (edgartools supports numeric CIK construction).
     """
     out = {"available": False}
     try:
-        c = Company(ticker)
+        # A1: prefer CIK construction when ticker absent to handle pre-listing spinoffs
+        if cik and not ticker:
+            c = Company(int(cik))
+        else:
+            c = Company(ticker)
         f = None
         form_used = None
         # Primary: 10-K (amendments=False — 10-K/A 修正件常缺 going-concern 全文)
@@ -475,6 +482,13 @@ def tenk_sections(ticker: str) -> dict:
 
 
 def pull(ticker: str, cik: str) -> dict:
+    """Pull all financial/insider/tenk data for a company.
+
+    A1 — CIK-first: ticker may be empty when cik is present (pre-listing spinoffs).
+    XBRL concept endpoints are CIK-based and always work.
+    insider_trades / tenk_sections use ticker for their HTML/edgartools calls;
+    they receive the cik fallback so Company() can be constructed from CIK.
+    """
     d = {"ticker": ticker, "cik": cik,
          "pulled_at": today()}
     print(f"  拉财务序列...", file=sys.stderr)
@@ -569,9 +583,15 @@ def pull(ticker: str, cik: str) -> dict:
         "latest_intangibles": intangibles[-1]["val"] if intangibles else None,
     }
     print(f"  拉内部人交易...", file=sys.stderr)
-    d["insider"] = insider_trades(ticker); time.sleep(0.3)
+    # A1: insider_trades queries openinsider by ticker; if no ticker, skip gracefully
+    if ticker:
+        d["insider"] = insider_trades(ticker, cik=cik)
+        time.sleep(0.3)
+    else:
+        d["insider"] = {"available": False, "note": "no_ticker_pre_listing"}
     print(f"  拉 10-K 章节...", file=sys.stderr)
-    d["tenk"] = tenk_sections(ticker)
+    # A1: tenk_sections uses CIK fallback when ticker absent
+    d["tenk"] = tenk_sections(ticker, cik=cik)
     return d
 
 
@@ -648,13 +668,17 @@ def _selftest():
 
 
 def _pull_and_save(ticker: str, cik: str) -> None:
-    """Pull data for one ticker and write JSON to REPORTS dir."""
-    print(f"深度尽调数据拉取: {ticker} (CIK {cik})", file=sys.stderr)
+    """Pull data for one ticker/CIK and write JSON to REPORTS dir.
+
+    A1: ticker may be empty for pre-listing spinoffs; use CIK as filename key in that case.
+    """
+    label = ticker if ticker else f"CIK{cik}"
+    print(f"深度尽调数据拉取: {label} (CIK {cik})", file=sys.stderr)
     d = pull(ticker, cik)
-    out = REPORTS / f"deepdive_{ticker}_{today()}.json"
+    out = REPORTS / f"deepdive_{label}_{today()}.json"
     out.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
     der = d["derived"]
-    print(f"\n=== {ticker} 数据摘要 ===")
+    print(f"\n=== {label} 数据摘要 ===")
     print(f"  营收: ${(der['latest_revenue'] or 0)/1e6:.1f}M (增速 {der['revenue_growth_pct']}%)")
     print(f"  净利: ${(der['latest_net_income'] or 0)/1e6:.1f}M | OCF: ${(der['latest_ocf'] or 0)/1e6:.1f}M")
     print(f"  现金: ${(der['latest_cash'] or 0)/1e6:.1f}M | runway: {der['runway_periods']} 期")
@@ -696,25 +720,62 @@ def main():
             ticker = rec.get("ticker", "")
             cik = str(rec.get("cik", ""))
             band = rec.get("band", "")
-            if not ticker:
-                print(f"  [warn] skipping record {i}: missing ticker", file=sys.stderr)
+
+            # C3 — band disambiguation:
+            #   "deep"    = mktcap < market_cap_max  → PROCESS
+            #   "watch"   = market_cap_max..watch_band_max → SKIP (surfaced separately)
+            #   "large"   = > watch_band_max → SKIP (out of scope)
+            #   "unknown" = mktcap unavailable / pre-listing → PROCESS (likely spinoff)
+            #   None / "" (legacy) = treat as "unknown" → PROCESS
+            if band in ("watch", "large"):
+                label = ticker if ticker else f"CIK{cik}"
+                print(
+                    f"  skipping {band}-band {label} (surfaced separately, no deep-dive)",
+                    file=sys.stderr,
+                )
                 continue
-            # Watch-band guard: $2-5B companies surface separately for human review;
-            # they must NOT get the expensive full deep-dive and must NOT pollute the
-            # small-cap deep ranking (rank.py reads report_*.md, so no report = no rank).
-            if band == "watch":
-                print(f"  skipping watch-band {ticker} (surfaced separately, no deep-dive)")
+
+            # A1 — CIK-first path: ticker-less pre-listing spinoffs
+            if not ticker and not cik:
+                print(
+                    f"  [warn] skipping record {i}: both ticker and cik empty",
+                    file=sys.stderr,
+                )
                 continue
-            if not cik:
+
+            if not ticker and cik:
+                # Try to resolve a ticker from CIK via edgartools
+                try:
+                    tickers_resolved = Company(int(cik)).tickers
+                    if tickers_resolved:
+                        ticker = tickers_resolved[0]
+                        print(
+                            f"  [A1] CIK {cik}: resolved ticker={ticker} from edgartools",
+                            file=sys.stderr,
+                        )
+                    else:
+                        print(
+                            f"  [A1] CIK {cik}: no ticker in edgartools; proceeding CIK-only",
+                            file=sys.stderr,
+                        )
+                except Exception as e:
+                    print(
+                        f"  [A1] CIK {cik}: ticker resolve failed ({e}); proceeding CIK-only",
+                        file=sys.stderr,
+                    )
+
+            if not cik and ticker:
                 try:
                     cik = str(Company(ticker).cik)
                 except Exception as e:
                     print(f"  [warn] cannot resolve CIK for {ticker}: {e}", file=sys.stderr)
                     continue
+
+            label = ticker if ticker else f"CIK{cik}"
             try:
                 _pull_and_save(ticker, cik)
             except Exception as e:
-                print(f"  [warn] {ticker}: {e}", file=sys.stderr)
+                print(f"  [warn] {label}: {e}", file=sys.stderr)
         return
 
     if not args.ticker:
