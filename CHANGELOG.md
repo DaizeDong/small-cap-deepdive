@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.2.1 — 2026-06-19
+
+Remediation round driven by the full real-data validation campaign (21 subagents:
+8 themes + 3 trigger-diagnostics + 3 event-driven + 4 robustness + 2 precision +
+synthesis; report in `docs/2026-06-19-validation-report.md`). The campaign confirmed
+the BUY trigger is **reachable, not logically dead** (SIGA fired mechanically), but
+that on real data **every BUY was a false positive** rooted in data-layer
+pathologies. Guards added:
+
+- **C1 — XBRL balance-sheet guards** (`tools/deepdive_data.py`): debt-truncation
+  cross-check (reported_debt vs liabilities−equity), debt-staleness (>18mo), and
+  wrong-entity detection (ticker absent from company_tickers.json / absurd
+  financials) → force `abstain`. Kills RYAM/FTAI/HRI/FSBW false positives and
+  AL/GOGL/EGLE wrong-entity resolution.
+- **C2 — financial-sector exclusion** (`tools/valuation.py`): SIC 60/61/63/64/67 →
+  `fcf_cap_model_unsuitable` → NAV/abstain; plus a SIC-absent fallback that detects
+  the BDC/closed-end-fund signature (no GAAP revenue + OCF present) for issuers SEC
+  omits a SIC for (e.g. WHF). Kills HCI/WHF/ABR pseudo-BUYs.
+- **I1 — FCF sustainability guard** (`tools/valuation.py`): reverse-DCF implied
+  growth < −15% or capital-intensive OCF-proxy → BUY downgraded to WATCH
+  (VSNT/SIGA/shippers).
+- **I3 — data-quality propagation** (`tools/valuation.py`): deepdive
+  `data_quality_warn` + C1 flags now surface in valuation's `data_quality` (SNFCA
+  unit anomaly visible at the decision layer).
+- **I4 — burn check uses OCF** (`tools/cheap_pass.py`): `reject_burn` keys on
+  operating cash flow, not GAAP net income, so non-cash impairments don't kill real
+  members (MATW).
+- **G1/G2 — defense-in-depth** (`tools/valuation.py`): |MoS|>100% and
+  market_cap>watch_band_max never auto-BUY.
+
+Verdict: v0.2.0 produced real mechanical signal and was honest about 0-BUY, but its
+robustness could not be trusted before these guards. Still a de-risk scanner, not a
+stock picker.
+
 ## v0.2.0 — 2026-06-19
 
 Phase 2–7 buildout on top of the v0.1.0 architecture. Remains a de-risk scanner:
