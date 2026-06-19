@@ -203,6 +203,6 @@ This table is the canonical list of ALL flags emitted by `compute_valuation()`:
 
 - `mechanical-checks.md` — data-layer guards; valuation module respects all five.
 - `judgment-rubric.md` — human/agent judgment layer reads valuation block alongside scores.
-- Phase 3 (planned) — reads `mos_basis` and the corresponding MoS field; applies BUY trigger
+- Phase 3 (implemented) — reads `mos_basis` and the corresponding MoS field; applies BUY trigger
   per the three-way contract documented in "Margin-of-Safety Basis & Phase 3 Contract" above.
 - `config.example.json` — all valuation config keys with defaults.
