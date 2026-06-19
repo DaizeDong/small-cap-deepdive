@@ -268,8 +268,12 @@ def score(df: pd.DataFrame) -> pd.DataFrame:
     df["reject_going_concern"] = (df.get("kf_going_concern", 0).fillna(0).astype(bool)
                                   & df.get("kf_substantial_doubt", 0).fillna(0).astype(bool))
     df["reject_killflags"] = df["killflag_count"] >= 2
+    # I4: use OCF (cash burn), not GAAP net_income, for burn rejection.
+    # net_income < 0 conflates non-cash GAAP losses (impairments, write-offs) with cash distress.
+    # A company with positive OCF and a non-cash impairment loss is NOT burning cash.
+    # reject_burn = short runway AND negative operating cash flow (actual cash burn).
     df["reject_burn"] = df["runway_periods"].notna() & (df["runway_periods"] < 1.0) & \
-                        (df["net_income"].fillna(0) < 0)
+                        (df["ocf_latest"].fillna(0) < 0)
     df["rejected"] = df["reject_going_concern"] | df["reject_killflags"] | df["reject_burn"]
     # 简单体检分:从100扣
     s = pd.Series(100.0, index=df.index)
@@ -388,7 +392,70 @@ def _selftest():
     else:
         print("  STNG blurb: empty (acceptable — theme-fit gate will fall back to WebSearch)")
 
-    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb + KOP MW=0 + STNG 20-F form-aware blurb)")
+    # Test 7: I4 — reject_burn uses OCF not net_income (MATW-like scenario)
+    # A company with positive OCF but negative GAAP net income must NOT be rejected by reject_burn.
+    # runway_periods < 1.0 is a required condition; simulate it with low cash relative to OCF.
+    # But with positive OCF, runway_periods would be None (OCF >= 0 → no burn).
+    # Key scenario: company has negative net_income, POSITIVE ocf_latest → runway=None → no burn reject.
+    _test_data_positive_ocf = pd.DataFrame([{
+        "ticker": "FAKE_MATW",
+        "name": "Fake Matthews-like",
+        "mktcap": 840_000_000,
+        "cash": 50_000_000,
+        "net_income": -100_000_000,  # negative GAAP (impairment-driven)
+        "ocf_latest": 80_000_000,    # positive OCF = NOT burning cash
+        "revenue": 1_800_000_000,
+        "runway_periods": None,      # runway=None because OCF>0 (no burn by construction)
+        "flag_ocf_ni_divergence": True,
+        "killflag_count": 0,
+        "kf_going_concern": 0,
+        "kf_substantial_doubt": 0,
+        "kf_material_weakness": 0,
+        "kf_death_spiral": 0,
+        "kf_reverse_split": 0,
+        "kf_scanned": True,
+        "business_blurb": "Memorialization products and brand management.",
+    }])
+    _scored = score(_test_data_positive_ocf)
+    assert not _scored["reject_burn"].iloc[0], (
+        f"I4: MATW-like company with positive OCF must NOT be rejected by reject_burn "
+        f"(runway_periods=None so no burn condition). "
+        f"reject_burn={_scored['reject_burn'].iloc[0]}"
+    )
+    assert not _scored["rejected"].iloc[0], (
+        f"I4: MATW-like company must survive cheap_pass (no kill-flags, positive OCF). "
+        f"rejected={_scored['rejected'].iloc[0]}"
+    )
+    print("  I4 reject_burn (OCF not net_income): MATW-like company with positive OCF survives  OK")
+
+    # Also verify the burn logic fires when OCF is negative (real cash-burn scenario):
+    _test_data_negative_ocf = pd.DataFrame([{
+        "ticker": "FAKE_BURN",
+        "name": "Fake Burn Company",
+        "mktcap": 10_000_000,
+        "cash": 500_000,
+        "net_income": -5_000_000,
+        "ocf_latest": -2_000_000,   # truly burning cash
+        "revenue": 3_000_000,
+        "runway_periods": 0.25,     # cash/burn < 1.0 period
+        "flag_ocf_ni_divergence": False,
+        "killflag_count": 0,
+        "kf_going_concern": 0,
+        "kf_substantial_doubt": 0,
+        "kf_material_weakness": 0,
+        "kf_death_spiral": 0,
+        "kf_reverse_split": 0,
+        "kf_scanned": True,
+        "business_blurb": "Startup burning cash.",
+    }])
+    _scored_burn = score(_test_data_negative_ocf)
+    assert _scored_burn["reject_burn"].iloc[0], (
+        f"I4: Cash-burning company (runway<1, OCF<0) MUST be rejected. "
+        f"reject_burn={_scored_burn['reject_burn'].iloc[0]}"
+    )
+    print("  I4 reject_burn (OCF negative): cash-burning company correctly rejected  OK")
+
+    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb + KOP MW=0 + STNG 20-F form-aware blurb + I4 reject_burn OCF fix)")
 
 
 def main():
