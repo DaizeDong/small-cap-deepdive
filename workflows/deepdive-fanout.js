@@ -19,7 +19,7 @@ const REPORT_SCHEMA = {
   required: ['ticker', 'rating', 'confidence', 'one_liner', 'is_misrecall', 'top_long', 'top_short', 'killflag_notes', 'margin_of_safety_pct', 'mos_basis', 'catalyst', 'report_md'],
   properties: {
     ticker: { type: 'string' },
-    rating: { type: 'string', enum: ['买入', 'BUY', '观察', '避开'] },
+    rating: { type: 'string', enum: ['买入', '观察', '避开'] },
     confidence: { type: 'integer', minimum: 0, maximum: 100 },
     one_liner: { type: 'string', description: 'one-sentence thesis' },
     is_misrecall: { type: 'boolean', description: 'true if the company is NOT actually in the theme (theme keyword was incidental)' },
@@ -37,7 +37,16 @@ const REPORT_SCHEMA = {
 const PREAMBLE = `你是怀疑派价值投资分析师,对一家被忽视小盘股做深度尽调并给可证伪评判。
 严格遵循 reference/judgment-rubric.md 与 reference/disclosure-discipline.md,违反即报告无效。
 **核心红线(违反即无效):先报 base rate。强制先搜反方再写空头。不许讲故事,不许给主题概念加分。**
-**评级可选:买入(BUY) / 观察 / 避开 — BUY 需满足 judgment-rubric.md §Symmetric BUY Trigger 的机械条件(MoS≥30% 或 T1 catalyst),缺一不可。**`
+**评级可选:买入 / 观察 / 避开 — 评级字段必须用中文(买入/观察/避开),不得写 BUY/WATCH/AVOID 英文。买入 需满足 judgment-rubric.md §Symmetric BUY Trigger 的机械条件(MoS≥30% 或 T1 enumerated-category catalyst),缺一不可。**
+**报告第一行必须写:评级: 买入(或观察/避开),置信度: XX% — 用中文前缀,rank.py 据此解析。**
+**kill-flag 零容忍:going_concern/death_spiral/material_weakness 任意一项为 True,禁止评买入,无例外。**
+**NAV 路径置信度:mos_basis=nav 时,将原始置信度乘以 0.6 后写入 confidence 字段(例:80% 置信 → 记录 48)。**
+**catalyst 仅限以下四类(否则填 null):
+  (a) 已提交 Form 10-12B/15-12B 的分拆,有指数基金被迫卖出机制文件;
+  (b) 90 天内 ≥2-3 名内部人在公开市场现金买入(Form 4,非期权/授予);
+  (c) 法院命令的资产出售/特别分配(8-K 附法院令+完成日期);
+  (d) 交易所摘牌警告/合规缺陷(8-K 或交易所通知,形成被迫卖出)。
+  业绩指引、产品发布、客户合同、营收增长叙事均不构成 catalyst。**`
 
 phase('DeepDive')
 

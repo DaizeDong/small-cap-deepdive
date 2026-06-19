@@ -142,7 +142,7 @@ Every deep-dive report must produce this structure exactly. No field may be omit
 ```
 # [TICKER] Deep Dive — <date> (timestamp-locked)
 
-Rating: [BUY / WATCH / AVOID]   Confidence: __%   Holding period: __
+评级: [买入 / 观察 / 避开]   置信度: __%   持有期: __
 
 ## 0. One-line thesis + base-rate anchor
 <One sentence stating the core thesis.>
@@ -206,6 +206,8 @@ BUY trigger fires: <YES — state basis | NO — state which condition fails>
 > This section is the single source of truth for when a BUY rating is mechanically permitted.
 > The trigger is based entirely on T1 valuation data from `tools/valuation.py`.
 > Scorecard aggregate alone cannot produce a BUY; the MoS threshold must also clear.
+>
+> **Conservatism note:** The BUY trigger is intentionally conservative — it requires the market cap to be ≥30% below the low end of the intrinsic value band, which itself already uses a conservative 12% cap rate on normalized (cycle-average) FCF. BUY rarely or never firing in a given run is expected and correct, not a calibration bug.
 
 ### Three-Way `mos_basis` Decision Tree
 
@@ -213,7 +215,7 @@ BUY trigger fires: <YES — state basis | NO — state which condition fails>
 
 **BUY requires ALL of the following:**
 1. `margin_of_safety_pct ≥ 30%` (conservative intrinsic value band low-end exceeds market cap by ≥30%)
-2. **Zero effective kill-flags** (kill-flag count = 0 from `cheap_pass.py` / `deepdive_data.py`; one kill-flag of modest severity may be noted but must be explicitly adjudicated T1-evidenced before the BUY stands)
+2. **Zero effective kill-flags** — kill-flag count must be 0. `going_concern`, `death_spiral`, and `material_weakness` all block BUY with no exception. There is no "one kill-flag of modest severity" escape hatch.
 3. **No T3-load-bearing thesis** — the primary BUY argument must rest on T1 evidence (audited financials, Form 4, 10-K); T3-only claims (management guidance, PR) may not be load-bearing for the rating
 4. Confidence is capped by valuation `data_quality` robustness: each data-quality flag that is load-bearing for the MoS computation (e.g., `capex_unavailable_fcf_uses_ocf_proxy`, `normalized_fcf_unavailable`) reduces confidence by 10 percentage points each, floor 30%
 
@@ -223,9 +225,9 @@ If `margin_of_safety_pct < 30%`, the company **cannot be rated BUY on MoS** — 
 
 **BUY requires ALL of the following:**
 1. `nav_margin_of_safety_pct ≥ 30%`
-2. Zero effective kill-flags
+2. Zero effective kill-flags (same zero-tolerance as fcf_cap; no exceptions)
 3. No T3-load-bearing thesis
-4. Confidence weight = 0.6 (NAV basis inherently carries accounting-convention and collateral-haircut uncertainty)
+4. **Confidence must be multiplied by 0.6 before populating the `confidence` field.** NAV basis inherently carries accounting-convention and collateral-haircut uncertainty. Example: an 80% conviction NAV BUY is recorded as `confidence: 48`. This down-weight must be applied mechanically so `rank.py`'s `combined` score actually reflects it.
 5. Surface in the report explicitly as: "**Asset-heavy / NAV basis — human NAV judgment advised**"
 
 EV/EBITDA and EV/Sales should be reported alongside for relative comparison. Do NOT use `margin_of_safety_pct` (FCF MoS) for these companies; it will be null with `mos_null_reason = "fcf_cap_model_unsuitable_use_nav"`.
@@ -240,15 +242,26 @@ EV/EBITDA and EV/Sales should be reported alongside for relative comparison. Do 
 
 A fairly-priced company (MoS < 30%) may reach BUY if a specific, T1-evidenced, un-priced catalyst is identified. This is not a narrative override — it is an additional evidence dimension.
 
+**Qualifying catalyst categories (CLOSED ENUMERATED LIST — no other categories qualify):**
+
+Only the following four catalyst types are recognized. An event that does not fit one of these four categories is NOT a catalyst, regardless of whether it appears in an SEC filing.
+
+- **(a) Spinoff filings:** Form 10-12B or 15-12B on file, with a documented index-fund / mandate forced-selling mechanism (e.g., the spinoff will not be eligible for inclusion in the index the parent is in, forcing passive holders to sell).
+- **(b) Cluster open-market insider purchases:** Form 4 filings showing ≥2–3 insiders purchasing shares at market prices within any rolling 90-day window. Option exercises, RSU vesting, and any grant-related acquisitions do NOT qualify — only open-market cash purchases.
+- **(c) Court-ordered asset sales or special distributions:** documented in an 8-K with a court order or settlement agreement reference AND a scheduled completion date on record.
+- **(d) Delisting-avoidance / exchange-deficiency events:** an 8-K or exchange notice documenting a minimum-bid or minimum-equity deficiency, which creates forced selling by holders who cannot hold below-standard securities.
+
+**Events that explicitly do NOT qualify as catalysts — regardless of SEC filing:**
+Earnings guidance, revenue guidance, product launches, new product announcements, customer wins, contract announcements, partnership announcements, market expansion narratives, and any organic-growth or forward-looking management narrative. These are NOT catalysts even if disclosed in an 8-K, 10-Q, or earnings call transcript.
+
 **Requirements to apply the catalyst modifier:**
-1. **T1-evidenced catalyst:** the catalyst must be documented in a T1 source (SEC filing, court record, exchange notice) — e.g., a filed Form 10-12B (spinoff), an 8-K announcing a special distribution, a Form 4 cluster of open-market insider purchases at market prices within the past 90 days
-2. **Dated trigger:** a specific expected resolution date or filing deadline must be recorded (e.g., "spinoff effective Q3 2026 per 10-12B filing dated 2026-03-15")
-3. **Forced-trading or information-diffusion mechanism:** name the mechanism by which the catalyst creates the mis-pricing (forced selling by index funds that cannot hold the spinoff; information gap because the Form 10-12B has had < 30 days of market exposure; etc.)
-4. **Catalyst field populated:** the `catalyst` field in the output schema must be filled with a one-sentence description of the catalyst and dated trigger; null if no catalyst applies
+1. **Category match:** the catalyst must fit one of the four enumerated categories above
+2. **T1-evidenced:** documented in the specific T1 source listed for that category (Form 10-12B/15-12B, Form 4, 8-K with court order, exchange deficiency notice)
+3. **Dated trigger:** a specific expected resolution date or filing deadline must be recorded (e.g., "spinoff effective Q3 2026 per 10-12B filing dated 2026-03-15")
+4. **Forced-trading or information-diffusion mechanism:** name the specific mechanism by which this catalyst creates mis-pricing
+5. **Catalyst field populated:** the `catalyst` field in the output schema must be filled with a one-sentence description of the catalyst category, T1 source, and dated trigger; null if no qualifying catalyst applies
 
-**Catalyst modifier logic:** if all four requirements are met, the MoS threshold is waived and BUY is permissible even at MoS < 30%, subject to the same zero-kill-flag and no-T3-load-bearing-thesis guardrails.
-
-**Anti-gaming guardrail:** "management expects revenue growth" is NOT a catalyst. A catalyst is an identifiable external event with a dated trigger that changes the information set or the forced-trading balance — not an extrapolation of the existing trend.
+**Catalyst modifier logic:** if all five requirements are met, the MoS threshold is waived and BUY is permissible even at MoS < 30%, subject to the same zero-kill-flag and no-T3-load-bearing-thesis guardrails.
 
 ---
 
@@ -270,13 +283,13 @@ These rules override scorecard totals. A high aggregate score does not rescue a 
 | Condition | Hard consequence |
 |---|---|
 | `mos_basis="fcf_cap"` AND `margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | **BUY permitted** (full weight 1.0); confidence adjusted by data_quality flags |
-| `mos_basis="nav"` AND `nav_margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | **BUY permitted** at reduced confidence (weight 0.6); surface as "asset-heavy / NAV basis" |
+| `mos_basis="nav"` AND `nav_margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | **BUY permitted**; multiply raw conviction by 0.6 before recording `confidence` field; surface as "asset-heavy / NAV basis" |
 | `mos_basis="abstain"` | No BUY or AVOID on MoS; rank on EV/EBITDA and EV/Sales only; never penalize for model mismatch |
-| T1-evidenced catalyst with dated trigger (spinoff/forced-selling/etc.) AND kill-flags = 0 | **Catalyst BUY permitted** even at MoS < 30%; `catalyst` field must be populated |
+| T1-evidenced catalyst matching enumerated category (a)–(d) AND dated trigger AND kill-flags = 0 | **Catalyst BUY permitted** even at MoS < 30%; `catalyst` field must be populated with category, T1 source, dated trigger |
 | `margin_of_safety_pct < 30%` with no catalyst | Cannot rate BUY on MoS basis |
 | "Cyclical turn not yet realized in T1" used as veto when MoS ≥ 30% | **Prohibited** — perpetual-veto; normalized FCF already accounts for cycle conservatism |
 | Any key claim rests solely on T3 evidence | Cannot rate BUY |
-| `kill-flag count ≥ 2` (going concern, death spiral, or material weakness) | Default AVOID |
+| Any kill-flag present (`going_concern`, `death_spiral`, or `material_weakness`) | **Blocks BUY** — zero-tolerance, no adjudication escape hatch. `kill-flag count ≥ 2` → Default AVOID. |
 | `death_spiral` convertible detected | Dim 1 capped at 1; composite max = 2 |
 | `material_weakness` in ICFR | Dim 5 (theme fit / timing) capped at 2 |
 | Net income driven by deferred tax release (not OCF) | Score Dim 1 on OCF only; note the driver |

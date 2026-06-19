@@ -100,7 +100,7 @@ theme to event is a candidate next direction (ROADMAP), with the honest caveat t
 anomalies are decaying and liquidity eats much of the gross edge — so 0 BUY may still be the
 correct output even after the pivot.
 
-**Practical implication:** Do not ask the skill to produce a BUY rating. Ask it to produce the most disciplined ranking available from the data. Use the ranking as a triage for further human review, not as a trading signal.
+**Practical implication:** Do not ask the skill to MANUFACTURE a BUY rating — BUY fires only when the mechanical margin-of-safety conditions are met. Ask it to produce the most disciplined ranking available from the data. Use the ranking as a triage for further human review, not as a trading signal.
 
 ---
 

@@ -163,10 +163,10 @@ Run `python tools/valuation.py` before rating; read `mos_basis`, `margin_of_safe
 | `mos_basis` | BUY condition | Notes |
 |---|---|---|
 | `fcf_cap` | `margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | Full confidence weight 1.0; capped by data_quality flags |
-| `nav` | `nav_margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | Reduced weight 0.6; surface as "asset-heavy / NAV basis" |
+| `nav` | `nav_margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | Multiply raw conviction by 0.6 before recording `confidence` field; surface as "asset-heavy / NAV basis" |
 | `abstain` | No MoS BUY/AVOID trigger; rank on EV/EBITDA + EV/Sales only | Never penalize for model mismatch |
 
-**Catalyst modifier:** T1-evidenced catalyst (e.g., filed Form 10-12B spinoff, Form 4 cluster buys) with dated trigger → BUY permitted even at MoS < 30%, subject to same zero-kill-flag and no-T3 guardrails. Populate `catalyst` field.
+**Catalyst modifier (closed enumerated list — no other types qualify):** (a) spinoff filing Form 10-12B/15-12B with documented index-fund forced-selling mechanism; (b) cluster open-market insider purchases Form 4 ≥2–3 insiders within 90 days, cash purchases only — not option exercises/grants; (c) court-ordered asset sale or special distribution per 8-K with scheduled completion date; (d) exchange delisting-avoidance / deficiency event per 8-K creating forced selling. Each requires a dated trigger. Earnings guidance, product launches, customer wins, and any organic-growth narrative do NOT qualify. Populate `catalyst` field with category, T1 source, and dated trigger; null otherwise.
 
 **Perpetual-veto prohibition:** "cyclical turn not yet realized in T1" may NOT veto a BUY when MoS ≥ 30%. Normalized FCF already accounts for cycle conservatism.
 
