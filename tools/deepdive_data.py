@@ -463,7 +463,7 @@ def pull(ticker: str, cik: str) -> dict:
     equity = concept_series(cik, "StockholdersEquity"); time.sleep(0.2)
 
     # Phase 2 additions: valuation inputs
-    print(f"  拉估值输入序列(债务/EBIT/D&A/CapEx)...", file=sys.stderr)
+    print(f"  拉估值输入序列(债务/EBIT/D&A/CapEx/Goodwill/Intangibles)...", file=sys.stderr)
     debt, debt_source = _debt_series(cik)
     time.sleep(0.2)
     ebit = concept_series(cik, "OperatingIncomeLoss"); time.sleep(0.2)
@@ -473,6 +473,10 @@ def pull(ticker: str, cik: str) -> dict:
     # CapEx from XBRL is a cash outflow stored as a positive number in PaymentsTo... concept.
     # We keep it positive (absolute value of spend) in the series for transparency.
     capex = capex_raw
+
+    # NAV inputs: goodwill and intangibles (needed for tangible equity calculation)
+    goodwill = concept_series(cik, "Goodwill"); time.sleep(0.2)
+    intangibles = concept_series(cik, "IntangibleAssetsNetExcludingGoodwill"); time.sleep(0.2)
 
     # Derive EBITDA = EBIT + D&A (matching end dates; use latest available pair)
     def _latest_paired_sum(s1: list, s2: list) -> float | None:
@@ -511,6 +515,9 @@ def pull(ticker: str, cik: str) -> dict:
         "ebit": ebit,
         "dep_amort": da,
         "capex": capex,
+        # NAV inputs
+        "goodwill": goodwill,
+        "intangibles": intangibles,
     }
     d["derived"] = {
         "revenue_growth_pct": pct_growth(rev),
@@ -532,6 +539,9 @@ def pull(ticker: str, cik: str) -> dict:
         "latest_ebitda": latest_ebitda,
         "latest_fcf": latest_fcf,
         "fcf_is_ocf_proxy": fcf_is_ocf_proxy,
+        # NAV inputs
+        "latest_goodwill": goodwill[-1]["val"] if goodwill else None,
+        "latest_intangibles": intangibles[-1]["val"] if intangibles else None,
     }
     print(f"  拉内部人交易...", file=sys.stderr)
     d["insider"] = insider_trades(ticker); time.sleep(0.3)
