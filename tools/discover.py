@@ -114,15 +114,23 @@ def apply_filters(df: pd.DataFrame, max_mcap: float, min_dollar_vol: float) -> p
     return df
 
 
+def _two_years_ago() -> str:
+    """Return ISO date string for today minus 2 years (dynamic FTS recall window)."""
+    from datetime import timedelta
+    return (datetime.now(timezone.utc) - timedelta(days=730)).strftime("%Y-%m-%d")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--theme", required=True, help="逗号分隔的主题短语")
     ap.add_argument("--forms", default="10-K,10-Q")
-    ap.add_argument("--startdt", default="2025-06-01")
+    ap.add_argument("--startdt", default=_two_years_ago(),
+                    help="FTS 起始日期 (default: today minus 2 years)")
     ap.add_argument("--enddt", default=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
     ap.add_argument("--max-mcap", type=float, default=CFG["market_cap_max"], help="小盘上限,默认 $2B")
     ap.add_argument("--min-dollar-vol", type=float, default=CFG["min_dollar_vol"], help="日均成交额下限")
-    ap.add_argument("--max-pages", type=int, default=5)
+    ap.add_argument("--max-pages", type=int, default=10,
+                    help="每短语最大翻页数 (default: 10, 每页100条)")
     ap.add_argument("--out-slug", default="", help="输出文件名 slug(多主题区分用)")
     args = ap.parse_args()
 

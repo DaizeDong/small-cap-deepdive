@@ -31,11 +31,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import init_edgar, UA, REPORTS, today, CFG, http_get
 
 FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json"
+DEI_FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/dei/{concept}.json"
+
+# Revenue concepts in priority order (earlier = lower priority, later = higher priority / overrides).
+# IncludingAssessedTax added: many companies (e.g. BUKS fiscal-year != CY) switched to this
+# after the 2018 ASC 606 adoption, while Revenues stopped being updated.
+REVENUE_CONCEPTS = [
+    "Revenues",
+    "SalesRevenueNet",
+    "RevenueFromContractWithCustomerIncludingAssessedTax",
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+]
 
 
-def _one_concept(cik: str, concept: str) -> list:
-    """拉单个 XBRL 概念的年度序列(跨度 350-380 天 或 instant)。"""
-    url = FACTS.format(cik=str(cik).zfill(10), concept=concept)
+def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap") -> list:
+    """拉单个 XBRL 概念的年度序列。
+
+    Annual selection: prefer entries where fp=='FY' AND form starts with '10-K'.
+    Secondary guard: for flow concepts (revenue/income) with start+end dates, also accept
+    day-span 330-400 as fallback when fp/form fields are absent.
+    Instant concepts (balance-sheet items without 'start') are always included.
+
+    Same end-date dedup within one concept: last entry in API response order wins,
+    which aligns with EDGAR ordering (restated/amended values appear after originals).
+    """
+    if taxonomy == "us-gaap":
+        url = FACTS.format(cik=str(cik).zfill(10), concept=concept)
+    else:
+        url = DEI_FACTS.format(cik=str(cik).zfill(10), concept=concept)
     try:
         r = http_get(url, timeout=20)
         if r.status_code != 200:
@@ -43,36 +66,75 @@ def _one_concept(cik: str, concept: str) -> list:
         units = r.json().get("units", {})
         vals = units.get("USD") or units.get("USD/shares") or units.get("shares") or []
         from datetime import date
-        annual = []
+        seen_end: dict = {}  # dedup by end date; last wins (restated overrides original)
         for v in vals:
             if "start" in v and "end" in v:
                 try:
-                    s = date.fromisoformat(v["start"]); e = date.fromisoformat(v["end"])
-                    if 350 <= (e - s).days <= 380:
-                        annual.append({"end": v["end"], "val": v["val"], "fy": v.get("fy")})
+                    s = date.fromisoformat(v["start"])
+                    e = date.fromisoformat(v["end"])
+                    days = (e - s).days
+                    fp = v.get("fp", "")
+                    form = v.get("form", "")
+                    # Accept: fp==FY AND form is annual (10-K or 10-K/A)
+                    is_annual_tagged = (fp == "FY" and form.startswith("10-K"))
+                    # Fallback: day span ~annual when tags absent
+                    is_annual_span = (330 <= days <= 400)
+                    if is_annual_tagged or is_annual_span:
+                        seen_end[v["end"]] = {
+                            "end": v["end"], "val": v["val"],
+                            "fy": v.get("fy"), "fp": fp, "form": form,
+                        }
                 except Exception:
                     pass
-            elif "end" in v:  # instant(资产负债表项)
-                annual.append({"end": v["end"], "val": v["val"], "fy": v.get("fy")})
-        return annual
+            elif "end" in v:  # instant (balance-sheet item — no start date)
+                seen_end[v["end"]] = {"end": v["end"], "val": v["val"], "fy": v.get("fy")}
+        return list(seen_end.values())
     except Exception:
         return []
 
 
 def concept_series(cik: str, concepts, n: int = 8) -> list:
     """拉一个或多个 XBRL 概念,**合并**取真正最新的 n 期。
-    关键修复(2026-06-18):公司常在 2018 新收入准则后换概念
-    (Revenues → RevenueFromContractWithCustomerExcludingAssessedTax)。
-    旧版用 `or` 短路只取到旧概念的 2018 截止值 → latest_revenue 是 2017 旧数。
-    现合并所有传入概念,同 end 日去重(后出现的概念优先=更新口径)。"""
+
+    Concept merge: for the same end-date, later concepts in the list override earlier ones.
+    This means callers should list older/narrower concepts first and the preferred/current
+    concept last. Within a single concept, _one_concept already keeps the last (restated) value.
+    """
     if isinstance(concepts, str):
         concepts = [concepts]
-    seen = {}
+    seen: dict = {}
     for concept in concepts:
         for a in _one_concept(cik, concept):
-            # 同 end 日:已有则保留(先传入的概念优先级低,后传入覆盖)
+            # Later concept overrides earlier for the same end date.
             seen[a["end"]] = a
         time.sleep(0.15)
+    return sorted(seen.values(), key=lambda x: x["end"])[-n:]
+
+
+def _shares_series(cik: str, n: int = 8) -> list:
+    """Shares outstanding with a three-level fallback chain.
+
+    1. us-gaap:CommonStockSharesOutstanding  (precise period-end count)
+    2. dei:EntityCommonStockSharesOutstanding (cover-page count; coarser but current)
+    3. us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding (annual average; diluted)
+
+    Each level supplements gaps from the previous; the combined series is sorted by end date
+    and the last n entries are returned. Duplicate end-dates: latest taxonomy/concept wins.
+    """
+    seen: dict = {}
+    # Level 1: us-gaap common shares
+    for a in _one_concept(cik, "CommonStockSharesOutstanding", taxonomy="us-gaap"):
+        seen[a["end"]] = a
+    time.sleep(0.15)
+    # Level 2: dei cover-page count (instant, no start date in XBRL response)
+    for a in _one_concept(cik, "EntityCommonStockSharesOutstanding", taxonomy="dei"):
+        seen[a["end"]] = a
+    time.sleep(0.15)
+    # Level 3: diluted weighted-average (flow concept, annual fp=FY only via _one_concept filter)
+    for a in _one_concept(cik, "WeightedAverageNumberOfDilutedSharesOutstanding", taxonomy="us-gaap"):
+        if a["end"] not in seen:  # only fill gaps; don't overwrite more precise counts
+            seen[a["end"]] = a
+    time.sleep(0.15)
     return sorted(seen.values(), key=lambda x: x["end"])[-n:]
 
 
@@ -150,12 +212,12 @@ def pull(ticker: str, cik: str) -> dict:
     d = {"ticker": ticker, "cik": cik,
          "pulled_at": today()}
     print(f"  拉财务序列...", file=sys.stderr)
-    rev = concept_series(cik, ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"])
+    rev = concept_series(cik, REVENUE_CONCEPTS)
     time.sleep(0.2)
     ni = concept_series(cik, "NetIncomeLoss"); time.sleep(0.2)
     ocf = concept_series(cik, "NetCashProvidedByUsedInOperatingActivities"); time.sleep(0.2)
     cash = concept_series(cik, "CashAndCashEquivalentsAtCarryingValue"); time.sleep(0.2)
-    shares = concept_series(cik, "CommonStockSharesOutstanding"); time.sleep(0.2)
+    shares = _shares_series(cik); time.sleep(0.2)
     assets = concept_series(cik, "Assets"); time.sleep(0.2)
     equity = concept_series(cik, "StockholdersEquity"); time.sleep(0.2)
 
@@ -183,9 +245,38 @@ def pull(ticker: str, cik: str) -> dict:
 
 def _selftest():
     init_edgar()
-    rev = concept_series("1066194", ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"])
-    years = [v["end"][:4] for v in rev]
-    assert any(y >= "2024" for y in years), f"EGAN revenue must reach >=2024 after concept merge, got {years}"
+
+    # --- EGAN (CIK 1066194): fiscal-year == calendar-year concept-merge ---
+    rev_egan = concept_series("1066194", REVENUE_CONCEPTS)
+    years_egan = [v["end"][:4] for v in rev_egan]
+    assert any(y >= "2024" for y in years_egan), (
+        f"EGAN revenue must reach >=2024 after concept merge, got {years_egan}"
+    )
+    print(f"  EGAN: revenue years={years_egan}, latest={rev_egan[-1]['val']/1e6:.1f}M  OK")
+
+    # --- BUKS (CIK 15847): fiscal-year != calendar-year (Apr 30 year-end), ASC-606 concept ---
+    # Historically stuck at FY2018 $48M because 'Revenues' only covers through 2018;
+    # the correct concept post-2018 is RevenueFromContractWithCustomerIncludingAssessedTax.
+    rev_buks = concept_series("15847", REVENUE_CONCEPTS)
+    years_buks = [v["end"][:4] for v in rev_buks]
+    latest_buks = rev_buks[-1]["val"] if rev_buks else 0
+    assert any(y >= "2024" for y in years_buks), (
+        f"BUKS revenue must reach >=2024 (stuck-2018 bug), got {years_buks}"
+    )
+    assert latest_buks > 60_000_000, (
+        f"BUKS latest revenue must be >$60M (real ~$84M FY2025), got ${latest_buks/1e6:.1f}M"
+    )
+    print(f"  BUKS: revenue years={years_buks}, latest=${latest_buks/1e6:.1f}M  OK")
+
+    # --- WLFC (CIK 1018164): revenue must be in $400M-$800M range, not a tiny unit-leak value ---
+    rev_wlfc = concept_series("1018164", REVENUE_CONCEPTS)
+    latest_wlfc = rev_wlfc[-1]["val"] if rev_wlfc else 0
+    assert 400_000_000 <= latest_wlfc <= 800_000_000, (
+        f"WLFC latest revenue must be $400M-$800M (FY2024=$569M or FY2025=$730M), "
+        f"got ${latest_wlfc/1e6:.1f}M — possible unit leak if <10000"
+    )
+    print(f"  WLFC: latest revenue=${latest_wlfc/1e6:.1f}M  OK")
+
     print("deepdive_data selftest PASS")
 
 
