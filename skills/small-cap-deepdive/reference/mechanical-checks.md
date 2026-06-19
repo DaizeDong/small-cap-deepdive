@@ -170,3 +170,4 @@ This rule deserves its own section because it is the most frequently violated in
 - `judgment-rubric.md` — kill-flag counts from Guard 2/3 feed directly into the rubric's kill-flag hard-rules (≥2 → avoid, ≥3 → forced bottom of ranking).
 - `disclosure-discipline.md` — runway null disambiguation (Guard 5) is explicitly called out as a required honest data-gap disclosure.
 - `valuation.md` — Phase 2 valuation module; consumes the financial series produced by `deepdive_data.py` and applies the same data-only contract (no narrative, no buy/sell rating).
+- `event-driven.md` — kill-flag scan (`cheap_pass.py`) applies **equally** to event-mode candidates (spinoffs and insider-cluster buys).  A compelling catalyst does not excuse a going-concern filing.  Guards 1–5 are not relaxed for event candidates.

@@ -151,14 +151,22 @@ theme-fit gate needed — form-type enumeration replaces keyword over-recall):
    event candidates.  A compelling catalyst does not excuse a going-concern filing.
 
 3. **Deep-dive data pull.** Run `tools/deepdive_data.py --candidates <candidates_json>`.
-   Watch-band guard applies: `band="watch"` companies are surfaced for human review only;
-   the expensive deep-dive is reserved for `band="deep"` candidates.
+   **Band guard (four explicit bands — C3):**
+   - `band="deep"` (mktcap < market_cap_max): **process** — full deep-dive.
+   - `band="watch"` (market_cap_max..watch_band_max): **skip** — surfaced separately for human review only; not deep-dived.
+   - `band="large"` (> watch_band_max): **skip** — out of scope.
+   - `band="unknown"` (mktcap unavailable / pre-listing): **process** — likely a pre-listing spinoff, highest-catalyst cohort; worth the deep-dive.
 
-4. **Rank and rate.** Spawn one Agent per `band="deep"` survivor, applying
+4. **Rank and rate.** Spawn one Agent per `band="deep"` or `band="unknown"` survivor, applying
    `reference/judgment-rubric.md` in full (including preamble: base-rate anchor +
    disconfirmation search + valuation + MoS check).
    The catalyst field in each record is pre-populated — the rubric's catalyst modifier
    (categories a and b) maps directly to spinoff and insider-cluster events respectively.
+   **Catalyst re-verify (mandatory):** the pre-populated `catalyst` field is a
+   discovery-stage hint (T2), NOT rubric-compliant evidence.  The agent MUST independently
+   verify the forced-trading mechanism + T1 source (EDGAR 10-12B / Form 4) and re-populate
+   the rubric catalyst field per `judgment-rubric.md`'s five-requirement checklist before
+   the catalyst BUY modifier may apply.
    **No theme-fit gate:** skip Gate 1 (SIC) and Gate 2 (LLM theme-fit) — form-type
    precision replaces keyword precision; every record is a valid event by construction.
 
