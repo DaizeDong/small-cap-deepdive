@@ -180,3 +180,4 @@ Do not insert any deepdive computation between FTS and Gate 2 completion. Do not
 - `mechanical-checks.md` — Gate 2 depends on full 10-K text being read, not sampled; the "full-not-sampled" rule from invariant B also applies here.
 - `judgment-rubric.md` — theme-fit dimension (dim 5) maps to Gate 2 output; `misrecall` companies should never appear in the rubric scoring phase.
 - `data-sources.md` — EDGAR FTS rate limits and retry-backoff discipline apply to all FTS calls in `discover.py`.
+- `event-driven.md` — for event-driven discovery (Form 10-12B spinoffs, cluster insider buys) that bypasses the theme-fit gate by using form-type enumeration instead of keyword FTS.

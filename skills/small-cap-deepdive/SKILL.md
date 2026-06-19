@@ -123,6 +123,49 @@ scored candidate set without re-running discovery or deep-dive.
 
 ---
 
+### Entry 4 — `events <spinoffs|insider-clusters>` (event-driven discovery)
+
+**Use when:** you want to hunt for mis-priced small-caps via a structural catalyst rather than a
+theme keyword.  Two event axes are supported; both are structurally high-precision (no
+theme-fit gate needed — form-type enumeration replaces keyword over-recall):
+
+- `spinoffs` — enumerate recent **Form 10-12B / 10-12B/A** registrations (spinoff / carve-out).
+  Catalyst: passive index-fund holders of the parent are forced to sell the spun-off child if it
+  falls outside their index mandate.  This forced-selling window is the mis-pricing mechanism.
+
+- `insider-clusters` — enumerate recent **cluster open-market insider buys** from
+  openinsider.com.  Catalyst: multiple insiders buying at market price within a short window
+  is the strongest available management-conviction signal (Form 4, open-market cash only).
+
+**Rationale and honest caveats:** `reference/event-driven.md`.
+
+**Natural-language orchestration:**
+
+1. **Enumerate the event.** Run `tools/discover_events.py --spinoffs` or
+   `tools/discover_events.py --insider-clusters`.
+   Output: `reports/smallcap/candidates_event_<mode>_<date>.json` — same shape as
+   theme-mode `candidates_<slug>.json`.
+
+2. **Kill-flag scan (mandatory).** Run `tools/cheap_pass.py --universe <candidates_json>`.
+   Kill-flags (`going_concern`, `death_spiral`, `material_weakness`) apply identically to
+   event candidates.  A compelling catalyst does not excuse a going-concern filing.
+
+3. **Deep-dive data pull.** Run `tools/deepdive_data.py --candidates <candidates_json>`.
+   Watch-band guard applies: `band="watch"` companies are surfaced for human review only;
+   the expensive deep-dive is reserved for `band="deep"` candidates.
+
+4. **Rank and rate.** Spawn one Agent per `band="deep"` survivor, applying
+   `reference/judgment-rubric.md` in full (including preamble: base-rate anchor +
+   disconfirmation search + valuation + MoS check).
+   The catalyst field in each record is pre-populated — the rubric's catalyst modifier
+   (categories a and b) maps directly to spinoff and insider-cluster events respectively.
+   **No theme-fit gate:** skip Gate 1 (SIC) and Gate 2 (LLM theme-fit) — form-type
+   precision replaces keyword precision; every record is a valid event by construction.
+
+5. **Output.** Ranked shortlist per `tools/rank.py --slug event_<mode>`.
+
+---
+
 ## Two-Stage Precision Gate (Mandatory in Theme Flow)
 
 > Full spec: `reference/discovery-engine.md`. This section is a navigational summary only.
