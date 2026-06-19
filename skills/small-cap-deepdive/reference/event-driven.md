@@ -122,7 +122,7 @@ The page is already filtered to cluster events — every row represents a compan
 `discover_events.py --insider-clusters` parses this HTML table using the same
 `HTMLParser` pattern as `deepdive_data.insider_trades` and filters to:
 - Trade Type "P - Purchase" (open-market only; no grants, option exercises, or RSU vesting)
-- `Ins` column ≥ min_insiders (default 2)
+- `Ins` column ≥ min_insiders (default 3; rubric category (b) lower bound)
 
 ### Why Cluster Insider Buys Signal Mis-Pricing
 

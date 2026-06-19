@@ -55,12 +55,15 @@ _NAME_TICK_CIK = re.compile(r"^(.*?)\s*\(([A-Za-z0-9.\-]+)\)\s*\(CIK\s*(\d+)\)")
 _NAME_CIK = re.compile(r"^(.*?)\s*\(CIK\s+(\d+)\)")
 
 
-def _parse_display_name(dn: str) -> tuple[str, str, str]:
+def _parse_display_name(dn: str, source: dict | None = None) -> tuple[str, str, str]:
     """Return (name, ticker, cik) from an EDGAR display_names entry.
 
     EDGAR display_names have two forms:
       'Company Inc.  (TICK)  (CIK 0001234567)'   — ticker assigned
       'Company Inc.  (CIK 0001234567)'            — no ticker yet
+
+    MINOR: when both regexes miss (e.g. malformed string), fall back to
+    _source.ciks[0] (stripped of leading zeros) before dropping the record.
     """
     m = _NAME_TICK_CIK.match(dn)
     if m:
@@ -68,6 +71,12 @@ def _parse_display_name(dn: str) -> tuple[str, str, str]:
     m2 = _NAME_CIK.match(dn)
     if m2:
         return m2.group(1).strip(), "", m2.group(2).lstrip("0") or "0"
+    # Fallback: try _source.ciks if the caller passed the raw EFTS _source dict
+    if source:
+        ciks = source.get("ciks", [])
+        if ciks:
+            fallback_cik = str(ciks[0]).lstrip("0") or "0"
+            return dn.strip(), "", fallback_cik
     return dn.strip(), "", ""
 
 
@@ -87,16 +96,28 @@ def _yf_mktcap(ticker: str) -> float | None:
         return None
 
 
-def _band(mktcap: float | None) -> str | None:
+def _band(mktcap: float | None) -> str:
+    """Return band tag for a market cap value.
+
+    C3 — four explicit bands (no None ambiguity):
+      "deep"    = mktcap < market_cap_max     → full deep-dive
+      "watch"   = market_cap_max..watch_band_max → surface separately, no deep-dive
+      "large"   = > watch_band_max            → out of scope, no deep-dive
+      "unknown" = mktcap unavailable / pre-listing → process (likely spinoff)
+
+    Previously the function returned None for both mktcap=None AND >watch_band_max,
+    conflating "pre-listing / no data" with "too large".  This caused pre-listing
+    spinoffs (the highest-catalyst cohort) to be silently skipped downstream.
+    """
     max_mcap = CFG.get("market_cap_max", 2_000_000_000)
     watch_max = CFG.get("watch_band_max", 5_000_000_000)
     if mktcap is None or mktcap <= 0:
-        return None
+        return "unknown"
     if mktcap < max_mcap:
         return "deep"
     if mktcap < watch_max:
         return "watch"
-    return None
+    return "large"
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +165,13 @@ def discover_spinoffs(
     hits = d.get("hits", {}).get("hits", [])
     total = d.get("hits", {}).get("total", {}).get("value", 0)
     print(f"  [spinoffs] EDGAR returned {total} hits ({len(hits)} in page)", file=sys.stderr)
+    # MINOR: warn if EFTS response was truncated (more hits than returned)
+    if total > len(hits):
+        print(
+            f"  [warn] truncated: {len(hits)} of {total} hits returned; "
+            f"widen pagination or narrow date range to capture all filings.",
+            file=sys.stderr,
+        )
 
     # Deduplicate by CIK: prefer the record that has a ticker, else keep earliest.
     # Key: cik -> dict with best info so far
@@ -156,7 +184,8 @@ def discover_spinoffs(
         root_form = (s.get("root_forms") or [form])[0]
 
         for dn in s.get("display_names", []):
-            name, ticker, cik = _parse_display_name(dn)
+            # MINOR: pass source dict so fallback CIK extraction works on malformed names
+            name, ticker, cik = _parse_display_name(dn, source=s)
             if not cik:
                 continue
             existing = by_cik.get(cik)
@@ -190,6 +219,7 @@ def discover_spinoffs(
             "name": item["name"],
             "theme": "event:spinoff",
             "theme_slug": "event_spinoff",
+            "horizon": None,          # D2: event-mode — no keyword-horizon concept applies
             "catalyst": catalyst,
             "event_type": "spinoff",
             "file_date": item["file_date"],
@@ -258,7 +288,7 @@ def _parse_int(s: str) -> int:
 
 
 def discover_insider_clusters(
-    min_insiders: int = 2,
+    min_insiders: int = 3,
     enrich_mktcap: bool = True,
 ) -> list[dict]:
     """Enumerate cluster open-market insider buys from openinsider /latest-cluster-buys.
@@ -400,6 +430,7 @@ def discover_insider_clusters(
             "name": item["name"],
             "theme": "event:insider_cluster",
             "theme_slug": "event_insider_cluster",
+            "horizon": None,          # D2: event-mode — no keyword-horizon concept applies
             "catalyst": catalyst,
             "event_type": "insider_cluster",
             "n_insiders": item["n_insiders"],
@@ -482,9 +513,10 @@ def main() -> None:
     ap.add_argument(
         "--min-insiders",
         type=int,
-        default=2,
+        default=3,
         help="Insider-clusters: minimum number of distinct insiders buying "
-             "(default 2). Page already filters to cluster events.",
+             "(default 3; rubric category (b) lower bound). "
+             "Page already filters to cluster events.",
     )
     ap.add_argument(
         "--no-mktcap",
