@@ -43,12 +43,12 @@ Append-only. One JSON object per line. Fields:
 | `catalyst` | `string\|null` | T1-evidenced catalyst string or null |
 | `implied_prob` | `number` (0–1) | Model probability the thesis resolves favorably (stock beats benchmark over horizon) |
 | `horizon_months` | `integer` | Default 12. Forward tracking period in months. |
-| `entry_price` | `number\|null` | Stock closing price on/near verdict_date (yfinance) |
+| `entry_price` | `number\|null` | Stock closing price on/near verdict_date (yfinance). **Bias note: price-only total return; understates true returns for high-dividend names (MLPs, utilities). See Brier Score Methodology section.** |
 | `entry_date` | `string` (YYYY-MM-DD) | Date entry_price was fetched |
 | `benchmark` | `string` | Default `IWM` (Russell 2000). The correct small-cap universe benchmark. |
 | `benchmark_entry_price` | `number\|null` | Benchmark closing price on/near verdict_date |
 | `scored` | `boolean` | False until horizon has elapsed and prices are fetched |
-| `realized_excess_pct` | `number\|null` | Stock total return minus benchmark total return over horizon; null until scored |
+| `realized_excess_pct` | `number\|null` | Stock total return minus benchmark total return over horizon; null until scored. **Price-only; understates excess for high-dividend names.** |
 | `brier` | `number\|null` | `(implied_prob - favorable)^2`; null until scored |
 | `notes` | `string\|null` | Free-text annotation |
 
@@ -79,11 +79,41 @@ The defaults are a convention, not a constraint.
 
 ---
 
+## Seeded Verdicts Backfill
+
+When verdicts are seeded in bulk (e.g., from a prior run without live yfinance calls), they may
+have `entry_price: null` and `benchmark_entry_price: null`. These rows cannot be scored until
+prices are filled in.
+
+**The correct fix is `--backfill`, not `--record`:**
+
+```bash
+python tools/track_forward.py --backfill
+```
+
+This fetches historical closes at each verdict's `verdict_date` for both the stock and IWM,
+fills null prices in-place, and saves atomically. It is **idempotent** — rows already filled
+are skipped. Re-running `--backfill` is always safe.
+
+**Why not `--record`?** The `--record` command checks for duplicate `(ticker, verdict_date)` pairs
+and skips them with a warning. Using `--record` for tickers already in `verdicts.jsonl` would
+not update the existing row — it would just warn and skip. `--backfill` correctly fills the
+existing row without creating a duplicate.
+
+**Expected outcome after backfill:** verdict_date=2026-06-18 is historical data — yfinance can
+fetch these closes. Some thin/delisted tickers may legitimately fail; `--backfill` logs which
+ones failed and why. A partial backfill is still useful — even if 2 of 40 tickers fail, the
+other 38 can be scored when their horizons mature.
+
+---
+
 ## Brier Score Methodology
 
 **Favorable outcome definition:** stock total return **> benchmark total return** over the horizon.
 (Total return = price appreciation only in this implementation — dividends excluded for simplicity.
-Document this limitation in notes if material for high-dividend stocks.)
+For high-dividend names such as MLPs and utilities (e.g., UAN, ARTNA), this understates true
+returns and introduces a systematic bias against income-focused stocks. Document in `notes`
+field for affected verdicts.)
 
 **Per-verdict Brier score:**
 
@@ -107,7 +137,13 @@ uninformative, negative = worse than uninformative.
 ## Calibration Table
 
 Groups verdicts by `implied_prob` bucket and compares predicted probability to realized favorable
-frequency. A well-calibrated model has `realized_freq ≈ predicted_p_midpoint` in each bucket.
+frequency. A well-calibrated model has `realized_freq ≈ mean implied_prob of bucket members`.
+
+**Calibration error definition:** `realized_freq − mean(implied_prob of verdicts in that bucket)`.
+This uses the actual mean implied_prob of members — NOT the bucket geometric midpoint. For the
+`观察` bucket where all verdicts sit at exactly p=0.50, the error is `realized_freq − 0.50`.
+Using the bucket midpoint (0.475) would be incorrect and would introduce a spurious 2.5pp bias.
+The implementation in `cmd_scorecard` and the selftest both verify this behavior.
 
 Buckets used (encoded in `CALIB_BUCKETS`):
 

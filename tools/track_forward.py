@@ -26,15 +26,24 @@ Usage:
     # Show pending/matured/scored counts:
     python tools/track_forward.py --status
 
+    # Backfill null entry_price / benchmark_entry_price for seeded verdicts:
+    python tools/track_forward.py --backfill
+
     # Run synthetic Brier math selftest (no network):
     python tools/track_forward.py --selftest
 
 Output: metrics/verdicts.jsonl (append-only), metrics/scorecard.md
+
+Notes:
+    --backfill is the correct way to add prices to existing rows with null entry prices.
+    Do NOT use --record for tickers already in verdicts.jsonl (dup-detection will warn+skip).
+    --backfill is idempotent: rows with non-null entry_price are skipped.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import warnings
 from datetime import datetime, timezone, timedelta
@@ -80,11 +89,16 @@ def _months_between(date1: str, date2: str) -> float:
     return (d2 - d1).days / 30.44
 
 
-def _fetch_close(ticker: str, on_date: str) -> float | None:
+def _fetch_close(ticker: str, on_date: str, verbose: bool = False) -> float | None:
     """Fetch closing price for ticker on or near on_date via yfinance.
 
-    Tries the exact date first (most recent trading day within ±5 calendar days).
+    Tries the exact date first (most recent trading day on or before on_date,
+    within a ±7 calendar day search window).
     Returns None on any error (yfinance unavailable, ticker not found, etc.).
+
+    Bug-fix (Phase 6 review): close price is now derived from hist_filt (the date-filtered
+    slice), not from the unfiltered hist. The old code extracted close_col from hist before
+    filtering, so iloc[-1] could return a price one trading day AFTER the intended date.
     """
     try:
         import yfinance as yf
@@ -96,13 +110,29 @@ def _fetch_close(ticker: str, on_date: str) -> float | None:
             hist = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=True)
         if hist is None or hist.empty:
             return None
-        # Use 'Close' column; take the row closest to on_date
-        close_col = hist["Close"] if "Close" in hist.columns else hist.iloc[:, 0]
-        # Filter to on or before on_date
+
+        # Filter to on or before on_date FIRST, then resolve Close column from the filtered slice.
         hist_filt = hist[hist.index <= dt.strftime("%Y-%m-%d")]
         if hist_filt.empty:
-            hist_filt = hist  # fallback: take any row
-        price = float(close_col.iloc[-1].item() if hasattr(close_col.iloc[-1], "item") else close_col.iloc[-1])
+            # Fallback: take the earliest available row (pre-listing or data gap edge case)
+            hist_filt = hist
+
+        # Resolve "Close" column: prefer "Close", then "Adj Close", then first column.
+        # Only use the positional fallback if neither named column is present.
+        if "Close" in hist_filt.columns:
+            close_col = hist_filt["Close"]
+        elif "Adj Close" in hist_filt.columns:
+            close_col = hist_filt["Adj Close"]
+        else:
+            close_col = hist_filt.iloc[:, 0]
+
+        raw = close_col.iloc[-1]
+        price = float(raw.item() if hasattr(raw, "item") else raw)
+
+        if verbose:
+            resolved_date = hist_filt.index[-1]
+            print(f"    [_fetch_close] {ticker} on_date={on_date} → resolved={resolved_date.date()} price={price:.4f}")
+
         return price
     except Exception:
         return None
@@ -123,11 +153,18 @@ def _load_verdicts() -> list[dict]:
 
 
 def _save_verdicts(rows: list[dict]) -> None:
+    """Atomically rewrite verdicts.jsonl.
+
+    Writes to a temp file in the same directory, flushes, then os.replace() to the
+    final path. os.replace() is atomic on both POSIX and Windows (same-filesystem),
+    so a mid-write crash cannot leave a truncated ledger.
+    """
     METRICS_DIR.mkdir(parents=True, exist_ok=True)
-    VERDICTS_FILE.write_text(
-        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
-        encoding="utf-8",
-    )
+    tmp_path = VERDICTS_FILE.with_suffix(".jsonl.tmp")
+    content = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
+    tmp_path.write_text(content, encoding="utf-8")
+    # Flush is implicit after write_text closes the file; os.replace is atomic.
+    os.replace(tmp_path, VERDICTS_FILE)
 
 
 def _append_verdict(row: dict) -> None:
@@ -168,8 +205,8 @@ def _build_verdict_from_flags(args) -> dict:
         catalyst = args.catalyst
 
     entry_date = verdict_date
-    entry_price = _fetch_close(args.ticker, entry_date)
-    benchmark_entry_price = _fetch_close(DEFAULT_BENCHMARK, entry_date)
+    entry_price = _fetch_close(args.ticker, entry_date, verbose=True)
+    benchmark_entry_price = _fetch_close(DEFAULT_BENCHMARK, entry_date, verbose=True)
 
     return {
         "verdict_date": verdict_date,
@@ -240,8 +277,8 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
         theme = rec.get("theme") or rec.get("theme_slug") or None
 
         entry_date = verdict_date
-        entry_price = _fetch_close(ticker, entry_date) if ticker else None
-        benchmark_entry_price = _fetch_close(DEFAULT_BENCHMARK, entry_date)
+        entry_price = _fetch_close(ticker, entry_date, verbose=True) if ticker else None
+        benchmark_entry_price = _fetch_close(DEFAULT_BENCHMARK, entry_date, verbose=True)
 
         row = {
             "verdict_date": verdict_date,
@@ -269,7 +306,13 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
 
 
 def cmd_record(args) -> None:
-    """--record: ingest one or more verdicts."""
+    """--record: ingest one or more verdicts.
+
+    Dup-detection: if (ticker, verdict_date) already exists in verdicts.jsonl, the row is
+    SKIPPED with a warning. Do NOT use --record to add prices to existing seeded rows —
+    use --backfill for that purpose. --backfill is idempotent and correctly fills null
+    entry_price / benchmark_entry_price in-place without creating duplicate rows.
+    """
     existing = _load_verdicts()
     existing_keys = {(r["ticker"], r["verdict_date"]) for r in existing}
 
@@ -292,7 +335,8 @@ def cmd_record(args) -> None:
     for row in new_rows:
         key = (row["ticker"], row["verdict_date"])
         if key in existing_keys:
-            print(f"WARN: {row['ticker']} on {row['verdict_date']} already logged — skipping")
+            print(f"WARN: {row['ticker']} on {row['verdict_date']} already logged — skipping "
+                  f"(use --backfill to fill null entry prices for existing rows)")
             warned += 1
             continue
         existing_keys.add(key)
@@ -305,6 +349,78 @@ def cmd_record(args) -> None:
 
     print(f"\nRecorded {added} new verdict(s). {warned} duplicate(s) skipped.")
     print(f"Verdicts file: {VERDICTS_FILE}")
+
+
+# ---------------------------------------------------------------------------
+# --backfill
+# ---------------------------------------------------------------------------
+
+def cmd_backfill(args) -> None:
+    """--backfill: for every verdict with null entry_price or null benchmark_entry_price,
+    fetch the historical close at its verdict_date (stock + IWM) and fill them in.
+
+    Idempotent: rows where both entry_price and benchmark_entry_price are already non-null
+    are skipped. Saves atomically via _save_verdicts.
+
+    This is the correct way to populate prices for seeded verdicts. Do not use --record
+    for tickers already in verdicts.jsonl (dup-detection will warn and skip).
+    """
+    rows = _load_verdicts()
+    if not rows:
+        print("No verdicts found in verdicts.jsonl.")
+        return
+
+    filled = 0
+    skipped_already_filled = 0
+    failed = []
+
+    for row in rows:
+        ticker = row.get("ticker", "")
+        verdict_date = row.get("verdict_date", "")
+        has_stock = row.get("entry_price") is not None
+        has_bm = row.get("benchmark_entry_price") is not None
+
+        if has_stock and has_bm:
+            skipped_already_filled += 1
+            continue
+
+        # Fetch whichever is missing
+        changed = False
+        if not has_stock and ticker:
+            price = _fetch_close(ticker, verdict_date, verbose=True)
+            if price is not None:
+                row["entry_price"] = price
+                changed = True
+            else:
+                failed.append(f"{ticker} ({verdict_date}) — stock price unavailable")
+
+        if not has_bm:
+            benchmark = row.get("benchmark", DEFAULT_BENCHMARK)
+            bm_price = _fetch_close(benchmark, verdict_date, verbose=True)
+            if bm_price is not None:
+                row["benchmark_entry_price"] = bm_price
+                changed = True
+            else:
+                failed.append(f"{ticker} ({verdict_date}) — {benchmark} price unavailable")
+
+        if changed:
+            filled += 1
+            ep = row.get("entry_price")
+            bm = row.get("benchmark_entry_price")
+            ep_str = f"${ep:.2f}" if ep is not None else "N/A"
+            bm_str = f"${bm:.2f}" if bm is not None else "N/A"
+            print(f"  Backfilled {ticker} | entry={ep_str} | {DEFAULT_BENCHMARK}={bm_str}")
+
+    # Atomic save
+    _save_verdicts(rows)
+
+    total = len(rows)
+    print(f"\nBackfill complete: {filled} filled | {skipped_already_filled} already had prices "
+          f"| {len(failed)} failed | {total} total verdicts")
+    if failed:
+        print("\nFailed tickers (thin markets / delisted / data unavailable):")
+        for f in failed:
+            print(f"  - {f}")
 
 
 # ---------------------------------------------------------------------------
@@ -465,24 +581,29 @@ def cmd_scorecard(args) -> None:
             lines.append(f"| {rating} | {len(bucket)} | {avg_b:.4f} | {hit*100:.1f}% | {p:.2f} |")
 
         # Calibration table
+        # Calibration error = realized_freq − mean(implied_prob of members in bucket).
+        # Using the mean implied_prob (not the bucket geometric midpoint) is correct because
+        # all 观察 verdicts sit at exactly p=0.50 — error must be realized_freq − 0.50,
+        # not realized_freq − 0.475 (the midpoint of [0.40, 0.55)).
         lines += [
             "",
             "## Calibration Table",
             "",
             "*(Predicted probability bucket vs. realized favorable frequency)*",
+            "*(Calibration error = realized_freq − mean implied_prob of bucket members)*",
             "",
-            "| p bucket | N | Realized freq | Calibration error |",
-            "|---|---|---|---|",
+            "| p bucket | N | Mean implied_p | Realized freq | Calibration error |",
+            "|---|---|---|---|---|",
         ]
         for (lo, hi) in CALIB_BUCKETS:
             bucket = [r for r in scored if lo <= r.get("implied_prob", 0.5) < hi]
             if not bucket:
-                lines.append(f"| {lo:.2f}–{hi:.2f} | 0 | — | — |")
+                lines.append(f"| {lo:.2f}–{hi:.2f} | 0 | — | — | — |")
                 continue
-            mid = (lo + hi) / 2
+            mean_p = sum(r.get("implied_prob", 0.5) for r in bucket) / len(bucket)
             realized = sum(1 for r in bucket if r.get("realized_excess_pct", 0) > 0) / len(bucket)
-            err = realized - mid
-            lines.append(f"| {lo:.2f}–{hi:.2f} | {len(bucket)} | {realized:.2f} | {err:+.2f} |")
+            err = realized - mean_p
+            lines.append(f"| {lo:.2f}–{hi:.2f} | {len(bucket)} | {mean_p:.3f} | {realized:.2f} | {err:+.2f} |")
 
         # Individual scored table
         lines += [
@@ -636,7 +757,9 @@ def _selftest() -> None:
     assert abs(hit_rate - 0.5) < 1e-9, f"Hit rate should be 0.5, got {hit_rate}"
     print(f"  PASS: bucket aggregation — 买入 avg Brier={avg_buy_brier:.4f}, hit_rate={hit_rate:.1%}")
 
-    # --- Test 6: calibration table bucket membership ---
+    # --- Test 6: calibration table — bucket membership + mean-implied-prob error ---
+    # All 观察 verdicts sit at p=0.50. Calibration error must be realized_freq − 0.50,
+    # NOT realized_freq − 0.475 (bucket midpoint of [0.40, 0.55)).
     calib_test = [
         {"implied_prob": 0.35, "realized_excess_pct": -5.0},  # 避开 bucket [0.0, 0.40)
         {"implied_prob": 0.50, "realized_excess_pct": 8.0},   # 观察 bucket [0.40, 0.55)
@@ -650,6 +773,28 @@ def _selftest() -> None:
             count = sum(1 for (l2, h2) in CALIB_BUCKETS if l2 <= r["implied_prob"] < h2)
             assert count == 1, f"p={r['implied_prob']} falls in {count} buckets (should be 1)"
     print("  PASS: calibration table — each implied_prob in exactly one bucket")
+
+    # Verify calibration error uses mean_implied_prob of bucket members (not midpoint).
+    # 观察 bucket [0.40, 0.55): one verdict at p=0.50, favorable (excess=8.0 > 0).
+    # realized_freq = 1.0 / 1 = 1.0; mean_implied_p = 0.50; error = 1.0 - 0.50 = +0.50
+    # NOT: 1.0 - 0.475 = +0.525 (the old midpoint-based error)
+    obs_bucket = [r for r in calib_test if 0.40 <= r["implied_prob"] < 0.55]
+    assert len(obs_bucket) == 1, f"Expected 1 verdict in 观察 bucket, got {len(obs_bucket)}"
+    mean_p_obs = sum(r["implied_prob"] for r in obs_bucket) / len(obs_bucket)
+    realized_obs = sum(1 for r in obs_bucket if r["realized_excess_pct"] > 0) / len(obs_bucket)
+    calib_err_mean = realized_obs - mean_p_obs    # correct: uses mean implied_prob
+    calib_err_mid  = realized_obs - (0.40 + 0.55) / 2  # wrong: uses geometric midpoint
+    assert abs(calib_err_mean - (1.0 - 0.50)) < 1e-9, (
+        f"Calibration error with mean_p wrong: {calib_err_mean}"
+    )
+    assert abs(calib_err_mid - (1.0 - 0.475)) < 1e-9, (
+        f"Old midpoint error sanity check failed: {calib_err_mid}"
+    )
+    assert abs(calib_err_mean - calib_err_mid) > 1e-6, (
+        "mean_p and midpoint errors should differ for 观察 bucket — check fix is applied"
+    )
+    print(f"  PASS: calibration error uses mean implied_prob ({mean_p_obs:.3f}), "
+          f"not bucket midpoint (0.475): err={calib_err_mean:+.3f} vs midpoint-err={calib_err_mid:+.3f}")
 
     # --- Test 7: rating → prob convention ---
     for rating, expected_p in RATING_PROB.items():
@@ -700,6 +845,10 @@ def main() -> None:
                     help="Write metrics/scorecard.md")
     ap.add_argument("--status", action="store_true",
                     help="Show pending/matured/scored counts")
+    ap.add_argument("--backfill", action="store_true",
+                    help="Fetch historical entry_price/benchmark_entry_price for seeded verdicts "
+                         "with null prices. Idempotent — skips rows already filled. "
+                         "Use this (not --record) to add prices to existing rows.")
     ap.add_argument("--selftest", action="store_true",
                     help="Run synthetic Brier math selftest (no network)")
     args = ap.parse_args()
@@ -723,6 +872,10 @@ def main() -> None:
 
     if args.status:
         cmd_status(args)
+        return
+
+    if args.backfill:
+        cmd_backfill(args)
         return
 
     ap.print_help()
