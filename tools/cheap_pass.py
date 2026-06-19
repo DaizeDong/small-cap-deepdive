@@ -14,6 +14,7 @@ kill-flag(成簇出现≈几乎必暴雷):going concern / material weakness / �
 """
 from __future__ import annotations
 import argparse
+import re
 import sys
 import time
 import urllib.parse
@@ -24,8 +25,6 @@ import pandas as pd
 from edgar import Company
 
 # Import _common exports
-import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import init_edgar, REPORTS, slug, today, CFG, http_get
 
@@ -42,13 +41,35 @@ KILL_PHRASES = {
 }
 
 
+def _looks_like_toc(text: str) -> bool:
+    """Return True if the first ~200 chars look like a table-of-contents entry.
+
+    TOC lines have few alphabetic chars and are dominated by dots, digits, and
+    whitespace (e.g. "Business........ 3" or "Item 1. Business ........... 4").
+    Prose sections have many alphabetic chars and few dots/digits.
+    Threshold: fewer than 50 alpha chars OR dot/digit fraction > 40%.
+    """
+    sample = text[:200]
+    alpha = sum(1 for c in sample if c.isalpha())
+    dot_digit = sum(1 for c in sample if c in "0123456789.")
+    if alpha < 50:
+        return True
+    if len(sample) > 0 and dot_digit / len(sample) > 0.40:
+        return True
+    return False
+
+
 def _extract_business_blurb(txt: str, max_chars: int = 2000) -> str:
     """Extract Item 1 Business section blurb from 10-K full text.
 
     Searches for the 'Item 1' / 'Business' heading and returns the first
     max_chars characters after it. Returns empty string if not found.
+
+    TOC detection: after each match, inspect the first ~200 chars for prose
+    density (>= 50 alpha chars and dot/digit fraction <= 40%). If it looks like
+    a table-of-contents entry, advance to the next occurrence of the pattern.
+    This prevents returning "Business........... 3" noise.
     """
-    import re as _re
     low = txt.lower()
     # Try to find "item 1" followed shortly by "business" heading patterns.
     # Match variations: "item 1.", "item 1 -", "item 1\nbusiness", "item 1. business"
@@ -56,20 +77,20 @@ def _extract_business_blurb(txt: str, max_chars: int = 2000) -> str:
         r"item\s+1[\.\-\s]+business",   # "item 1. business" or "item 1 business"
         r"item\s+1\b",                   # bare "item 1" fallback
     ]
-    idx = -1
     for pat in patterns:
-        m = _re.search(pat, low)
-        if m:
-            idx = m.end()
-            break
-    if idx < 0:
-        return ""
-    # Skip past a short heading line (newlines / table-of-contents artifacts)
-    # and grab the actual content
-    blurb = txt[idx:idx + max_chars + 200].strip()
-    # Remove leading whitespace/newlines
-    blurb = blurb.lstrip("\r\n\t ")
-    return blurb[:max_chars]
+        start = 0
+        while True:
+            m = re.search(pat, low[start:])
+            if not m:
+                break
+            idx = start + m.end()
+            candidate = txt[idx:idx + max_chars + 200].strip().lstrip("\r\n\t ")
+            if not _looks_like_toc(candidate):
+                return candidate[:max_chars]
+            # TOC hit — advance past this match and try the next occurrence
+            start = idx
+        # If we exhausted all occurrences for this pattern, try the next pattern.
+    return ""
 
 
 def killflag_scan(ticker: str) -> dict:
@@ -106,7 +127,6 @@ def killflag_scan(ticker: str) -> dict:
                     or "identified material weakness" in low
                     or "were not effective" in low
                     or "was not effective" in low
-                    or "have identified" in low
                 )
                 out["kf_material_weakness"] = 1 if (phrase in low and _mw_affirmative) else 0
             else:
@@ -175,8 +195,6 @@ def health_check(row) -> dict:
     # --- kill-flag 全文扫描(edgartools 读 10-K 全文,精准判定)---
     flags = killflag_scan(row["ticker"])
     out.update(flags)
-    # business_blurb carried forward from killflag_scan (Fix 3: theme-fit gate reuse)
-    out["business_blurb"] = flags.get("business_blurb", "")
     # 计数:going_concern+substantial_doubt 同时命中才算"持续经营"1票(避免例行提及误报)
     has_going_concern = (flags.get("kf_going_concern") and flags.get("kf_substantial_doubt"))
     going = 1 if has_going_concern else 0
@@ -214,9 +232,11 @@ def _selftest():
     """Selftest:
     1. IQST — must flag going_concern + substantial_doubt (Guard 2/3: full-text double-hit).
     2. KOP  — amendments=False must NOT return a 10-K/A as the latest filing (Guard 1).
-    3. EGAN — must NOT flag has_material_weakness (FP fix: bare boilerplate phrase
-               in risk factors must not fire; requires affirmative ICFR finding).
-    4. business_blurb — must be non-empty for a valid filer (e.g. EGAN).
+    3. EGAN — must NOT flag kf_material_weakness (FP fix: bare boilerplate must not fire;
+               requires affirmative ICFR finding per Guard 3b).
+    4. business_blurb — EGAN blurb must be real prose: >100 chars, contains lowercase
+               words, not dominated by dots/digits (TOC noise prevention, A4 fix).
+    5. KOP  — must NOT flag kf_material_weakness = 0 (Guard 3b anchor test; clean filer).
     """
     init_edgar()
     # Test 1: IQST going-concern double-hit
@@ -228,9 +248,8 @@ def _selftest():
     print(f"  IQST: going_concern={r['kf_going_concern']} substantial_doubt={r['kf_substantial_doubt']}  OK")
 
     # Test 2: KOP amendment exclusion — latest filing must be 10-K, not 10-K/A
-    from edgar import Company
-    kop = Company("KOP")
-    fl = kop.get_filings(form="10-K", amendments=False)
+    kop_company = Company("KOP")
+    fl = kop_company.get_filings(form="10-K", amendments=False)
     f = fl.latest(1) if fl is not None and len(fl) else None
     assert f is not None, "KOP: no 10-K found (amendments=False)"
     form_type = str(getattr(f, "form", "") or getattr(f, "form_type", "")).strip()
@@ -239,10 +258,10 @@ def _selftest():
     )
     print(f"  KOP: form_type={form_type!r} (not 10-K/A)  OK")
 
-    # Test 3: EGAN no-material-weakness FP fix
+    # Test 3: EGAN no-material-weakness FP fix (Guard 3b)
     # EGAN (eGain Corp) is a healthy filer that should NOT have an actual ICFR material weakness.
     # The old bare-phrase rule would fire on boilerplate risk-factor language; the new
-    # affirmative-finding rule must return False for a company with no actual ICFR finding.
+    # affirmative-finding rule must return 0 for a company with no actual ICFR finding.
     egan_r = killflag_scan("EGAN")
     assert egan_r["kf_material_weakness"] == 0, (
         f"EGAN: kf_material_weakness must be 0 under affirmative-finding rule "
@@ -250,14 +269,35 @@ def _selftest():
     )
     print(f"  EGAN: kf_material_weakness={egan_r['kf_material_weakness']} (FP fix verified)  OK")
 
-    # Test 4: business_blurb extracted (Fix 3)
+    # Test 4: business_blurb is real prose, not TOC noise (A4 fix)
     blurb = egan_r.get("business_blurb", "")
     assert len(blurb) > 100, (
         f"EGAN: business_blurb should be >100 chars (Item 1 extraction), got len={len(blurb)}"
     )
-    print(f"  EGAN: business_blurb length={len(blurb)} chars  OK")
+    # Verify prose quality: must contain lowercase words (real prose) and not be dominated by dots.
+    sample200 = blurb[:200]
+    alpha_count = sum(1 for c in sample200 if c.isalpha())
+    dot_digit_count = sum(1 for c in sample200 if c in "0123456789.")
+    assert alpha_count >= 50, (
+        f"EGAN blurb first 200 chars has only {alpha_count} alpha chars — looks like TOC noise.\n"
+        f"First 200 chars: {sample200!r}"
+    )
+    assert len(sample200) == 0 or dot_digit_count / len(sample200) <= 0.40, (
+        f"EGAN blurb first 200 chars is {dot_digit_count/len(sample200):.0%} dots/digits — "
+        f"looks like TOC noise.\nFirst 200 chars: {sample200!r}"
+    )
+    print(f"  EGAN: business_blurb length={len(blurb)} chars, alpha={alpha_count} in first 200 (prose OK)")
+    print(f"  EGAN blurb first 200 chars: {sample200!r}")
 
-    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb)")
+    # Test 5: KOP material_weakness must be 0 (Guard 3b anchor; clean filer)
+    kop_r = killflag_scan("KOP")
+    assert kop_r["kf_material_weakness"] == 0, (
+        f"KOP: kf_material_weakness must be 0 (clean filer, Guard 3b anchor), "
+        f"got {kop_r['kf_material_weakness']}"
+    )
+    print(f"  KOP: kf_material_weakness={kop_r['kf_material_weakness']} (Guard 3b anchor OK)")
+
+    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb + KOP MW=0)")
 
 
 def main():

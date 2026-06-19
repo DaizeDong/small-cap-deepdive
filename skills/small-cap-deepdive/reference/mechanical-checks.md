@@ -36,13 +36,13 @@ If a Python tool cannot determine a value from authoritative data, it outputs `n
 
 **Rule:** Kill-flag detection reads the full text of the target company's most recent 10-K via `edgartools`, then checks for the flag keyword in context — not as a raw count.
 
-**Going-concern requires double-hit:** A going-concern flag is valid only when both of the following appear in proximity within the same document:
+**Going-concern requires double-hit:** A going-concern flag is valid only when both of the following appear anywhere in the same document:
 - `going concern`
 - `substantial doubt`
 
 A filing that says "we have no going concern issues" should produce `has_going_concern = False`. A filing with both `going concern` and `substantial doubt` in the auditor's note or MD&A produces `has_going_concern = True`.
 
-**Implementation:** `cheap_pass.py` uses `edgartools` to retrieve the 10-K text and applies the double-hit rule with a context window check — not a global string count.
+**Implementation:** `cheap_pass.py` uses `edgartools` to retrieve the 10-K text and applies the double-hit rule — not a global string count.
 
 **Anchor test:** IQST — going concern correctly flagged True; amendment exclusion (Guard 1) verified to not contaminate the result.
 
@@ -84,22 +84,21 @@ Risk-factor sections routinely describe *hypothetical* weaknesses as a standard 
    - `"identified material weakness"`
    - `"were not effective"`
    - `"was not effective"`
-   - `"have identified"` (paired with the material weakness context)
 
 **Implementation:** `cheap_pass.py` `killflag_scan()` and `deepdive_data.py` `tenk_sections()`
 both apply this two-condition check. Single-hit on the bare phrase alone returns `False`.
 
-**Why "have identified" is included:** Management assessment language of the form
-"we have identified a material weakness in our internal control over financial reporting"
-is the canonical affirmative disclosure. The phrase `"have identified"` is a sufficiently
-specific trigger when co-present with `"material weakness"` to distinguish from boilerplate.
+**Why "have identified" was removed:** The standalone phrase `"have identified"` fired on
+ordinary segment descriptions such as "we have identified three business segments" — causing
+false positives in healthy filers. The four specific phrases above are sufficiently precise
+without it.
 
 **Going-concern rule unchanged:** The going-concern double-hit (Guard 3) remains:
-`going concern` + `substantial doubt` both present. No change.
+`going concern` + `substantial doubt` both present anywhere in the same document. No change.
 
 **Anchor tests:**
 - EGAN: clean filer, must return `kf_material_weakness = 0` (FP prevention)
-- KOP: clean filer, must return `kf_material_weakness = 0` (FP prevention)
+- KOP: clean filer, must return `kf_material_weakness = 0` (FP prevention; Guard 3b anchor)
 
 ---
 
