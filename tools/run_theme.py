@@ -101,8 +101,13 @@ def stage_cheap_pass(universe_csv: Path, out_slug: str) -> Path:
     return cp
 
 
-def stage_sic_filter(cheappass_csv: Path, universe_csv: Path, out_slug: str) -> Path:
-    """Inline: join cheappass with universe for cik/sic, apply SIC filter, write candidates JSON."""
+def stage_sic_filter(cheappass_csv: Path, universe_csv: Path, out_slug: str, theme_kw: str = "") -> Path:
+    """Inline: join cheappass with universe for cik/sic, apply SIC filter, write candidates JSON.
+
+    theme_kw: human-readable theme keyword string (e.g. "railcar,railcar leasing").
+    Written into each candidate record as "theme" so that theme-fit-gate.js can
+    interpolate it into prompts without getting 'undefined'.
+    """
     hard_exclude: list[str] = CFG["sic_hard_exclude"]
 
     cdf = pd.read_csv(cheappass_csv)
@@ -137,6 +142,7 @@ def stage_sic_filter(cheappass_csv: Path, universe_csv: Path, out_slug: str) -> 
             "cik": str(int(cik_raw)) if pd.notna(cik_raw) else None,
             "name": r.get("name", ""),
             "theme_slug": out_slug,
+            "theme": theme_kw,           # D4: human-readable theme for theme-fit-gate.js prompt
             "sic": str(r.get("sic", "")).split(".")[0],
             "mktcap": float(r["mktcap"]) if pd.notna(r.get("mktcap")) else None,
             "health_score": float(r["health_score"]) if pd.notna(r.get("health_score")) else None,
@@ -193,7 +199,7 @@ def main() -> None:
     cheappass_csv = stage_cheap_pass(universe_csv, out_slug)
 
     # Stage 3 — inline SIC filter → candidates JSON
-    candidates_json = stage_sic_filter(cheappass_csv, universe_csv, out_slug)
+    candidates_json = stage_sic_filter(cheappass_csv, universe_csv, out_slug, theme_kw=args.theme)
 
     # Stage 4 — handoff message
     print(
