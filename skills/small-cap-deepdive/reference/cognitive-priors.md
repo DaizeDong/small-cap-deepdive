@@ -155,3 +155,4 @@ These are not limitations to be fixed in future versions. They are principled ex
 - `judgment-rubric.md` — the base-rate prior table feeds Section 0 of the output template; commitment #5 (scanner not picker) governs what "rating" means
 - `discovery-engine.md` — commitment #1 (neglect ≠ undervalued) governs what the precision gate is looking for
 - `mechanical-checks.md` — commitment #4 (agent edge = mechanical discipline) defines why the machine layer exists and must not be bypassed
+- `event-driven.md` — Phase 5 event discovery axis (spinoffs + cluster insider buys); implements the run-3 audit finding that remaining edge is event-driven, not theme-static
