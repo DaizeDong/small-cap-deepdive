@@ -62,8 +62,44 @@ both phrases must appear anywhere in the same document for the flag to fire.
 **Why this matters:** Of the original kill-flag signals, going-concern had the highest false-positive rate when measured by raw keyword count. After applying the double-hit rule, false positives dropped from approximately 60% to under 10% in test runs.
 
 **Other kill-flags use single-hit with context verification:**
-- `has_material_weakness` — requires `material weakness` in an auditor report or management assessment section (not in a risk-factor boilerplate)
+- `has_material_weakness` — see Guard 3b below for the refined affirmative-finding rule
 - `has_death_spiral` — requires `variable conversion` or `discount to VWAP` (or `discount to market`) in a debt instrument description
+
+---
+
+## Guard 3b — Material Weakness Affirmative-Finding Rule
+
+**Bug (Phase 1 audit finding):** 4 out of 4 companies flagged `has_material_weakness = True`
+in a production audit run were false positives. All four had boilerplate risk-factor language
+such as "our failure to maintain effective internal controls could result in a material weakness"
+— not actual ICFR findings. Agents overturned every one manually, wasting deep-dive time.
+
+**Root cause:** The prior rule fired on the bare phrase `material weakness` anywhere in the 10-K.
+Risk-factor sections routinely describe *hypothetical* weaknesses as a standard disclosure.
+
+**Rule (Phase 1 fix):** `has_material_weakness = True` requires BOTH:
+1. The phrase `material weakness` appears in the filing AND
+2. At least one **affirmative-finding phrase** also appears in the same document:
+   - `"identified a material weakness"`
+   - `"identified material weakness"`
+   - `"were not effective"`
+   - `"was not effective"`
+   - `"have identified"` (paired with the material weakness context)
+
+**Implementation:** `cheap_pass.py` `killflag_scan()` and `deepdive_data.py` `tenk_sections()`
+both apply this two-condition check. Single-hit on the bare phrase alone returns `False`.
+
+**Why "have identified" is included:** Management assessment language of the form
+"we have identified a material weakness in our internal control over financial reporting"
+is the canonical affirmative disclosure. The phrase `"have identified"` is a sufficiently
+specific trigger when co-present with `"material weakness"` to distinguish from boilerplate.
+
+**Going-concern rule unchanged:** The going-concern double-hit (Guard 3) remains:
+`going concern` + `substantial doubt` both present. No change.
+
+**Anchor tests:**
+- EGAN: clean filer, must return `kf_material_weakness = 0` (FP prevention)
+- KOP: clean filer, must return `kf_material_weakness = 0` (FP prevention)
 
 ---
 
@@ -123,6 +159,7 @@ This rule deserves its own section because it is the most frequently violated in
 | 1: Amendment exclusion | Fix #1 (production run) | `form_type == "10-K"` only | KOP |
 | 2: Kill-flag full context | Fix #2 (production run) | Read full text via edgartools, not FTS count | IQST |
 | 3: Going-concern double-hit | Fix #2 (production run) | Requires both `going concern` + `substantial doubt` in same filing | IQST |
+| 3b: MW affirmative-finding | Phase 1 audit (4/4 FP) | `material weakness` + affirmative phrase required; bare boilerplate = False | EGAN, KOP |
 | 4: concept_series merge | Fix #4 (production run) | Filter to annual, sort by `end` date desc, annotate dates | EGAN |
 | 5: runway nan | Fix #5 (production run) | Annotate `ocf_positive` vs `insufficient_data` | Multiple |
 

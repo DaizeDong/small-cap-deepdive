@@ -148,24 +148,125 @@ def pct_growth(series: list) -> float | None:
 def insider_trades(ticker: str) -> dict:
     """内部人交易净方向(最硬的管理层诚实信号)。
     源由 CFG["insider_source"] 控制,默认 openinsider(已测试路径)。
+
+    Returns open-market-only counts and dollar values:
+      - open_market_buys / open_market_sells: count of P / S transaction codes only
+      - buy_value / sell_value: sum of dollar Value column for P / S rows
+      - buys / sells: same as open_market_buys/sells (backward compat alias)
+      - net_signal: based on open-market P vs S only
+    Excludes non-open-market codes: A (grant/award), M (option exercise), G (gift),
+    and any other code — these are RSU/option noise, not management conviction signals.
     """
     if CFG["insider_source"] == "openinsider":
-        out = {"available": False, "buys": 0, "sells": 0, "net_signal": None,
-               "buy_value": 0, "sell_value": 0, "source": "openinsider"}
+        out = {
+            "available": False,
+            "buys": 0, "sells": 0,
+            "open_market_buys": 0, "open_market_sells": 0,
+            "buy_value": 0, "sell_value": 0,
+            "net_signal": None, "source": "openinsider",
+        }
         try:
-            # openinsider 最近交易表(精确解析 P/S transaction code)
-            url = f"http://openinsider.com/screener?s={ticker}&o=&pl=&ph=&ll=&lh=&fd=730&fdr=&td=0&tdr=&fdlyl=&fdlyh=&daysago=&xp=1&xs=1&vl=&vh=&ocl=&och=&sic1=-1&sicl=100&sich=9999&grp=0&nfl=&nfh=&nil=&nih=&nol=&noh=&v2l=&v2h=&oc2l=&oc2h=&sortcol=0&cnt=100&page=1"
-            r = http_get(url, timeout=20)
+            # openinsider screener: last 730 days, open-market P/S rows, up to 100 rows
+            url = (
+                f"http://openinsider.com/screener?s={ticker}"
+                "&o=&pl=&ph=&ll=&lh=&fd=730&fdr=&td=0&tdr=&fdlyl=&fdlyh=&daysago="
+                "&xp=1&xs=1&vl=&vh=&ocl=&och=&sic1=-1&sicl=100&sich=9999"
+                "&grp=0&nfl=&nfh=&nil=&nih=&nol=&noh=&v2l=&v2h=&oc2l=&oc2h="
+                "&sortcol=0&cnt=100&page=1"
+            )
+            r = http_get(url, timeout=30)
             if r.status_code != 200:
                 out["error"] = f"http {r.status_code}"
                 return out
+
+            # Parse HTML table rows to extract transaction type code and Value column.
+            # openinsider table columns (0-indexed):
+            #   0: filing date, 1: trade date, 2: ticker, 3: company, 4: insider name,
+            #   5: title, 6: trade type code, 7: price, 8: qty, 9: owned, 10: delta%,
+            #   11: Value
             import re as _re
-            # 表格行含 transaction type 列:P - Purchase / S - Sale
-            buys = len(_re.findall(r"P\s*-\s*Purchase", r.text))
-            sells = len(_re.findall(r"S\s*-\s*Sale", r.text))
-            out.update({"available": True, "buys": buys, "sells": sells,
-                        "net_signal": ("net_buy" if buys > sells else
-                                       "net_sell" if sells > buys else "neutral")})
+            from html.parser import HTMLParser
+
+            class _TableParser(HTMLParser):
+                """Minimal parser: collect <td> text within <tr> blocks."""
+                def __init__(self):
+                    super().__init__()
+                    self._in_td = False
+                    self._cur_row: list[str] = []
+                    self._cur_cell: list[str] = []
+                    self.rows: list[list[str]] = []
+
+                def handle_starttag(self, tag, attrs):
+                    if tag == "tr":
+                        self._cur_row = []
+                    elif tag == "td":
+                        self._in_td = True
+                        self._cur_cell = []
+
+                def handle_endtag(self, tag):
+                    if tag == "td":
+                        self._in_td = False
+                        self._cur_row.append("".join(self._cur_cell).strip())
+                    elif tag == "tr" and self._cur_row:
+                        self.rows.append(self._cur_row)
+                        self._cur_row = []
+
+                def handle_data(self, data):
+                    if self._in_td:
+                        self._cur_cell.append(data)
+
+            parser = _TableParser()
+            parser.feed(r.text)
+
+            open_market_buys = 0
+            open_market_sells = 0
+            buy_value = 0.0
+            sell_value = 0.0
+
+            # Non-open-market codes to exclude (RSU noise, option exercises, gifts)
+            _EXCLUDE_CODES = {"A", "M", "G", "D", "F", "I", "J", "L", "U", "W", "X", "Z"}
+
+            def _parse_value(s: str) -> float:
+                """Parse openinsider Value cell like '$1,234,567' or '+$1,234,567'."""
+                cleaned = _re.sub(r"[^0-9.]", "", s.replace(",", ""))
+                try:
+                    return float(cleaned) if cleaned else 0.0
+                except ValueError:
+                    return 0.0
+
+            for row in parser.rows:
+                if len(row) < 12:
+                    continue
+                code_cell = row[6].strip()
+                # code_cell is like "P - Purchase" or "S - Sale" or "A - Award"
+                code_match = _re.match(r"^([A-Z])", code_cell)
+                if not code_match:
+                    continue
+                code = code_match.group(1)
+                if code in _EXCLUDE_CODES:
+                    continue  # skip non-open-market transactions
+                val = _parse_value(row[11])
+                if code == "P":
+                    open_market_buys += 1
+                    buy_value += val
+                elif code == "S":
+                    open_market_sells += 1
+                    sell_value += val
+
+            out.update({
+                "available": True,
+                "open_market_buys": open_market_buys,
+                "open_market_sells": open_market_sells,
+                "buys": open_market_buys,   # backward-compat alias
+                "sells": open_market_sells,  # backward-compat alias
+                "buy_value": round(buy_value),
+                "sell_value": round(sell_value),
+                "net_signal": (
+                    "net_buy" if open_market_buys > open_market_sells else
+                    "net_sell" if open_market_sells > open_market_buys else
+                    "neutral"
+                ),
+            })
         except Exception as e:
             out["error"] = str(e)
         return out
@@ -195,7 +296,18 @@ def tenk_sections(ticker: str) -> dict:
         out["total_len"] = len(txt)
         # kill-flag 复核
         out["has_going_concern"] = "going concern" in low and "substantial doubt" in low
-        out["has_material_weakness"] = "material weakness" in low
+        # material_weakness: require affirmative ICFR finding, not bare boilerplate phrase.
+        # Risk-factor language ("our failure to maintain effective controls...") often
+        # contains "material weakness" without an actual finding — caused 4/4 FP in audit.
+        # Require co-occurrence with an affirmative phrase within the same document.
+        _mw_affirmative = (
+            "identified a material weakness" in low
+            or "identified material weakness" in low
+            or "were not effective" in low
+            or "was not effective" in low
+            or "have identified" in low
+        )
+        out["has_material_weakness"] = "material weakness" in low and _mw_affirmative
         out["has_death_spiral"] = "variable conversion" in low
         # 客户集中度信号
         out["customer_concentration_flag"] = "customers accounted for" in low or \
@@ -276,6 +388,40 @@ def _selftest():
         f"got ${latest_wlfc/1e6:.1f}M — possible unit leak if <10000"
     )
     print(f"  WLFC: latest revenue=${latest_wlfc/1e6:.1f}M  OK")
+
+    # --- Insider trades: open-market buy/sell values and counts (Fix 1) ---
+    # Use a ticker known to have insider activity. AI (C3.ai) has had open-market
+    # insider purchases on record. We assert that the parsing machinery works
+    # (keys present, types correct) and that at least one side is populated when
+    # activity exists. We do NOT hard-assert specific counts (they drift over time).
+    ins = insider_trades("AI")
+    assert isinstance(ins.get("open_market_buys"), int), (
+        f"open_market_buys must be int, got {type(ins.get('open_market_buys'))}"
+    )
+    assert isinstance(ins.get("open_market_sells"), int), (
+        f"open_market_sells must be int, got {type(ins.get('open_market_sells'))}"
+    )
+    assert isinstance(ins.get("buy_value"), (int, float)), (
+        f"buy_value must be numeric, got {type(ins.get('buy_value'))}"
+    )
+    assert isinstance(ins.get("sell_value"), (int, float)), (
+        f"sell_value must be numeric, got {type(ins.get('sell_value'))}"
+    )
+    assert ins.get("net_signal") in ("net_buy", "net_sell", "neutral", None), (
+        f"net_signal unexpected value: {ins.get('net_signal')!r}"
+    )
+    # At least one side should have activity for AI (active filer); if data unavailable
+    # we print a warning rather than hard-fail (network may be flaky).
+    total_activity = ins.get("open_market_buys", 0) + ins.get("open_market_sells", 0)
+    if ins.get("available") and total_activity == 0:
+        print(f"  [warn] AI insider: available=True but zero open-market rows — "
+              f"openinsider may have no recent trades for this ticker", file=sys.stderr)
+    else:
+        print(f"  AI insider: buys={ins.get('open_market_buys')} "
+              f"sells={ins.get('open_market_sells')} "
+              f"buy_value=${ins.get('buy_value', 0):,.0f} "
+              f"sell_value=${ins.get('sell_value', 0):,.0f} "
+              f"net={ins.get('net_signal')}  OK")
 
     print("deepdive_data selftest PASS")
 

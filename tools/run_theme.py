@@ -128,6 +128,10 @@ def stage_sic_filter(cheappass_csv: Path, universe_csv: Path, out_slug: str) -> 
     records = []
     for _, r in candidates.iterrows():
         cik_raw = r.get("cik")
+        # business_blurb: extracted by cheap_pass.py from Item 1 of the 10-K.
+        # Used by theme-fit-gate.js as PRIMARY basis for classification, eliminating
+        # redundant WebSearch for each candidate (Fix 3).
+        blurb_raw = r.get("business_blurb", "")
         records.append({
             "ticker": r["ticker"],
             "cik": str(int(cik_raw)) if pd.notna(cik_raw) else None,
@@ -137,6 +141,8 @@ def stage_sic_filter(cheappass_csv: Path, universe_csv: Path, out_slug: str) -> 
             "mktcap": float(r["mktcap"]) if pd.notna(r.get("mktcap")) else None,
             "health_score": float(r["health_score"]) if pd.notna(r.get("health_score")) else None,
             "killflag_count": int(r["killflag_count"]) if pd.notna(r.get("killflag_count")) else None,
+            "avg_dollar_vol": float(r["avg_dollar_vol"]) if pd.notna(r.get("avg_dollar_vol")) else None,
+            "business_blurb": str(blurb_raw) if pd.notna(blurb_raw) else "",
         })
 
     out = REPORTS / f"candidates_{out_slug}.json"
