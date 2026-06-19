@@ -13,7 +13,9 @@
 | 4 | 召回改进 | P4 20-F/40-F + SIC降级不drop + 双市值带 + per-theme关键词 | ✅ done | fc3d932 |
 | 5 | 事件驱动发现 | P5 spinoff(10-12B)+ cluster insider(Form4)发现轴 + events 入口 | ✅ done | 9f5a978 |
 | 6 | track-forward | metrics/verdicts.jsonl + track_forward.py(Brier 记分) | ✅ done | 8c2b9d8 |
-| 7 | 终集成+全审+版本 | 端到端测试 + 全 skill 对抗审查 + README/SKILL/CHANGELOG/版本 v0.2.0 | 🔄 in-progress | |
+| 7 | 终集成+全审+版本 | 端到端测试 + 全 skill 对抗审查 + README/SKILL/CHANGELOG/版本 v0.2.0 | ✅ done | 76d8297 |
+
+**🎉 全部 7 阶段完成,v0.2.0 已发布并 push(76d8297)。**
 
 ## 每阶段质量门(no corners)
 1. 实现 subagent(带 selftest/验证)
@@ -31,3 +33,9 @@
 
 ## 进度日志
 - 2026-06-18: 起始。P1(数据正确性+召回窗口)已完成并 push(99daf7a)。开始阶段 1。
+
+## 完成总结 (2026-06-19)
+- **P1** 机械层加固 (e2b74bd) · **P2** 估值引擎 (06416de) · **P3** BUY扳机+催化剂轴 (801e16b) · **P4** 召回改进 (fc3d932) · **P5** 事件驱动发现 (9f5a978) · **P6** track-forward校准 (8c2b9d8) · **P7** 终集成+发布 v0.2.0 (76d8297)。
+- 每阶段经 实现→审查subagent(抓真问题)→修复→控制器复验 闭环;6个审查均判 NEEDS-FIXES/APPROVE-WITH-MINOR 并修复后才进。
+- 端到端集成 PASS:funeral 主题 141→34→1 pure_play(SNFCA)→深查→MoS 128.7% 但 material_weakness kill-flag → 正确不买(保守性成立)。
+- 不变量全程保持;新增能力(估值/BUY/事件/校准)未退回讲故事;0-BUY 仍是合法输出。
