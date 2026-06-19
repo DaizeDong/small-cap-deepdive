@@ -431,13 +431,13 @@ def tenk_sections(ticker: str) -> dict:
             form_used = "10-K"
         # Fallback 1: 20-F (foreign-domiciled filers — Phase 4)
         if f is None:
-            fl20 = c.get_filings(form="20-F")
+            fl20 = c.get_filings(form="20-F", amendments=False)
             if fl20 is not None and len(fl20):
                 f = fl20.latest(1)
                 form_used = "20-F"
         # Fallback 2: 40-F (Canadian filers — Phase 4)
         if f is None:
-            fl40 = c.get_filings(form="40-F")
+            fl40 = c.get_filings(form="40-F", amendments=False)
             if fl40 is not None and len(fl40):
                 f = fl40.latest(1)
                 form_used = "40-F"
@@ -695,8 +695,15 @@ def main():
         for i, rec in enumerate(candidates):
             ticker = rec.get("ticker", "")
             cik = str(rec.get("cik", ""))
+            band = rec.get("band", "")
             if not ticker:
                 print(f"  [warn] skipping record {i}: missing ticker", file=sys.stderr)
+                continue
+            # Watch-band guard: $2-5B companies surface separately for human review;
+            # they must NOT get the expensive full deep-dive and must NOT pollute the
+            # small-cap deep ranking (rank.py reads report_*.md, so no report = no rank).
+            if band == "watch":
+                print(f"  skipping watch-band {ticker} (surfaced separately, no deep-dive)")
                 continue
             if not cik:
                 try:

@@ -4,6 +4,11 @@ rank.py — 聚合 deep dive 报告,产出主题级排序
 读 reports/smallcap/report_*.md,提取评级/置信度,结合 cheap pass 体检分 +
 deepdive JSON 的硬数据,产出排序表。AVOID/kill-flag>=2 一律沉底(不靠高分捞回)。
 
+NOTE — watch-band companies (band="watch", $2-5B market cap) are NOT ranked here.
+They are surfaced separately via the candidates JSON (band=watch) for human review.
+deepdive_data.py --candidates skips them (no report_*.md generated → no rank entry).
+This file naturally ranks only deep-band companies that completed a full deep-dive.
+
 用法:
     python tools/rank.py
     python tools/rank.py --slug railcar

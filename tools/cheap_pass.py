@@ -46,8 +46,12 @@ def _looks_like_toc(text: str) -> bool:
 
     TOC lines have few alphabetic chars and are dominated by dots, digits, and
     whitespace (e.g. "Business........ 3" or "Item 1. Business ........... 4").
+    Also detects page-number-padded TOC entries common in 20-F filings, where
+    each entry ends with large whitespace padding and a page number
+    (e.g. "ITEM 4A. UNRESOLVED STAFF COMMENTS                    57").
     Prose sections have many alphabetic chars and few dots/digits.
-    Threshold: fewer than 50 alpha chars OR dot/digit fraction > 40%.
+    Threshold: fewer than 50 alpha chars OR dot/digit fraction > 40%
+    OR page-number-padded TOC pattern (3+ spaces followed by digit(s) at line end).
     """
     sample = text[:200]
     alpha = sum(1 for c in sample if c.isalpha())
@@ -56,27 +60,50 @@ def _looks_like_toc(text: str) -> bool:
         return True
     if len(sample) > 0 and dot_digit / len(sample) > 0.40:
         return True
+    # Page-number-padded TOC: lines ending with multiple spaces + a page number.
+    # Pattern: 3 or more spaces followed by digits at end-of-line.
+    # In a 200-char sample, two or more such occurrences indicates a TOC.
+    toc_page_pattern = re.compile(r"\s{3,}\d+\s*(?:\n|$)")
+    if len(toc_page_pattern.findall(sample)) >= 2:
+        return True
     return False
 
 
-def _extract_business_blurb(txt: str, max_chars: int = 2000) -> str:
-    """Extract Item 1 Business section blurb from 10-K full text.
+def _extract_business_blurb(txt: str, max_chars: int = 2000,
+                            filing_form: str | None = None) -> str:
+    """Extract business description section blurb from annual-report full text.
 
-    Searches for the 'Item 1' / 'Business' heading and returns the first
-    max_chars characters after it. Returns empty string if not found.
+    Form-aware extraction:
+      - 10-K (default): searches for "Item 1. Business" (correct for domestic filers).
+      - 20-F / 40-F: searches for "Item 4. Information on the Company" (foreign filers).
+        In a 20-F, Item 1 is the directors roster — garbage for theme-fit; the real
+        business description lives under Item 4.
 
     TOC detection: after each match, inspect the first ~200 chars for prose
     density (>= 50 alpha chars and dot/digit fraction <= 40%). If it looks like
     a table-of-contents entry, advance to the next occurrence of the pattern.
     This prevents returning "Business........... 3" noise.
+
+    Returns empty string if no meaningful prose is found — the theme-fit gate
+    already falls back to WebSearch on empty blurb (correct degradation).
     """
     low = txt.lower()
-    # Try to find "item 1" followed shortly by "business" heading patterns.
-    # Match variations: "item 1.", "item 1 -", "item 1\nbusiness", "item 1. business"
-    patterns = [
-        r"item\s+1[\.\-\s]+business",   # "item 1. business" or "item 1 business"
-        r"item\s+1\b",                   # bare "item 1" fallback
-    ]
+    is_foreign = (filing_form or "").upper() in ("20-F", "40-F")
+
+    if is_foreign:
+        # 20-F / 40-F: business description is "Item 4. Information on the Company"
+        # Also try generic "business overview" as a fallback for variations.
+        patterns = [
+            r"item\s+4[\.\-\s]+(information on the company|business overview|the business)",
+            r"item\s+4\b",  # bare "item 4" fallback
+        ]
+    else:
+        # 10-K: standard "Item 1. Business" heading
+        patterns = [
+            r"item\s+1[\.\-\s]+business",   # "item 1. business" or "item 1 business"
+            r"item\s+1\b",                   # bare "item 1" fallback
+        ]
+
     for pat in patterns:
         start = 0
         while True:
@@ -126,13 +153,13 @@ def killflag_scan(ticker: str) -> dict:
             form_used = "10-K"
         # Fallback 1: 20-F (foreign-domiciled filers — Phase 4)
         if f is None:
-            fl20 = c.get_filings(form="20-F")
+            fl20 = c.get_filings(form="20-F", amendments=False)
             if fl20 is not None and len(fl20):
                 f = fl20.latest(1)
                 form_used = "20-F"
         # Fallback 2: 40-F (Canadian filers — Phase 4)
         if f is None:
-            fl40 = c.get_filings(form="40-F")
+            fl40 = c.get_filings(form="40-F", amendments=False)
             if fl40 is not None and len(fl40):
                 f = fl40.latest(1)
                 form_used = "40-F"
@@ -156,8 +183,9 @@ def killflag_scan(ticker: str) -> dict:
             else:
                 out[f"kf_{name}"] = 1 if phrase in low else 0
         out["kf_scanned"] = True
-        # Extract business blurb for theme-fit gate (Fix 3)
-        out["business_blurb"] = _extract_business_blurb(txt)
+        # Extract business blurb for theme-fit gate — form-aware (C fix):
+        # 20-F/40-F: Item 4 "Information on the Company"; 10-K: Item 1 "Business"
+        out["business_blurb"] = _extract_business_blurb(txt, filing_form=form_used)
     except Exception as e:
         print(f"  [warn] killflag {ticker}: {e}", file=sys.stderr)
     return out
@@ -323,19 +351,43 @@ def _selftest():
 
     # Test 6: 20-F fallback — STNG (Scorpio Tankers) is a Marshall Islands domicile
     # that files 20-F (not 10-K). killflag_scan must find the 20-F without crashing,
-    # set kf_scanned=True, and set filing_form="20-F".
+    # set kf_scanned=True, and filing_form must be exactly "20-F" (not 10-K or 40-F).
+    # The business_blurb must be either real Item-4 prose OR empty (not the directors
+    # roster from Item 1, which is garbage for theme-fit).
     stng_r = killflag_scan("STNG")
     assert stng_r["kf_scanned"] is True, (
         f"STNG: kf_scanned must be True (20-F fallback should find a filing), "
         f"got kf_scanned={stng_r['kf_scanned']} filing_form={stng_r.get('filing_form')!r}"
     )
-    assert stng_r.get("filing_form") in ("20-F", "40-F", "10-K"), (
-        f"STNG: filing_form must be a valid form type, got {stng_r.get('filing_form')!r}"
+    assert stng_r.get("filing_form") == "20-F", (
+        f"STNG: filing_form must be exactly '20-F' (STNG is definitively a 20-F filer), "
+        f"got {stng_r.get('filing_form')!r}"
     )
+    stng_blurb = stng_r.get("business_blurb", "")
+    # Blurb must be empty OR real prose (not directors roster from Item 1).
+    # Directors roster contains names like "Mr." / "Ms." / "President" with few alpha chars
+    # per sentence relative to a real business description.
+    # We check: if non-empty, must have >= 50 alpha chars in first 200 and < 40% dots/digits.
+    if stng_blurb:
+        stng_sample = stng_blurb[:200]
+        stng_alpha = sum(1 for c in stng_sample if c.isalpha())
+        stng_dotdigit = sum(1 for c in stng_sample if c in "0123456789.")
+        assert stng_alpha >= 50, (
+            f"STNG blurb non-empty but looks like directors roster / TOC (only {stng_alpha} "
+            f"alpha chars in first 200). First 200: {stng_sample!r}"
+        )
+        assert len(stng_sample) == 0 or stng_dotdigit / len(stng_sample) <= 0.40, (
+            f"STNG blurb first 200 chars is {stng_dotdigit/len(stng_sample):.0%} dots/digits "
+            f"— looks like TOC. First 200: {stng_sample!r}"
+        )
     print(f"  STNG: kf_scanned={stng_r['kf_scanned']} filing_form={stng_r.get('filing_form')!r} "
-          f"(20-F fallback OK)")
+          f"blurb_len={len(stng_blurb)} (20-F form-aware blurb OK)")
+    if stng_blurb:
+        print(f"  STNG blurb first 200 chars: {stng_blurb[:200]!r}")
+    else:
+        print("  STNG blurb: empty (acceptable — theme-fit gate will fall back to WebSearch)")
 
-    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb + KOP MW=0 + STNG 20-F fallback)")
+    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb + KOP MW=0 + STNG 20-F form-aware blurb)")
 
 
 def main():

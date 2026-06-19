@@ -4,12 +4,23 @@ filter_by_sic.py — SIC-code coarse-exclusion library (Gate 1 of the two-stage 
 Library functions:
   sic_classify(sic, hard_exclude) — returns "keep" | "review" | "drop".
     "keep"   — SIC is not in the hard-exclude list; include in candidates normally.
-    "review" — SIC is in the hard-exclude list BUT the company was a theme-keyword hit;
-               let the LLM gate decide (e.g. TITN SIC 5990, SNFCA SIC 6199).
-    "drop"   — reserved for future explicit-drop logic; currently unused (same as old False).
-  sic_ok(sic, hard_exclude) — legacy bool wrapper: True iff classify returns "keep".
-    Kept for backward compatibility; callers that only need a binary pass/fail can
-    still use this. run_theme.py uses sic_classify directly for tri-state tagging.
+    "review" — SIC IS in the hard-exclude list; the company will be forwarded for LLM
+               review (e.g. TITN SIC 5990, SNFCA SIC 6199).
+               IMPORTANT: "review" is safe to forward ONLY because the caller (run_theme)
+               ensures every company reaching sic_classify has already passed FTS keyword
+               filtering. sic_classify itself does NOT check theme-keyword membership.
+               If called on a pre-FTS universe, "review" would be an over-recall hole.
+    "drop"   — reserved for future explicit-drop logic; currently unused (classify never
+               returns "drop").
+  sic_ok(sic, hard_exclude) — legacy bool wrapper: returns True for "keep" OR "review"
+    (i.e., True for any result that is not "drop"). Kept for backward compatibility.
+    NOTE: sic_ok now returns True for "review" as well as "keep" — the old docstring
+    saying "True iff classify returns 'keep'" was incorrect after the Phase-4 tri-state
+    change. run_theme.py uses sic_classify directly for tri-state tagging.
+
+CALLER CONTRACT: run_theme.py calls sic_classify on a post-FTS universe (every company
+has already matched theme keywords). Any other caller MUST apply the same FTS pre-filter
+before treating "review" as safe to forward — otherwise the over-recall hole reopens.
 
 run_theme.py imports both; this file is NOT run as a standalone pipeline step.
 
@@ -34,10 +45,13 @@ def sic_classify(sic: str, hard_exclude: list[str]) -> str:
 
     Returns:
       "keep"   — SIC is NOT in the hard-exclude list; candidate passes Gate 1 normally.
-      "review" — SIC IS in the hard-exclude list but the company matched theme keywords;
-                 carry it forward with sic_tier="review" so the LLM gate can decide.
-                 Examples: TITN (SIC 5990 retail — farm equipment dealer),
-                            SNFCA (SIC 6199 finance — real deathcare segment).
+      "review" — SIC IS in the hard-exclude list; forward with sic_tier="review" for
+                 LLM gate decision. Examples: TITN (SIC 5990 retail — farm equipment
+                 dealer), SNFCA (SIC 6199 finance — real deathcare segment).
+                 IMPORTANT: this function does NOT itself check theme-keyword membership.
+                 Safety comes from the pipeline: run_theme calls sic_classify on a
+                 post-FTS universe, so every company here is already a keyword hit.
+                 A caller that skips FTS pre-filtering would get over-recall on "review".
       "drop"   — explicit future use; currently unused (classify never returns "drop").
     SIC missing → "keep": defer to LLM, do not auto-exclude.
     """
@@ -52,9 +66,12 @@ def sic_classify(sic: str, hard_exclude: list[str]) -> str:
 
 
 def sic_ok(sic: str, hard_exclude: list[str]) -> bool:
-    """Legacy bool wrapper: True iff sic_classify returns 'keep'.
-    'review' now returns True so SIC-excluded theme-hits still pass Gate 1.
-    Use sic_classify directly when you need the tri-state tier."""
+    """Legacy bool wrapper: True for "keep" OR "review" (anything that is not "drop").
+    Note: the old docstring said "True iff classify returns 'keep'" — that was incorrect
+    after the Phase-4 tri-state change; sic_ok now also returns True for "review".
+    Use sic_classify directly when you need the tri-state tier.
+    # DEPRECATED: kept for backward-compat; prefer sic_classify
+    """
     tier = sic_classify(sic, hard_exclude)
     return tier != "drop"
 
