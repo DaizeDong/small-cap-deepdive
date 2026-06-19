@@ -19,6 +19,7 @@ deepdive_data.py — Stage 1 深度尽调的数据拉取层(机械部分)
 from __future__ import annotations
 import argparse
 import json
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -32,6 +33,9 @@ from _common import init_edgar, UA, REPORTS, today, CFG, http_get
 
 FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json"
 DEI_FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/dei/{concept}.json"
+
+# Non-open-market transaction codes to exclude (RSU grants, option exercises, gifts, etc.)
+_EXCLUDE_CODES = {"A", "M", "G", "D", "F", "I", "J", "L", "U", "W", "X", "Z"}
 
 # Revenue concepts in priority order (earlier = lower priority, later = higher priority / overrides).
 # IncludingAssessedTax added: many companies (e.g. BUKS fiscal-year != CY) switched to this
@@ -180,18 +184,19 @@ def insider_trades(ticker: str) -> dict:
                 return out
 
             # Parse HTML table rows to extract transaction type code and Value column.
-            # openinsider table columns (0-indexed):
+            # openinsider table columns (0-indexed, typical layout):
             #   0: filing date, 1: trade date, 2: ticker, 3: company, 4: insider name,
             #   5: title, 6: trade type code, 7: price, 8: qty, 9: owned, 10: delta%,
             #   11: Value
-            import re as _re
+            # A leading checkbox <td> can shift every column; we detect actual column
+            # positions from the header row instead of using hardcoded indices.
             from html.parser import HTMLParser
 
             class _TableParser(HTMLParser):
-                """Minimal parser: collect <td> text within <tr> blocks."""
+                """Minimal parser: collect <td> and <th> text within <tr> blocks."""
                 def __init__(self):
                     super().__init__()
-                    self._in_td = False
+                    self._in_cell = False
                     self._cur_row: list[str] = []
                     self._cur_cell: list[str] = []
                     self.rows: list[list[str]] = []
@@ -199,53 +204,85 @@ def insider_trades(ticker: str) -> dict:
                 def handle_starttag(self, tag, attrs):
                     if tag == "tr":
                         self._cur_row = []
-                    elif tag == "td":
-                        self._in_td = True
+                    elif tag in ("td", "th"):
+                        self._in_cell = True
                         self._cur_cell = []
 
                 def handle_endtag(self, tag):
-                    if tag == "td":
-                        self._in_td = False
+                    if tag in ("td", "th"):
+                        self._in_cell = False
                         self._cur_row.append("".join(self._cur_cell).strip())
                     elif tag == "tr" and self._cur_row:
                         self.rows.append(self._cur_row)
                         self._cur_row = []
 
                 def handle_data(self, data):
-                    if self._in_td:
+                    if self._in_cell:
                         self._cur_cell.append(data)
 
             parser = _TableParser()
             parser.feed(r.text)
+
+            def _parse_value(s: str) -> float:
+                """Parse openinsider Value cell like '$1,234,567' or '+$1,234,567'.
+                Strips all non-numeric characters (sign, currency, commas) via regex.
+                Parenthesized negatives like '($1,234)' are not expected in the Value
+                column (which stores absolute dollar amounts) but are handled safely —
+                the regex strips parens along with other non-numeric chars, returning
+                the absolute value."""
+                cleaned = re.sub(r"[^0-9.]", "", s)
+                try:
+                    return float(cleaned) if cleaned else 0.0
+                except ValueError:
+                    return 0.0
+
+            # Detect header row to find column indices for trade-type and Value.
+            # Hardcoded fallback (col 6 / col 11) used if no header found.
+            _FALLBACK_CODE_COL = 6
+            _FALLBACK_VALUE_COL = 11
+            code_col: int | None = None
+            value_col: int | None = None
+            for row in parser.rows:
+                row_low = [c.lower() for c in row]
+                # Look for the Trade Type column
+                for i, cell in enumerate(row_low):
+                    if any(kw in cell for kw in ("trade type", "trans", "type")):
+                        code_col = i
+                        break
+                # Look for the Value column
+                for i, cell in enumerate(row_low):
+                    if cell == "value" or cell.strip() == "value":
+                        value_col = i
+                        break
+                if code_col is not None and value_col is not None:
+                    break  # header found
+            if code_col is None or value_col is None:
+                import logging
+                logging.warning(
+                    "openinsider: header row not found; falling back to hardcoded column "
+                    "indices (code=%d, value=%d). Table layout may have changed.",
+                    _FALLBACK_CODE_COL, _FALLBACK_VALUE_COL,
+                )
+                code_col = _FALLBACK_CODE_COL
+                value_col = _FALLBACK_VALUE_COL
 
             open_market_buys = 0
             open_market_sells = 0
             buy_value = 0.0
             sell_value = 0.0
 
-            # Non-open-market codes to exclude (RSU noise, option exercises, gifts)
-            _EXCLUDE_CODES = {"A", "M", "G", "D", "F", "I", "J", "L", "U", "W", "X", "Z"}
-
-            def _parse_value(s: str) -> float:
-                """Parse openinsider Value cell like '$1,234,567' or '+$1,234,567'."""
-                cleaned = _re.sub(r"[^0-9.]", "", s.replace(",", ""))
-                try:
-                    return float(cleaned) if cleaned else 0.0
-                except ValueError:
-                    return 0.0
-
             for row in parser.rows:
-                if len(row) < 12:
+                if len(row) <= max(code_col, value_col):
                     continue
-                code_cell = row[6].strip()
+                code_cell = row[code_col].strip()
                 # code_cell is like "P - Purchase" or "S - Sale" or "A - Award"
-                code_match = _re.match(r"^([A-Z])", code_cell)
+                code_match = re.match(r"^([A-Z])", code_cell)
                 if not code_match:
                     continue
                 code = code_match.group(1)
                 if code in _EXCLUDE_CODES:
                     continue  # skip non-open-market transactions
-                val = _parse_value(row[11])
+                val = _parse_value(row[value_col])
                 if code == "P":
                     open_market_buys += 1
                     buy_value += val
@@ -305,7 +342,6 @@ def tenk_sections(ticker: str) -> dict:
             or "identified material weakness" in low
             or "were not effective" in low
             or "was not effective" in low
-            or "have identified" in low
         )
         out["has_material_weakness"] = "material weakness" in low and _mw_affirmative
         out["has_death_spiral"] = "variable conversion" in low
@@ -389,11 +425,11 @@ def _selftest():
     )
     print(f"  WLFC: latest revenue=${latest_wlfc/1e6:.1f}M  OK")
 
-    # --- Insider trades: open-market buy/sell values and counts (Fix 1) ---
-    # Use a ticker known to have insider activity. AI (C3.ai) has had open-market
-    # insider purchases on record. We assert that the parsing machinery works
-    # (keys present, types correct) and that at least one side is populated when
-    # activity exists. We do NOT hard-assert specific counts (they drift over time).
+    # --- Insider trades: open-market buy/sell values and counts (A1) ---
+    # Use AI (C3.ai) — a ticker known to have open-market insider activity over the
+    # last 730 days. Assert type correctness AND that at least one dollar-value side
+    # is NONZERO (catches the silently-wrong-column failure where all values read as 0
+    # even though available=True).
     ins = insider_trades("AI")
     assert isinstance(ins.get("open_market_buys"), int), (
         f"open_market_buys must be int, got {type(ins.get('open_market_buys'))}"
@@ -410,18 +446,19 @@ def _selftest():
     assert ins.get("net_signal") in ("net_buy", "net_sell", "neutral", None), (
         f"net_signal unexpected value: {ins.get('net_signal')!r}"
     )
-    # At least one side should have activity for AI (active filer); if data unavailable
-    # we print a warning rather than hard-fail (network may be flaky).
-    total_activity = ins.get("open_market_buys", 0) + ins.get("open_market_sells", 0)
-    if ins.get("available") and total_activity == 0:
-        print(f"  [warn] AI insider: available=True but zero open-market rows — "
-              f"openinsider may have no recent trades for this ticker", file=sys.stderr)
-    else:
-        print(f"  AI insider: buys={ins.get('open_market_buys')} "
-              f"sells={ins.get('open_market_sells')} "
-              f"buy_value=${ins.get('buy_value', 0):,.0f} "
-              f"sell_value=${ins.get('sell_value', 0):,.0f} "
-              f"net={ins.get('net_signal')}  OK")
+    # Hard-assert at least one side is nonzero — catches column-misread silently returning 0.
+    # C3.ai has documented insider purchases; if both sides are 0 the column parsing is broken.
+    assert ins.get("available") and (ins.get("buy_value", 0) > 0 or ins.get("sell_value", 0) > 0), (
+        f"AI insider: buy_value and sell_value are BOTH zero with available=True — "
+        f"column parsing is broken (wrong column indices). "
+        f"buys={ins.get('open_market_buys')} sells={ins.get('open_market_sells')} "
+        f"buy_value={ins.get('buy_value')} sell_value={ins.get('sell_value')}"
+    )
+    print(f"  AI insider: buys={ins.get('open_market_buys')} "
+          f"sells={ins.get('open_market_sells')} "
+          f"buy_value=${ins.get('buy_value', 0):,.0f} "
+          f"sell_value=${ins.get('sell_value', 0):,.0f} "
+          f"net={ins.get('net_signal')}  OK")
 
     print("deepdive_data selftest PASS")
 
