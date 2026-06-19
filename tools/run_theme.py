@@ -28,7 +28,7 @@ from _common import CFG, REPORTS, slug as _slug, today
 
 import pandas as pd
 
-from filter_by_sic import sic_ok
+from filter_by_sic import sic_classify
 
 
 # ---------------------------------------------------------------------------
@@ -54,17 +54,25 @@ def _find_csv(pattern: str) -> Path | None:
 # Pipeline stages
 # ---------------------------------------------------------------------------
 
-def stage_discover(theme_kw: str, out_slug: str, max_mcap: float) -> Path:
-    """Run discover.py; return the universe CSV path."""
+def stage_discover(theme_kw: str, out_slug: str, max_mcap: float,
+                   watch_band_max: float | None = None) -> Path:
+    """Run discover.py; return the universe CSV path.
+
+    Phase 4: passes --forms including 20-F/40-F (discover.py default) and
+    --watch-band-max for dual-band tagging.
+    """
     py = CFG["python_cmd"]
     tools_dir = Path(__file__).resolve().parent
     cmd = [
         py, str(tools_dir / "discover.py"),
         "--theme", theme_kw,
-        "--forms", "10-K,10-Q",
+        # forms: discover.py default now includes 20-F,40-F; omit explicit --forms
+        # here so the discover.py default (10-K,10-Q,20-F,40-F) is used.
         "--max-mcap", str(max_mcap),
         "--out-slug", out_slug,
     ]
+    if watch_band_max is not None:
+        cmd += ["--watch-band-max", str(watch_band_max)]
     _run(cmd, "DISCOVER")
 
     # Locate the output — prefer today's date, fall back to any matching file.
@@ -104,6 +112,14 @@ def stage_cheap_pass(universe_csv: Path, out_slug: str) -> Path:
 def stage_sic_filter(cheappass_csv: Path, universe_csv: Path, out_slug: str, theme_kw: str = "") -> Path:
     """Inline: join cheappass with universe for cik/sic, apply SIC filter, write candidates JSON.
 
+    Phase 4 changes:
+    - Uses sic_classify() (tri-state) instead of sic_ok() (bool).
+      sic_tier="keep" | "review": both pass to LLM gate.
+      sic_tier="drop": excluded (currently never returned by sic_classify).
+    - Carries sic_tier into each candidate record so theme-fit-gate can surface it.
+    - Carries band ("deep" | "watch") from universe CSV into each candidate record.
+      Downstream deepdive_data / rank must skip expensive deep-dive for band="watch".
+
     theme_kw: human-readable theme keyword string (e.g. "railcar,railcar leasing").
     Written into each candidate record as "theme" so that theme-fit-gate.js can
     interpolate it into prompts without getting 'undefined'.
@@ -111,21 +127,29 @@ def stage_sic_filter(cheappass_csv: Path, universe_csv: Path, out_slug: str, the
     hard_exclude: list[str] = CFG["sic_hard_exclude"]
 
     cdf = pd.read_csv(cheappass_csv)
-    udf = pd.read_csv(universe_csv)[["ticker", "cik", "sic", "mktcap"]]
+    # Include "band" from universe if present
+    uni_cols = ["ticker", "cik", "sic", "mktcap"]
+    udf_raw = pd.read_csv(universe_csv)
+    if "band" in udf_raw.columns:
+        uni_cols.append("band")
+    udf = udf_raw[uni_cols]
 
-    # Join to obtain cik/sic for cheappass rows
+    # Join to obtain cik/sic/band for cheappass rows
     merged = cdf.merge(udf, on="ticker", how="left", suffixes=("", "_u"))
 
     # Keep only survivors (not rejected by cheap_pass)
     survivors = merged[~merged["rejected"]].copy()
 
-    # Apply SIC filter
-    survivors["sic_ok"] = survivors["sic"].apply(lambda x: sic_ok(str(x), hard_exclude))
-    candidates = survivors[survivors["sic_ok"]].copy()
+    # Apply SIC tri-state classification (Phase 4: "review" now passes, not dropped)
+    survivors["sic_tier"] = survivors["sic"].apply(lambda x: sic_classify(str(x), hard_exclude))
+    candidates = survivors[survivors["sic_tier"] != "drop"].copy()
 
+    n_keep = (candidates["sic_tier"] == "keep").sum()
+    n_review = (candidates["sic_tier"] == "review").sum()
     print(
         f"\n[SIC_FILTER] cheappass survivors: {len(survivors)} → "
-        f"after SIC filter: {len(candidates)}",
+        f"after SIC filter: {len(candidates)} "
+        f"(keep={n_keep}, review={n_review} — review goes to LLM gate)",
         flush=True,
     )
 
@@ -137,6 +161,8 @@ def stage_sic_filter(cheappass_csv: Path, universe_csv: Path, out_slug: str, the
         # Used by theme-fit-gate.js as PRIMARY basis for classification, eliminating
         # redundant WebSearch for each candidate (Fix 3).
         blurb_raw = r.get("business_blurb", "")
+        # band: "deep" | "watch" | None (from universe CSV; None if universe predates Phase 4)
+        band_raw = r.get("band", None)
         records.append({
             "ticker": r["ticker"],
             "cik": str(int(cik_raw)) if pd.notna(cik_raw) else None,
@@ -144,6 +170,8 @@ def stage_sic_filter(cheappass_csv: Path, universe_csv: Path, out_slug: str, the
             "theme_slug": out_slug,
             "theme": theme_kw,           # D4: human-readable theme for theme-fit-gate.js prompt
             "sic": str(r.get("sic", "")).split(".")[0],
+            "sic_tier": str(r.get("sic_tier", "keep")),   # Phase 4: "keep" | "review"
+            "band": str(band_raw) if pd.notna(band_raw) else "deep",  # Phase 4: "deep" | "watch"
             "mktcap": float(r["mktcap"]) if pd.notna(r.get("mktcap")) else None,
             "health_score": float(r["health_score"]) if pd.notna(r.get("health_score")) else None,
             "killflag_count": int(r["killflag_count"]) if pd.notna(r.get("killflag_count")) else None,
@@ -182,18 +210,19 @@ def main() -> None:
 
     out_slug = _slug(args.slug)
     max_mcap = CFG["micro_cap_max"] if args.micro else CFG["market_cap_max"]
+    watch_band_max = CFG.get("watch_band_max", 5_000_000_000)
     cap_label = f"${max_mcap/1e6:.0f}M (micro)" if args.micro else f"${max_mcap/1e9:.1f}B"
 
     print(
         f"\n{'#'*72}\n"
-        f"  run_theme  slug={out_slug}  cap={cap_label}\n"
+        f"  run_theme  slug={out_slug}  cap={cap_label}  watch_band=${watch_band_max/1e9:.1f}B\n"
         f"  theme keywords: {args.theme}\n"
         f"{'#'*72}",
         flush=True,
     )
 
-    # Stage 1 — discover
-    universe_csv = stage_discover(args.theme, out_slug, max_mcap)
+    # Stage 1 — discover (Phase 4: passes watch_band_max for dual-band tagging)
+    universe_csv = stage_discover(args.theme, out_slug, max_mcap, watch_band_max=watch_band_max)
 
     # Stage 2 — cheap pass
     cheappass_csv = stage_cheap_pass(universe_csv, out_slug)

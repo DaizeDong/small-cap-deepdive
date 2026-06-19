@@ -94,7 +94,7 @@ def _extract_business_blurb(txt: str, max_chars: int = 2000) -> str:
 
 
 def killflag_scan(ticker: str) -> dict:
-    """读最新 10-K 全文,判定各 kill-flag 短语是否真实出现。
+    """读最新年报全文,判定各 kill-flag 短语是否真实出现。
     going_concern + substantial_doubt 同时命中 = 强信号(真持续经营疑虑)。
 
     material_weakness: requires affirmative ICFR finding (identified/not-effective),
@@ -103,18 +103,42 @@ def killflag_scan(ticker: str) -> dict:
 
     Also extracts business_blurb (Item 1 first ~2000 chars) for theme-fit gate reuse,
     avoiding redundant WebSearch in theme-fit-gate.js.
+
+    Phase 4 — 20-F / 40-F graceful fallback:
+    If get_filings(form="10-K", amendments=False) returns no results, falls back to
+    20-F then 40-F. Foreign-domiciled filers (shipping, some industrials/mining) file
+    20-F/40-F; going-concern and material-weakness language is structurally similar.
+    The same kill-flag phrases and business_blurb extraction are reused unchanged.
+    Sets out["filing_form"] to the form type that was actually read.
     """
     out = {f"kf_{k}": 0 for k in KILL_PHRASES}
     out["kf_scanned"] = False
     out["business_blurb"] = ""
+    out["filing_form"] = None
     try:
         c = Company(ticker)
-        # amendments=False:10-K/A 修正件是部分文件,常缺 going-concern 全文
-        # (实测 IQST:10-K/A 仅 30K 字符漏判,原始 10-K 381K 字符命中)
+        f = None
+        form_used = None
+        # Primary: 10-K (amendments=False — 10-K/A 修正件常缺 going-concern 全文)
         fl = c.get_filings(form="10-K", amendments=False)
-        f = fl.latest(1) if fl is not None and len(fl) else None
+        if fl is not None and len(fl):
+            f = fl.latest(1)
+            form_used = "10-K"
+        # Fallback 1: 20-F (foreign-domiciled filers — Phase 4)
+        if f is None:
+            fl20 = c.get_filings(form="20-F")
+            if fl20 is not None and len(fl20):
+                f = fl20.latest(1)
+                form_used = "20-F"
+        # Fallback 2: 40-F (Canadian filers — Phase 4)
+        if f is None:
+            fl40 = c.get_filings(form="40-F")
+            if fl40 is not None and len(fl40):
+                f = fl40.latest(1)
+                form_used = "40-F"
         if f is None:
             return out
+        out["filing_form"] = form_used
         txt = f.text() if hasattr(f, "text") else str(f.obj())
         low = txt.lower()
         for name, phrase in KILL_PHRASES.items():
@@ -297,7 +321,21 @@ def _selftest():
     )
     print(f"  KOP: kf_material_weakness={kop_r['kf_material_weakness']} (Guard 3b anchor OK)")
 
-    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb + KOP MW=0)")
+    # Test 6: 20-F fallback — STNG (Scorpio Tankers) is a Marshall Islands domicile
+    # that files 20-F (not 10-K). killflag_scan must find the 20-F without crashing,
+    # set kf_scanned=True, and set filing_form="20-F".
+    stng_r = killflag_scan("STNG")
+    assert stng_r["kf_scanned"] is True, (
+        f"STNG: kf_scanned must be True (20-F fallback should find a filing), "
+        f"got kf_scanned={stng_r['kf_scanned']} filing_form={stng_r.get('filing_form')!r}"
+    )
+    assert stng_r.get("filing_form") in ("20-F", "40-F", "10-K"), (
+        f"STNG: filing_form must be a valid form type, got {stng_r.get('filing_form')!r}"
+    )
+    print(f"  STNG: kf_scanned={stng_r['kf_scanned']} filing_form={stng_r.get('filing_form')!r} "
+          f"(20-F fallback OK)")
+
+    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb + KOP MW=0 + STNG 20-F fallback)")
 
 
 def main():

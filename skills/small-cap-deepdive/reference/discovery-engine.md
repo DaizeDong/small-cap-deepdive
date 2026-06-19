@@ -88,6 +88,27 @@ If a keyword returns 200 filings, process all 200 through the SIC gate and theme
 
 A theme about specialty chemicals should use 2–4 keywords covering different terminology the target companies use (e.g., `titanium dioxide`, `pigment`, `TiO2`). Merge by CIK after FTS to deduplicate.
 
+**Rule 5: Use words companies actually put in their 10-K business description — not academic or analyst terminology.**
+
+Run-3 lessons from the crop-inputs theme audit:
+
+- `crop inputs` was too academic → missed LXU (nitrogen fertilizer), IPI (potash), AVD (crop protection). These companies write `fertilizer`, `potash`, `crop protection`, `plant nutrition` in their Item 1. Use those words.
+- `facility services` was over-broad → swept unrelated building-services and outsourcing companies. Prefer the specific sub-sector term (e.g. `industrial cleaning`, `grounds maintenance`).
+- `engine` is over-broad → every manufacturer, automotive, and aerospace company mentions engines. Use `diesel engine`, `gas turbine`, or the specific model name.
+- `deathcare` / `funeral services` / `cremation` / `cemetery` are all used interchangeably by actual operators; use at least two of these to maximize recall without over-broadening.
+
+**Per-theme keyword heuristics (run-3 lessons):**
+
+| Theme | Good keywords | Bad keywords |
+|---|---|---|
+| Crop inputs / ag chemicals | `fertilizer`, `potash`, `crop protection`, `plant nutrition` | `crop inputs`, `agricultural inputs` |
+| Funeral / deathcare | `funeral`, `cremation`, `cemetery`, `deathcare` | `end-of-life services` |
+| Industrial filters | `filtration`, `industrial filter`, `filter media` | `filtration services` (too broad) |
+| Tanker shipping | `product tanker`, `crude tanker`, `chemical tanker` | `shipping` (entire maritime sector) |
+| Farm equipment dealers | `farm equipment`, `agricultural equipment dealer`, `Case IH`, `John Deere dealer` | `equipment`, `dealer` |
+
+The pattern: use the noun+modifier that appears in the company's own product or service description, not the analyst category label.
+
 ---
 
 ## Refractory Case: Full Reconstruction
@@ -107,17 +128,32 @@ The case established the two-stage gate as a mandatory invariant, not an optiona
 
 ## Coverage Caveat — Foreign Filers (20-F / 40-F)
 
-The discovery flow searches `forms=10-K,10-Q`. Companies domiciled outside the US
-(common in shipping, mining, some industrials) file **20-F** (or Canadian **40-F**),
-not 10-K — so they are invisible to this pipeline regardless of theme fit. A real run
-on a tanker-shipping theme returned near-zero recall for this reason (most tanker
-operators are Marshall Islands / foreign-domiciled 20-F filers).
+**Phase 4 status: 20-F / 40-F is now graceful-fallback (not ignored).**
 
-Implication: this is a **theme-selection** constraint, not a bug to patch lightly.
-Prefer themes whose pure-plays are US-domiciled 10-K filers. If a theme is structurally
-foreign-filer-heavy, either accept the gap explicitly or add `20-F`/`40-F` to `forms` —
-but note the downstream mechanical guards (amendment exclusion, going-concern double-hit)
-are written against 10-K structure and would need validation against 20-F layout first.
+`discover.py` default `--forms` now includes `20-F,40-F` in addition to `10-K,10-Q`,
+so foreign-domiciled filers are discovered at the FTS stage.
+
+Downstream fallback chain (implemented in Phase 4):
+- `cheap_pass.killflag_scan`: tries 10-K first; if empty, falls back to 20-F then 40-F.
+  Same kill-flag phrases and business_blurb extraction are reused — going-concern and
+  material-weakness language is structurally similar in 20-F/40-F.
+- `deepdive_data.tenk_sections`: same fallback chain. Sets `filing_form` field so the
+  caller knows which form type was actually read.
+- XBRL concept_series (`us-gaap/companyfacts`): already works for foreign filers with
+  SEC EDGAR registration. No change needed.
+
+**Known gap / untested:** XBRL concept differences between 10-K and 20-F filers are
+not systematically validated. Foreign filers may tag revenue under different us-gaap
+concepts or use IFRS concepts (not covered by us-gaap companyfacts). If a 20-F filer
+returns empty financials, this is the likely cause. Treat XBRL data for 20-F filers
+as best-effort and flag for manual review.
+
+**Verification:** killflag_scan tested on STNG (Scorpio Tankers, Marshall Islands
+domicile, files 20-F) — returns kf_scanned=True with filing_form="20-F" without crashing.
+
+**Theme-selection note:** Themes whose pure-plays are structurally foreign-domiciled
+(e.g. Marshall Islands tanker operators) now have partial coverage. Accept remaining
+gaps explicitly or supplement with a manual list of known 20-F filers for the theme.
 
 ---
 

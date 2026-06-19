@@ -410,18 +410,43 @@ def insider_trades(ticker: str) -> dict:
 
 
 def tenk_sections(ticker: str) -> dict:
-    """取最新 10-K 的关键文本片段(business + risk factors 节选)供判断层读。"""
+    """取最新年报的关键文本片段(business + risk factors 节选)供判断层读。
+
+    Phase 4 — 20-F / 40-F graceful fallback:
+    If no 10-K filing is found, falls back to 20-F then 40-F.
+    Foreign-domiciled filers (shipping, some industrials/mining) file 20-F/40-F.
+    Going-concern/material-weakness language is structurally similar in 20-F.
+    XBRL concept_series (us-gaap companyfacts) already works for foreign filers.
+    Sets out["filing_form"] to the form type actually read.
+    """
     out = {"available": False}
     try:
         c = Company(ticker)
-        # amendments=False:10-K/A 修正件常缺 going-concern 全文(实测 IQST 漏判)
+        f = None
+        form_used = None
+        # Primary: 10-K (amendments=False — 10-K/A 修正件常缺 going-concern 全文)
         fl = c.get_filings(form="10-K", amendments=False)
-        f = fl.latest(1) if fl is not None and len(fl) else None
+        if fl is not None and len(fl):
+            f = fl.latest(1)
+            form_used = "10-K"
+        # Fallback 1: 20-F (foreign-domiciled filers — Phase 4)
+        if f is None:
+            fl20 = c.get_filings(form="20-F")
+            if fl20 is not None and len(fl20):
+                f = fl20.latest(1)
+                form_used = "20-F"
+        # Fallback 2: 40-F (Canadian filers — Phase 4)
+        if f is None:
+            fl40 = c.get_filings(form="40-F")
+            if fl40 is not None and len(fl40):
+                f = fl40.latest(1)
+                form_used = "40-F"
         if f is None:
             return out
         txt = f.text() if hasattr(f, "text") else str(f.obj())
         low = txt.lower()
         out["available"] = True
+        out["filing_form"] = form_used
         out["filing_date"] = str(getattr(f, "filing_date", ""))
         out["total_len"] = len(txt)
         # kill-flag 复核
