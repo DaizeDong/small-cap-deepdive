@@ -105,6 +105,22 @@ The case established the two-stage gate as a mandatory invariant, not an optiona
 
 ---
 
+## Coverage Caveat — Foreign Filers (20-F / 40-F)
+
+The discovery flow searches `forms=10-K,10-Q`. Companies domiciled outside the US
+(common in shipping, mining, some industrials) file **20-F** (or Canadian **40-F**),
+not 10-K — so they are invisible to this pipeline regardless of theme fit. A real run
+on a tanker-shipping theme returned near-zero recall for this reason (most tanker
+operators are Marshall Islands / foreign-domiciled 20-F filers).
+
+Implication: this is a **theme-selection** constraint, not a bug to patch lightly.
+Prefer themes whose pure-plays are US-domiciled 10-K filers. If a theme is structurally
+foreign-filer-heavy, either accept the gap explicitly or add `20-F`/`40-F` to `forms` —
+but note the downstream mechanical guards (amendment exclusion, going-concern double-hit)
+are written against 10-K structure and would need validation against 20-F layout first.
+
+---
+
 ## Integration with Workflow
 
 The discovery flow for `theme <keyword>` is:
