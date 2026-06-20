@@ -68,8 +68,8 @@ pip install -r tools/requirements.txt
 然后一次性配置：
 
 ```bash
-cp skills/small-cap-deepdive/reference/config.example.json \
-   skills/small-cap-deepdive/reference/config.json
+cp reference/config.example.json \
+   reference/config.json
 ```
 
 打开 `config.json`，将 `"sec_user_agent"` 设为你的真实姓名和邮箱：
@@ -87,7 +87,7 @@ cp skills/small-cap-deepdive/reference/config.example.json \
 cmd /c mklink /J "%USERPROFILE%\.claude\skills\small-cap-deepdive" "skills\small-cap-deepdive"
 
 # macOS / Linux
-ln -s "$(pwd)/skills/small-cap-deepdive" "$HOME/.claude/skills/small-cap-deepdive"
+ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 ```
 
 ---
@@ -179,8 +179,8 @@ ticker）通过 CIK 处理，归入 `band="unknown"` 队列。
   tools/run_theme.py     — 主题端到端驱动
 
 判断层（LLM，只读 JSON 做判断，永不计算财务数据）
-  skills/small-cap-deepdive/SKILL.md         — 编排 + 世界观 + 硬规则
-  skills/small-cap-deepdive/reference/*.md   — 方法论不变量（单一真相源）
+  SKILL.md         — 编排 + 世界观 + 硬规则
+  reference/*.md   — 方法论不变量（单一真相源）
   workflows/theme-fit-gate.js  — 可选：门 2 并行加速
   workflows/deepdive-fanout.js — 可选：尽调并行加速
 ```
@@ -231,4 +231,4 @@ ticker）通过 CIK 处理，归入 `band="unknown"` 队列。
 | 1–2 | 硬上限规则生效 | 存在已命名的结构性问题；在解决前不应投资 |
 | 已淘汰 | cheap_pass 触发 kill-flag | 停止——不必重新审查 |
 
-综合分 = 7 维加权平均。硬上限规则凌驾于叙事质量之上。完整评分卡：`skills/small-cap-deepdive/reference/judgment-rubric.md`。
+综合分 = 7 维加权平均。硬上限规则凌驾于叙事质量之上。完整评分卡：`reference/judgment-rubric.md`。

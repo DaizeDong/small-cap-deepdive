@@ -7,7 +7,7 @@ import requests
 
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent
-_REF = _REPO / "skills" / "small-cap-deepdive" / "reference"
+_REF = _REPO / "reference"
 
 def load_config() -> dict:
     # precedence: config.json (gitignored) > config.example.json defaults; env SMALLCAP_* overrides scalars
