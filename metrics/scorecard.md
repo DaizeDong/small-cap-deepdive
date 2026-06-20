@@ -1,10 +1,47 @@
 # Track-Forward Calibration Scorecard
 
-> Generated: 2026-06-19
+> Generated: 2026-06-20
 > Verdicts file: `metrics/verdicts.jsonl`
 > Benchmark: IWM (Russell 2000 small-cap ETF)
+> Returns: dividend-adjusted total return (yfinance auto_adjust=True)
 
-## Status: 0 Scored / 41 Pending
+## De-Risk-Native Metrics
+
+*(A de-risk scanner's job is blowup AVOIDANCE, not beating IWM by a hair. These measure that.)*
+
+| Metric | Value | N | Notes |
+|---|---|---|---|
+| BUY data-integrity (clean / all BUY) | 0.0% | 19 | measurable today; 19 adjudicated data_false_positive |
+| Blowup-avoidance (观察/避开 avoided <= -40% total return) | — | 0 | needs matured price verdicts |
+| Downside-capture (避开 underperformed AND blew up) | — | 0 | needs matured 避开 verdicts |
+
+## BUY Data-Integrity (validation false-positive cohort)
+
+19 BUY-eligible (MoS>=30%) names from the 2026-06-19 validation campaign, each adjudicated `data_false_positive` by balance-sheet cross-check. Kept OUT of the price-Brier (no forward horizon); they populate the BUY-data-integrity metric so the BUY arm is not permanently empty.
+
+| Ticker | MoS% | fp_cause |
+|---|---|---|
+| CISS | 2355% | micro-cap collapse + debt=total-liabilities proxy |
+| AII | 290% | material_weakness + cash unavailable -> EV excludes cash |
+| GRNT | 209% | material_weakness + cash unavailable -> EV understated |
+| QFIN | 190% | debt=total-liabilities proxy + OCF-proxy + China VIE |
+| ARDT | 168% | OCF-proxy FCF (no capex) + large-cap out of scope |
+| VSNT | 153% | large-cap scope leak + structural decline + linear terminal value |
+| SNFCA | 129% | NI unit anomaly from DEF 14A (32B vs 344M rev); wrong form |
+| DAC | 128% | OCF-proxy FCF (no capex) |
+| HCI | 118% | insurer financial-structure mismatch; FCF/EV model invalid |
+| FSBW | 104% | debt truncation (stale 2022) -> false fcf_cap routing |
+| GSL | 102% | total_debt=None -> EV collapses to market cap; ZERO flags raised |
+| GNE | 97% | over-normalized FCF; multiple kill-flags |
+| ESEA | 87% | going_concern + IFRS capex gaps |
+| FVRR | 82% | material_weakness |
+| SIGA | 76% | ~90% single-customer BARDA concentration; lumpy/over-normalized OCF |
+| GIII | 73% | material_weakness |
+| RYAM | 63% | debt truncation 779M -> 21.5M -> false MoS |
+| TUSK | 55% | FEMA one-time OCF inflates 5yr avg; revenue collapsed |
+| CMRE | 45% | OCF-proxy FCF (no capex) |
+
+## Status: 0 Scored / 40 Pending
 
 **Calibration unknown until verdicts mature.**
 
@@ -58,4 +95,3 @@ This is the correct honest state. The epistemic spine of the skill (market-effic
 | VSTS | uniform | 观察 | 0.50 | 2026-06-18 | 2027-06-18 |
 | WLFC | aeromro | 观察 | 0.50 | 2026-06-18 | 2027-06-18 |
 | BUKS | aeromro | 观察 | 0.50 | 2026-06-18 | 2027-06-18 |
-| SNFCA | funeral | 观察 | 0.50 | 2026-06-19 | 2027-06-19 |

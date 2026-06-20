@@ -21,7 +21,7 @@ import pandas as pd
 
 # Import from _common
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import UA, REPORTS, slug as _slug, http_get, today, CFG
+from _common import UA, REPORTS, slug as _slug, http_get, today, CFG, resolve_mktcap, band_for
 
 FTS = "https://efts.sec.gov/LATEST/search-index"
 
@@ -73,14 +73,24 @@ def fts_search(phrase: str, forms: str, startdt: str, enddt: str,
 
 
 def enrich_marketcap(df: pd.DataFrame) -> pd.DataFrame:
-    """逐 ticker 用 yfinance 补市值+流动性(候选集已小,可逐个)。"""
+    """逐 ticker 补市值+流动性(候选集已小,可逐个)。
+
+    P5: market cap is no longer yfinance-only. Per row we try the fallback chain
+    (resolve_mktcap): yfinance marketCap -> SEC companyfacts shares-outstanding x
+    last price. mktcap_source records which leg resolved it ("yfinance" /
+    "sec_shares_x_price" / "unresolved"). A row that stays unresolved is NOT
+    dropped here — apply_filters tags it band="unknown" and flows it through.
+    """
     import yfinance as yf
+    ciks = df["cik"].tolist() if "cik" in df.columns else [None] * len(df)
     rows = []
     for i, t in enumerate(df["ticker"]):
-        rec = {"mktcap": None, "avg_dollar_vol": None, "price": None, "exch": None}
+        rec = {"mktcap": None, "avg_dollar_vol": None, "price": None,
+               "exch": None, "mktcap_source": "unresolved"}
+        yf_mktcap = None
         try:
             info = yf.Ticker(t).info
-            rec["mktcap"] = info.get("marketCap")
+            yf_mktcap = info.get("marketCap")
             rec["price"] = info.get("currentPrice") or info.get("regularMarketPrice")
             rec["exch"] = info.get("exchange")
             # 近30日日均成交额
@@ -89,6 +99,11 @@ def enrich_marketcap(df: pd.DataFrame) -> pd.DataFrame:
                 rec["avg_dollar_vol"] = float((h["Close"] * h["Volume"]).mean())
         except Exception:
             pass
+        # Fallback chain: yfinance -> SEC shares x price. Keeps mktcap when yfinance
+        # is null but a price + SEC shares-outstanding exist (common for small/foreign).
+        mc, src = resolve_mktcap(yf_mktcap, rec["price"], ciks[i] if i < len(ciks) else None)
+        rec["mktcap"] = mc
+        rec["mktcap_source"] = src
         rows.append(rec)
         time.sleep(0.25)
         if (i + 1) % 20 == 0:
@@ -104,16 +119,24 @@ def apply_filters(df: pd.DataFrame, max_mcap: float, min_dollar_vol: float,
                   watch_band_max: float | None = None) -> pd.DataFrame:
     """Apply market-cap + liquidity filters.
 
-    Band tagging (Phase 4 — dual market-cap band):
-      band="deep"  — mktcap < max_mcap (standard small-cap; full rubric in downstream)
-      band="watch" — max_mcap <= mktcap < watch_band_max (surfaced separately;
-                     gets theme-fit + one-line note, NOT expensive deep-dive)
-      band=None    — mktcap missing or above watch_band_max (excluded)
+    Band tagging (Phase 4 dual-band + P5 unknown flow-through; band_for is the SSOT
+    shared with discover_events.py):
+      band="deep"    — mktcap < max_mcap (standard small-cap; full rubric downstream)
+      band="watch"   — max_mcap <= mktcap < watch_band_max (surfaced separately;
+                       theme-fit + one-line note, NOT expensive deep-dive)
+      band="large"   — mktcap >= watch_band_max (out of scope; flagged flag_too_big,
+                       flowed through so downstream guards/gates can see it, not dropped)
+      band="unknown" — mktcap missing/unresolvable after the fallback chain. P5:
+                       previously this was band=None and the row was DROPPED
+                       (flag_no_mktcap). yfinance-null was silently discarding
+                       91-100% of some themes before any gate. Unknown-band rows now
+                       FLOW THROUGH (smallcap_candidate=True), mirroring the event
+                       path (discover_events.py:99-120) which keeps null as "unknown".
 
     watch_band_max: from config key watch_band_max (default $5B).
-    Companies in the watch band are tagged smallcap_candidate=True so they flow
-    through SIC filter and theme-fit gate; downstream run_theme/deepdive must
-    check band before running the full rubric.
+    smallcap_candidate is True for deep/watch/unknown bands (anything not "large"),
+    subject to the non-mktcap gates (not SPAC, not illiquid). downstream
+    run_theme/deepdive must check band before running the full rubric.
     """
     if watch_band_max is None:
         watch_band_max = CFG.get("watch_band_max", 5_000_000_000)
@@ -123,21 +146,15 @@ def apply_filters(df: pd.DataFrame, max_mcap: float, min_dollar_vol: float,
     df["flag_spac"] = df["name"].str.contains(SPAC_PAT, na=False) | (df["sic"] == "6770")
     df["flag_illiquid"] = df["avg_dollar_vol"].fillna(0) < min_dollar_vol
     df["flag_no_price"] = df["price"].isna()
-    # smallcap_candidate: mktcap > 0, within watch band, not SPAC, not illiquid, has price
+    # Band via shared SSOT (null/zero -> "unknown"; >=watch_band_max -> "large").
+    df["band"] = df["mktcap"].apply(lambda mc: band_for(mc, max_mcap, watch_band_max))
+    # smallcap_candidate: NOT too big (deep/watch/unknown), not SPAC, not illiquid.
+    # P5: unknown-band (null mktcap) rows are kept — flow through instead of drop.
+    # The illiquidity gate still applies; a no-price row with no volume is illiquid
+    # and falls out there, not via a blanket mktcap drop.
     df["smallcap_candidate"] = (
-        df["mktcap"].notna() & (df["mktcap"] <= watch_band_max) & (df["mktcap"] > 0)
-        & ~df["flag_spac"] & ~df["flag_illiquid"] & df["price"].notna()
+        (df["band"] != "large") & ~df["flag_spac"] & ~df["flag_illiquid"]
     )
-    # Band: "deep" < max_mcap; "watch" between max_mcap and watch_band_max; None otherwise
-    def _band(row):
-        if pd.isna(row["mktcap"]) or row["mktcap"] <= 0:
-            return None
-        if row["mktcap"] < max_mcap:
-            return "deep"
-        if row["mktcap"] < watch_band_max:
-            return "watch"
-        return None
-    df["band"] = df.apply(_band, axis=1)
     return df
 
 
@@ -147,8 +164,61 @@ def _two_years_ago() -> str:
     return (datetime.now(timezone.utc) - timedelta(days=730)).strftime("%Y-%m-%d")
 
 
+def _selftest() -> None:
+    """P5: null-mktcap rows must become band='unknown' and FLOW THROUGH (not drop)."""
+    max_mcap = 2_000_000_000
+    watch_max = 5_000_000_000
+    df = pd.DataFrame([
+        # deep small-cap with full data
+        {"name": "Deep Co", "ticker": "DEEP", "cik": "1", "sic": "2810",
+         "mktcap": 8e8, "price": 10.0, "avg_dollar_vol": 5e6},
+        # watch band
+        {"name": "Watch Co", "ticker": "WTCH", "cik": "2", "sic": "2810",
+         "mktcap": 3e9, "price": 20.0, "avg_dollar_vol": 5e6},
+        # large / out of scope
+        {"name": "Big Co", "ticker": "BIG", "cik": "3", "sic": "2810",
+         "mktcap": 9e9, "price": 50.0, "avg_dollar_vol": 5e6},
+        # null mktcap but liquid + has price — the P5 case that used to be DROPPED
+        {"name": "Unknown Co", "ticker": "UNK", "cik": "4", "sic": "2810",
+         "mktcap": None, "price": 12.0, "avg_dollar_vol": 5e6},
+        # null mktcap AND no price/volume — still flows as 'unknown' band, but is illiquid
+        {"name": "Dark Co", "ticker": "DARK", "cik": "5", "sic": "2810",
+         "mktcap": None, "price": None, "avg_dollar_vol": 0.0},
+    ])
+    out = apply_filters(df, max_mcap, min_dollar_vol=1e6, watch_band_max=watch_max)
+
+    # band assignments
+    bands = dict(zip(out["ticker"], out["band"]))
+    assert bands["DEEP"] == "deep", f"DEEP band={bands['DEEP']}"
+    assert bands["WTCH"] == "watch", f"WTCH band={bands['WTCH']}"
+    assert bands["BIG"] == "large", f"BIG band={bands['BIG']}"
+    # CORE P5 ASSERTION: null mktcap -> band='unknown', NOT None (which meant dropped)
+    assert bands["UNK"] == "unknown", f"null-mktcap UNK must band='unknown', got {bands['UNK']}"
+    assert bands["DARK"] == "unknown", f"null-mktcap DARK must band='unknown', got {bands['DARK']}"
+    assert out["band"].notna().all(), "no band may be None/NaN (None==dropped, the old bug)"
+
+    # flow-through: the unknown-band row with price+volume is a live candidate, NOT dropped
+    cand = dict(zip(out["ticker"], out["smallcap_candidate"]))
+    assert cand["UNK"] is True or cand["UNK"] == True, (
+        "null-mktcap but liquid row must remain smallcap_candidate=True (flow through, not drop)"
+    )
+    assert cand["DEEP"] == True and cand["WTCH"] == True, "deep/watch must stay candidates"
+    # large is out of scope (not a candidate) but still present in the frame (flagged, not dropped)
+    assert cand["BIG"] == False, "large-band must not be a smallcap_candidate"
+    assert "BIG" in bands, "large-band row must remain in the frame, not be dropped"
+    # genuinely illiquid unknown row falls out via the illiquidity gate, not a mktcap drop
+    assert cand["DARK"] == False, "DARK is illiquid -> not a candidate (via liquidity gate, not mktcap)"
+
+    print("discover selftest PASS (P5 null-mktcap -> band='unknown' flow-through, no drop)")
+
+
 def main():
+    # --selftest short-circuit: library-style unit check, no --theme required.
+    if "--selftest" in sys.argv:
+        _selftest()
+        return
     ap = argparse.ArgumentParser()
+    ap.add_argument("--selftest", action="store_true", help="Run unit assertions and exit")
     ap.add_argument("--theme", required=True, help="逗号分隔的主题短语")
     ap.add_argument("--forms", default="10-K,10-Q,20-F,40-F",
                     help="SEC form types to search (default includes 20-F/40-F for foreign filers)")
