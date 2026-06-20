@@ -59,19 +59,66 @@ METRICS_DIR = REPO / "metrics"
 VERDICTS_FILE = METRICS_DIR / "verdicts.jsonl"
 SCORECARD_FILE = METRICS_DIR / "scorecard.md"
 
-# Default rating → implied_prob convention (overridable per record)
-# Rationale: 买入 predicts OUTperformance, 避开 predicts UNDERperformance
+# Default rating → implied_prob convention (used only when no model confidence is supplied).
+# Rationale: 买入 predicts OUTperformance, 避开 predicts UNDERperformance.
+# NOTE (P12): the LIVE path now derives implied_prob from the model's own confidence mapped by
+# rating DIRECTION (see _implied_prob_from_confidence). RATING_PROB is the fallback when a verdict
+# carries no confidence, and the reference anchor the calibration scorecard reports per bucket.
 RATING_PROB = {
     "买入": 0.65,
     "观察": 0.50,
     "避开": 0.35,
 }
 
+# Rating → directional sign for confidence-as-probability mapping (P12a).
+# 买入 predicts OUTperformance (+1), 避开 predicts UNDERperformance (-1), 观察 is neutral (0).
+RATING_DIRECTION = {
+    "买入": 1,
+    "观察": 0,
+    "避开": -1,
+}
+
 DEFAULT_HORIZON_MONTHS = 12
 DEFAULT_BENCHMARK = "IWM"  # Russell 2000 small-cap ETF — correct universe comparison
 
+# De-risk-native metric thresholds (P12c).
+BLOWUP_DRAWDOWN_THRESHOLD = -0.40  # a horizon total return <= -40% counts as a "blowup"
+
 # Calibration bucket edges for implied_prob
 CALIB_BUCKETS = [(0.0, 0.40), (0.40, 0.55), (0.55, 0.70), (0.70, 1.01)]
+
+
+def _implied_prob_from_confidence(rating: str, confidence: float | None) -> float:
+    """Map a model confidence (0..1) to an implied probability of FAVORABLE outcome, by
+    rating direction (P12a).
+
+        favorable = stock total return > benchmark total return over horizon.
+
+    Direction sign d = RATING_DIRECTION[rating] in {+1, 0, -1}:
+        implied_prob = 0.5 + d * (confidence - 0.5)
+
+    Examples:
+        买入 (d=+1), confidence 0.70 -> 0.70   (high confidence the thesis resolves favorably)
+        避开 (d=-1), confidence 0.70 -> 0.30   (high confidence in UNDERperformance)
+        观察 (d= 0), any confidence  -> 0.50   (neutral by construction)
+        买入 (d=+1), confidence 0.50 -> 0.50   (no edge)
+
+    When confidence is None/invalid, fall back to the fixed RATING_PROB convention. Result is
+    clamped to (0, 1) so Brier math is always well-defined.
+    """
+    d = RATING_DIRECTION.get(rating, 0)
+    if confidence is None:
+        return RATING_PROB.get(rating, 0.50)
+    try:
+        c = float(confidence)
+    except (TypeError, ValueError):
+        return RATING_PROB.get(rating, 0.50)
+    # Tolerate confidence given as a percentage (e.g. 70 -> 0.70).
+    if c > 1.0:
+        c = c / 100.0
+    p = 0.5 + d * (c - 0.5)
+    # Clamp into the open interval so a perfectly-wrong/right Brier stays in [0,1] and never NaN.
+    return min(0.999, max(0.001, p))
 
 
 # ---------------------------------------------------------------------------
@@ -90,11 +137,19 @@ def _months_between(date1: str, date2: str) -> float:
 
 
 def _fetch_close(ticker: str, on_date: str, verbose: bool = False) -> float | None:
-    """Fetch closing price for ticker on or near on_date via yfinance.
+    """Fetch the DIVIDEND-ADJUSTED closing price for ticker on or near on_date via yfinance.
 
     Tries the exact date first (most recent trading day on or before on_date,
     within a ±7 calendar day search window).
     Returns None on any error (yfinance unavailable, ticker not found, etc.).
+
+    Total-return basis (P12b): yfinance is called with auto_adjust=True, which back-adjusts the
+    Close column for BOTH splits AND cash dividends. The price returned here is therefore a
+    total-return series — (horizon_close - entry_close) / entry_close is the dividend-adjusted
+    total return, not price-only. This removes the systematic bias that previously scored every
+    high-dividend WATCH name (MLPs/utilities: UAN, ARTNA, MSEX, YORW) as an underperformer.
+    With auto_adjust=True yfinance overwrites "Close" with the adjusted series and drops the
+    separate "Adj Close" column, so preferring "Close" below already yields the adjusted value.
 
     Bug-fix (Phase 6 review): close price is now derived from hist_filt (the date-filtered
     slice), not from the unfiltered hist. The old code extracted close_col from hist before
@@ -179,6 +234,85 @@ def _brier(implied_prob: float, favorable: bool) -> float:
     return (implied_prob - o) ** 2
 
 
+def _is_data_false_positive(row: dict) -> bool:
+    """True if a verdict is an adversarially-resolved BUY data false-positive (P12d).
+
+    These rows carry adjudication=="data_false_positive": a BUY-eligible (MoS>=30%) name that the
+    validation campaign proved is a data/model pathology (debt truncation, wrong-entity,
+    financial-SIC misroute, OCF-proxy, concentration, lumpy OCF). They are KEPT OUT of the
+    price-Brier (they have no forward price horizon) but DO feed the BUY-data-integrity metric.
+    """
+    return row.get("adjudication") == "data_false_positive"
+
+
+def _price_scorable(rows: list[dict]) -> list[dict]:
+    """Scored verdicts eligible for the price-Brier: scored AND not a data_false_positive.
+
+    The 19 backfilled BUY false-positives are adjudicated by balance-sheet cross-check, not by a
+    forward price, so they must never contaminate the price-return Brier / calibration table.
+    """
+    return [r for r in rows if r.get("scored") and not _is_data_false_positive(r)]
+
+
+# ---------------------------------------------------------------------------
+# De-risk-native metrics (P12c)
+#
+# Brier-vs-IWM measures stock-picking. This scanner's job is blowup AVOIDANCE. These three
+# metrics measure that directly and are reported alongside Brier in the scorecard.
+# ---------------------------------------------------------------------------
+
+def _blowup_avoidance_rate(rows: list[dict],
+                           threshold: float = BLOWUP_DRAWDOWN_THRESHOLD) -> float | None:
+    """Fraction of scored 观察/避开 (de-risk) verdicts whose stock horizon TOTAL RETURN avoided a
+    blowup (return > threshold, default -40%). Higher is better.
+
+    Only price-scorable, non-BUY verdicts with a non-null stock_return_pct are counted. Returns
+    None when there are no such verdicts yet.
+    """
+    pool = [r for r in _price_scorable(rows)
+            if r.get("rating") in ("观察", "避开") and r.get("stock_return_pct") is not None]
+    if not pool:
+        return None
+    avoided = sum(1 for r in pool if (r["stock_return_pct"] / 100.0) > threshold)
+    return avoided / len(pool)
+
+
+def _downside_capture_rate(rows: list[dict],
+                           threshold: float = BLOWUP_DRAWDOWN_THRESHOLD) -> float | None:
+    """Fraction of scored 避开 (AVOID) verdicts that did their job: UNDERperformed the benchmark
+    (realized_excess_pct < 0) AND drew down past the blowup threshold. This is the de-risk
+    "we correctly told you to run" rate. Higher means AVOID is genuinely flagging losers.
+
+    Returns None when there are no scored AVOID verdicts with the needed fields.
+    """
+    pool = [r for r in _price_scorable(rows)
+            if r.get("rating") == "避开"
+            and r.get("stock_return_pct") is not None
+            and r.get("realized_excess_pct") is not None]
+    if not pool:
+        return None
+    captured = sum(
+        1 for r in pool
+        if r["realized_excess_pct"] < 0 and (r["stock_return_pct"] / 100.0) <= threshold
+    )
+    return captured / len(pool)
+
+
+def _buy_data_integrity_rate(rows: list[dict]) -> float | None:
+    """Fraction of all BUY verdicts that survive a balance-sheet cross-check, i.e. are NOT
+    adjudicated data_false_positive. Measurable TODAY from the backfilled 19 — no 12-month wait.
+
+    integrity = clean_BUYs / all_BUYs. With only the 19 validation false-positives logged and no
+    clean BUY yet, this is 0.0 — the honest, decision-relevant headline number. Returns None when
+    no BUY verdicts exist at all.
+    """
+    buys = [r for r in rows if r.get("rating") == "买入"]
+    if not buys:
+        return None
+    clean = sum(1 for r in buys if not _is_data_false_positive(r))
+    return clean / len(buys)
+
+
 # ---------------------------------------------------------------------------
 # --record
 # ---------------------------------------------------------------------------
@@ -187,7 +321,15 @@ def _build_verdict_from_flags(args) -> dict:
     """Build a verdict dict from explicit CLI flags."""
     verdict_date = args.verdict_date or _today()
     rating = args.rating
-    implied_prob = RATING_PROB.get(rating, 0.50)
+
+    confidence: float | None = None
+    if getattr(args, "confidence", None) not in (None, "", "null", "none"):
+        try:
+            confidence = float(args.confidence)
+        except (TypeError, ValueError):
+            confidence = None
+    # P12a: implied_prob = model confidence mapped by rating direction (fallback RATING_PROB).
+    implied_prob = _implied_prob_from_confidence(rating, confidence)
 
     mos_pct: float | None = None
     if args.mos_pct and args.mos_pct.lower() not in ("null", "none", ""):
@@ -218,6 +360,7 @@ def _build_verdict_from_flags(args) -> dict:
         "mos_basis": args.mos_basis or "abstain",
         "kill_flags": kill_flags,
         "catalyst": catalyst,
+        "confidence": confidence,
         "implied_prob": implied_prob,
         "horizon_months": DEFAULT_HORIZON_MONTHS,
         "entry_price": entry_price,
@@ -225,8 +368,11 @@ def _build_verdict_from_flags(args) -> dict:
         "benchmark": DEFAULT_BENCHMARK,
         "benchmark_entry_price": benchmark_entry_price,
         "scored": False,
+        "stock_return_pct": None,
         "realized_excess_pct": None,
         "brier": None,
+        "adjudication": None,
+        "fp_cause": None,
         "notes": None,
     }
 
@@ -245,7 +391,16 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
         _rating_norm = {"buy": "买入", "watch": "观察", "hold": "观察",
                         "avoid": "避开", "sell": "避开"}
         rating = _rating_norm.get(rating.lower(), rating)
-        implied_prob = RATING_PROB.get(rating, 0.50)
+
+        # P12a: confidence-as-probability mapped by rating direction (fallback RATING_PROB).
+        confidence: float | None = None
+        raw_conf = rec.get("confidence")
+        if raw_conf is not None and str(raw_conf).lower() not in ("null", "none", ""):
+            try:
+                confidence = float(raw_conf)
+            except (TypeError, ValueError):
+                confidence = None
+        implied_prob = _implied_prob_from_confidence(rating, confidence)
 
         # mos_pct: from valuation json or report field
         mos_pct: float | None = None
@@ -290,6 +445,7 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
             "mos_basis": mos_basis,
             "kill_flags": kill_flags,
             "catalyst": catalyst,
+            "confidence": confidence,
             "implied_prob": implied_prob,
             "horizon_months": DEFAULT_HORIZON_MONTHS,
             "entry_price": entry_price,
@@ -297,8 +453,11 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
             "benchmark": DEFAULT_BENCHMARK,
             "benchmark_entry_price": benchmark_entry_price,
             "scored": False,
+            "stock_return_pct": None,
             "realized_excess_pct": None,
             "brier": None,
+            "adjudication": None,
+            "fp_cause": None,
             "notes": None,
         }
         rows.append(row)
@@ -424,6 +583,111 @@ def cmd_backfill(args) -> None:
 
 
 # ---------------------------------------------------------------------------
+# --backfill-validation-fp  (P12d)
+# ---------------------------------------------------------------------------
+
+# The 19 BUY-eligible (MoS>=30%) names from the 2026-06-19 validation campaign, every one a
+# false positive with an identified XBRL/model cause (docs/2026-06-19-validation-report.md +
+# reports/smallcap/2026-06-19_validation-v0.2.0/). MoS% as reported (whole-percent); fp_cause is
+# the validated structural pathology. These are logged as rating=买入 with a NEW field
+# adjudication="data_false_positive" so the BUY arm of the calibration loop is not permanently
+# empty — and they are KEPT OUT of the price-Brier (adjudicated by balance-sheet cross-check,
+# not by a forward price). cik is unknown in the validation artifacts (not emitted by valuation
+# JSON) → null.
+VALIDATION_FP_DATE = "2026-06-19"
+VALIDATION_FP = [
+    # (ticker, mos_pct, theme, fp_cause)
+    ("CISS", 2355.0, "shipping",  "micro-cap collapse + debt=total-liabilities proxy"),
+    ("AII",   290.0, "lowev",     "material_weakness + cash unavailable -> EV excludes cash"),
+    ("GRNT",  209.0, "lowev",     "material_weakness + cash unavailable -> EV understated"),
+    ("QFIN",  190.0, "lowev",     "debt=total-liabilities proxy + OCF-proxy + China VIE"),
+    ("ARDT",  168.0, "cluster",   "OCF-proxy FCF (no capex) + large-cap out of scope"),
+    ("VSNT",  153.0, "spinoff",   "large-cap scope leak + structural decline + linear terminal value"),
+    ("SNFCA", 129.0, "microcap",  "NI unit anomaly from DEF 14A (32B vs 344M rev); wrong form"),
+    ("DAC",   128.0, "shipping",  "OCF-proxy FCF (no capex)"),
+    ("HCI",   118.0, "lowev",     "insurer financial-structure mismatch; FCF/EV model invalid"),
+    ("FSBW",  104.0, "regbank",   "debt truncation (stale 2022) -> false fcf_cap routing"),
+    ("GSL",   102.0, "shipping",  "total_debt=None -> EV collapses to market cap; ZERO flags raised"),
+    ("GNE",    97.0, "lowev",     "over-normalized FCF; multiple kill-flags"),
+    ("ESEA",   87.0, "shipping",  "going_concern + IFRS capex gaps"),
+    ("FVRR",   82.0, "netnet",    "material_weakness"),
+    ("SIGA",   76.0, "netnet",    "~90% single-customer BARDA concentration; lumpy/over-normalized OCF"),
+    ("GIII",   73.0, "netnet",    "material_weakness"),
+    ("RYAM",   63.0, "specchem",  "debt truncation 779M -> 21.5M -> false MoS"),
+    ("TUSK",   55.0, "oilsvc",    "FEMA one-time OCF inflates 5yr avg; revenue collapsed"),
+    ("CMRE",   45.0, "shipping",  "OCF-proxy FCF (no capex)"),
+]
+
+
+def _build_validation_fp_rows() -> list[dict]:
+    """Build the 19 data_false_positive BUY verdict rows (P12d). Deterministic; no network."""
+    rows = []
+    for ticker, mos_pct, theme, fp_cause in VALIDATION_FP:
+        rating = "买入"
+        # confidence is not the axis here — these are adversarially RESOLVED. Keep the BUY
+        # convention implied_prob=0.65 for reference, but they never enter the price-Brier.
+        implied_prob = _implied_prob_from_confidence(rating, None)
+        rows.append({
+            "verdict_date": VALIDATION_FP_DATE,
+            "ticker": ticker,
+            "cik": None,
+            "theme": theme,
+            "rating": rating,
+            "mos_pct": mos_pct,
+            "mos_basis": "fcf_cap",
+            "kill_flags": [],
+            "catalyst": None,
+            "confidence": None,
+            "implied_prob": implied_prob,
+            "horizon_months": DEFAULT_HORIZON_MONTHS,
+            "entry_price": None,
+            "entry_date": VALIDATION_FP_DATE,
+            "benchmark": DEFAULT_BENCHMARK,
+            "benchmark_entry_price": None,
+            "scored": False,
+            "stock_return_pct": None,
+            "realized_excess_pct": None,
+            "brier": None,
+            "adjudication": "data_false_positive",
+            "fp_cause": fp_cause,
+            "notes": "[validation 2026-06-19 BUY false-positive] kept OUT of price-Brier; "
+                     "feeds BUY-data-integrity metric. See docs/2026-06-19-validation-report.md.",
+        })
+    return rows
+
+
+def cmd_backfill_validation_fp(args) -> None:
+    """--backfill-validation-fp: inject the 19 validation BUY false-positives (P12d).
+
+    Idempotent: rows whose (ticker, verdict_date) already exist are skipped. These rows carry
+    adjudication="data_false_positive" and are excluded from the price-Brier; they exist so the
+    BUY arm of calibration is observable (BUY-data-integrity metric) instead of empty for 12+ months.
+    """
+    existing = _load_verdicts()
+    existing_keys = {(r["ticker"], r["verdict_date"]) for r in existing}
+
+    added = 0
+    skipped = 0
+    for row in _build_validation_fp_rows():
+        key = (row["ticker"], row["verdict_date"])
+        if key in existing_keys:
+            skipped += 1
+            continue
+        existing_keys.add(key)
+        _append_verdict(row)
+        added += 1
+        print(f"  Backfilled FP {row['ticker']} | MoS={row['mos_pct']:.0f}% | "
+              f"adjudication=data_false_positive | cause={row['fp_cause']}")
+
+    print(f"\nValidation FP backfill: {added} added | {skipped} already present "
+          f"| {len(VALIDATION_FP)} total in cohort")
+    integrity = _buy_data_integrity_rate(_load_verdicts())
+    if integrity is not None:
+        print(f"BUY data-integrity now: {integrity*100:.1f}% "
+              f"(clean BUYs / all BUYs)")
+
+
+# ---------------------------------------------------------------------------
 # --score
 # ---------------------------------------------------------------------------
 
@@ -438,6 +702,10 @@ def cmd_score(args) -> None:
 
     for row in rows:
         if row.get("scored"):
+            continue
+        # data_false_positive verdicts (P12d) are adjudicated by balance-sheet cross-check, not by
+        # a forward price horizon — never price-score them.
+        if _is_data_false_positive(row):
             continue
         months_elapsed = _months_between(row["verdict_date"], today_str)
         if months_elapsed < row.get("horizon_months", DEFAULT_HORIZON_MONTHS):
@@ -469,6 +737,7 @@ def cmd_score(args) -> None:
             still_pending += 1
             continue
 
+        # Dividend-adjusted total returns (P12b): both legs use auto_adjust=True closes.
         stock_return = (stock_horizon - entry_price) / entry_price
         bm_return = (bm_horizon - bm_entry) / bm_entry
         excess = stock_return - bm_return
@@ -477,6 +746,7 @@ def cmd_score(args) -> None:
         implied_prob = row.get("implied_prob", 0.50)
         b = _brier(implied_prob, favorable)
 
+        row["stock_return_pct"] = round(stock_return * 100, 2)  # absolute total return (de-risk metrics)
         row["realized_excess_pct"] = round(excess * 100, 2)
         row["brier"] = round(b, 6)
         row["scored"] = True
@@ -497,8 +767,15 @@ def cmd_scorecard(args) -> None:
     rows = _load_verdicts()
     today_str = _today()
 
-    scored = [r for r in rows if r.get("scored")]
-    pending = [r for r in rows if not r.get("scored")]
+    # Price-Brier population excludes data_false_positive BUYs (P12d): they have no forward price.
+    scored = _price_scorable(rows)
+    fp_rows = [r for r in rows if _is_data_false_positive(r)]
+    pending = [r for r in rows if not r.get("scored") and not _is_data_false_positive(r)]
+
+    # De-risk-native metrics (P12c) — measurable now, alongside / ahead of the price-Brier.
+    blowup_avoid = _blowup_avoidance_rate(rows)
+    downside_cap = _downside_capture_rate(rows)
+    buy_integrity = _buy_data_integrity_rate(rows)
 
     lines = [
         "# Track-Forward Calibration Scorecard",
@@ -506,8 +783,46 @@ def cmd_scorecard(args) -> None:
         f"> Generated: {today_str}",
         f"> Verdicts file: `metrics/verdicts.jsonl`",
         f"> Benchmark: {DEFAULT_BENCHMARK} (Russell 2000 small-cap ETF)",
+        f"> Returns: dividend-adjusted total return (yfinance auto_adjust=True)",
+        "",
+        "## De-Risk-Native Metrics",
+        "",
+        "*(A de-risk scanner's job is blowup AVOIDANCE, not beating IWM by a hair. These measure that.)*",
+        "",
+        "| Metric | Value | N | Notes |",
+        "|---|---|---|---|",
+        f"| BUY data-integrity (clean / all BUY) | "
+        f"{(f'{buy_integrity*100:.1f}%' if buy_integrity is not None else '—')} | "
+        f"{sum(1 for r in rows if r.get('rating')=='买入')} | "
+        f"measurable today; {len(fp_rows)} adjudicated data_false_positive |",
+        f"| Blowup-avoidance (观察/避开 avoided <= {BLOWUP_DRAWDOWN_THRESHOLD*100:.0f}% total return) | "
+        f"{(f'{blowup_avoid*100:.1f}%' if blowup_avoid is not None else '—')} | "
+        f"{len([r for r in scored if r.get('rating') in ('观察','避开') and r.get('stock_return_pct') is not None])} | "
+        f"needs matured price verdicts |",
+        f"| Downside-capture (避开 underperformed AND blew up) | "
+        f"{(f'{downside_cap*100:.1f}%' if downside_cap is not None else '—')} | "
+        f"{len([r for r in scored if r.get('rating')=='避开' and r.get('stock_return_pct') is not None])} | "
+        f"needs matured 避开 verdicts |",
         "",
     ]
+
+    if fp_rows:
+        lines += [
+            "## BUY Data-Integrity (validation false-positive cohort)",
+            "",
+            f"{len(fp_rows)} BUY-eligible (MoS>=30%) names from the 2026-06-19 validation campaign, each "
+            "adjudicated `data_false_positive` by balance-sheet cross-check. Kept OUT of the price-Brier "
+            "(no forward horizon); they populate the BUY-data-integrity metric so the BUY arm is not "
+            "permanently empty.",
+            "",
+            "| Ticker | MoS% | fp_cause |",
+            "|---|---|---|",
+        ]
+        for r in sorted(fp_rows, key=lambda x: -(x.get("mos_pct") or 0)):
+            mos = r.get("mos_pct")
+            mos_str = f"{mos:.0f}%" if mos is not None else "—"
+            lines.append(f"| {r['ticker']} | {mos_str} | {r.get('fp_cause','—')} |")
+        lines.append("")
 
     if not scored:
         # Compute earliest maturity date
@@ -656,8 +971,9 @@ def cmd_status(args) -> None:
     rows = _load_verdicts()
     today_str = _today()
 
-    scored = [r for r in rows if r.get("scored")]
-    unscored = [r for r in rows if not r.get("scored")]
+    fp_rows = [r for r in rows if _is_data_false_positive(r)]
+    scored = _price_scorable(rows)
+    unscored = [r for r in rows if not r.get("scored") and not _is_data_false_positive(r)]
 
     matured_unscored = []
     pending = []
@@ -670,9 +986,14 @@ def cmd_status(args) -> None:
 
     print(f"Track-forward status — {today_str}")
     print(f"  Total verdicts:      {len(rows)}")
-    print(f"  Scored:              {len(scored)}")
+    print(f"  Scored (price):      {len(scored)}")
     print(f"  Matured (unscored):  {len(matured_unscored)}  <- run --score")
     print(f"  Pending (horizon not reached): {len(pending)}")
+    print(f"  data_false_positive (BUY, out of price-Brier): {len(fp_rows)}")
+    buy_integrity = _buy_data_integrity_rate(rows)
+    if buy_integrity is not None:
+        print(f"  BUY data-integrity:  {buy_integrity*100:.1f}% "
+              f"({sum(1 for r in rows if r.get('rating')=='买入')} BUY verdicts)")
 
     if pending:
         earliest = None
@@ -805,7 +1126,103 @@ def _selftest() -> None:
     print(f"  PASS: rating→prob convention: 买入={RATING_PROB['买入']}, "
           f"观察={RATING_PROB['观察']}, 避开={RATING_PROB['避开']}")
 
-    print("\ntrack_forward selftest PASS — all Brier/calibration math verified")
+    # --- Test 8 (P12a): confidence-as-probability mapped by rating direction ---
+    # buy: p = 0.5 + (c - 0.5); avoid: p = 0.5 - (c - 0.5); watch: p = 0.5 always.
+    conf_cases = [
+        ("买入", 0.70, 0.70),
+        ("买入", 0.90, 0.90),
+        ("买入", 0.50, 0.50),
+        ("避开", 0.70, 0.30),
+        ("避开", 0.90, 0.10),
+        ("观察", 0.70, 0.50),   # neutral regardless of confidence
+        ("观察", 0.95, 0.50),
+    ]
+    for rating, conf, expected in conf_cases:
+        got = _implied_prob_from_confidence(rating, conf)
+        assert abs(got - expected) < 1e-9, (
+            f"_implied_prob_from_confidence({rating}, {conf}) = {got}, expected {expected}"
+        )
+    # Percentage form (70 -> 0.70) and None fallback to RATING_PROB.
+    assert abs(_implied_prob_from_confidence("买入", 70) - 0.70) < 1e-9, "pct-form confidence not normalized"
+    assert abs(_implied_prob_from_confidence("买入", None) - RATING_PROB["买入"]) < 1e-9, "None should fall back to RATING_PROB"
+    assert abs(_implied_prob_from_confidence("避开", None) - RATING_PROB["避开"]) < 1e-9, "None avoid fallback wrong"
+    # Direction symmetry: a buy and an avoid at the same confidence straddle 0.5 symmetrically.
+    pb = _implied_prob_from_confidence("买入", 0.80)
+    pa = _implied_prob_from_confidence("避开", 0.80)
+    assert abs((pb - 0.5) + (pa - 0.5)) < 1e-9, "buy/avoid not symmetric about 0.5"
+    # Clamp: extreme confidence stays in the open interval (Brier well-defined).
+    assert 0.0 < _implied_prob_from_confidence("买入", 1.0) < 1.0, "p=1.0 must be clamped open"
+    assert 0.0 < _implied_prob_from_confidence("避开", 1.0) < 1.0, "avoid p must be clamped open"
+    print("  PASS: confidence-as-probability — direction map, %-form, None fallback, symmetry, clamp")
+
+    # --- Test 9 (P12b): dividend-adjusted total return is the return basis ---
+    # The excess is computed from auto_adjust closes; verify the return arithmetic on adjusted prices.
+    entry, horizon = 100.0, 110.0       # +10% total return (price + reinvested dividends)
+    bm_entry, bm_horizon = 200.0, 206.0  # +3% benchmark total return
+    stock_return = (horizon - entry) / entry
+    bm_return = (bm_horizon - bm_entry) / bm_entry
+    excess = stock_return - bm_return
+    assert abs(stock_return - 0.10) < 1e-9, "total return arithmetic wrong"
+    assert abs(excess - 0.07) < 1e-9, f"excess total return wrong: {excess}"
+    assert abs(_brier(0.65, excess > 0) - (0.65 - 1.0) ** 2) < 1e-9, "Brier on total-return outcome wrong"
+    print(f"  PASS: dividend-adjusted total return — stock {stock_return:+.0%}, excess {excess:+.0%}")
+
+    # --- Test 10 (P12d): data_false_positive class excluded from price-Brier ---
+    fp_rows = _build_validation_fp_rows()
+    assert len(fp_rows) == 19, f"expected 19 validation FP rows, got {len(fp_rows)}"
+    assert len(VALIDATION_FP) == 19, f"VALIDATION_FP cohort must be 19, got {len(VALIDATION_FP)}"
+    for r in fp_rows:
+        assert r["adjudication"] == "data_false_positive", f"{r['ticker']} missing adjudication"
+        assert r["rating"] == "买入", f"{r['ticker']} FP must be rated 买入"
+        assert r["fp_cause"], f"{r['ticker']} missing fp_cause"
+        assert r["mos_pct"] is not None and r["mos_pct"] >= 30.0, f"{r['ticker']} MoS must be >=30%"
+        assert _is_data_false_positive(r), f"{r['ticker']} not recognized as data_false_positive"
+    tickers = [r["ticker"] for r in fp_rows]
+    assert len(set(tickers)) == 19, "duplicate ticker in validation FP cohort"
+    for must in ("SIGA", "GSL", "VSNT", "HCI", "CMRE"):
+        assert must in tickers, f"{must} missing from validation FP cohort"
+    # A FP BUY scored=True must NOT count toward the price-Brier population.
+    scored_fp = dict(fp_rows[0]); scored_fp["scored"] = True; scored_fp["brier"] = 0.1225
+    mixed = [
+        scored_fp,
+        {"rating": "观察", "scored": True, "brier": 0.25, "stock_return_pct": 5.0,
+         "realized_excess_pct": 2.0, "implied_prob": 0.5},
+    ]
+    ps = _price_scorable(mixed)
+    assert len(ps) == 1 and not _is_data_false_positive(ps[0]), (
+        "price-scorable population must exclude data_false_positive rows"
+    )
+    print(f"  PASS: data_false_positive class — 19-name cohort, all 买入/MoS>=30%, excluded from price-Brier")
+
+    # --- Test 11 (P12c): de-risk-native metrics (blowup-avoidance / downside-capture / BUY-integrity) ---
+    # BUY data-integrity: 19 FP + 1 clean BUY -> 1/20 = 0.05.
+    clean_buy = {"rating": "买入", "adjudication": None}
+    integ_rows = fp_rows + [clean_buy]
+    integ = _buy_data_integrity_rate(integ_rows)
+    assert abs(integ - (1.0 / 20.0)) < 1e-9, f"BUY data-integrity wrong: {integ}"
+    # All-FP -> 0.0; no BUY at all -> None.
+    assert _buy_data_integrity_rate(fp_rows) == 0.0, "all-FP integrity should be 0.0"
+    assert _buy_data_integrity_rate([{"rating": "观察"}]) is None, "no-BUY integrity should be None"
+    # Blowup-avoidance: 2 of 3 de-risk names avoided <= -40%.
+    derisk = [
+        {"rating": "观察", "scored": True, "stock_return_pct": -10.0},  # avoided
+        {"rating": "避开", "scored": True, "stock_return_pct": -55.0},  # blew up
+        {"rating": "避开", "scored": True, "stock_return_pct":  20.0},  # avoided
+    ]
+    ba = _blowup_avoidance_rate(derisk)
+    assert abs(ba - (2.0 / 3.0)) < 1e-9, f"blowup-avoidance wrong: {ba}"
+    assert _blowup_avoidance_rate([]) is None, "empty blowup-avoidance should be None"
+    # Downside-capture: 避开 that underperformed AND blew up = 1 of 2 避开.
+    dc_rows = [
+        {"rating": "避开", "scored": True, "stock_return_pct": -55.0, "realized_excess_pct": -30.0},  # captured
+        {"rating": "避开", "scored": True, "stock_return_pct":  20.0, "realized_excess_pct":  10.0},  # not
+    ]
+    dc = _downside_capture_rate(dc_rows)
+    assert abs(dc - 0.5) < 1e-9, f"downside-capture wrong: {dc}"
+    assert _downside_capture_rate([{"rating": "观察", "scored": True}]) is None, "no-避开 downside-capture should be None"
+    print(f"  PASS: de-risk metrics — integrity={integ:.2f}, blowup-avoid={ba:.2f}, downside-capture={dc:.2f}")
+
+    print("\ntrack_forward selftest PASS — all Brier/calibration/de-risk/FP math verified")
 
 
 # ---------------------------------------------------------------------------
@@ -834,6 +1251,9 @@ def main() -> None:
                     choices=["fcf_cap", "nav", "abstain"],
                     help="mos_basis for single-verdict --record")
     ap.add_argument("--catalyst", default="null", help="Catalyst string or null")
+    ap.add_argument("--confidence", default="", dest="confidence",
+                    help="Model confidence 0..1 (P12a). Mapped to implied_prob by rating "
+                         "direction. Omit to use the fixed RATING_PROB convention.")
     ap.add_argument("--kill-flags", default="", dest="kill_flags",
                     help="Comma-separated kill flags")
     ap.add_argument("--theme", default="", help="Theme slug")
@@ -849,6 +1269,9 @@ def main() -> None:
                     help="Fetch historical entry_price/benchmark_entry_price for seeded verdicts "
                          "with null prices. Idempotent — skips rows already filled. "
                          "Use this (not --record) to add prices to existing rows.")
+    ap.add_argument("--backfill-validation-fp", action="store_true", dest="backfill_validation_fp",
+                    help="Inject the 19 validation BUY false-positives as adjudication="
+                         "data_false_positive (P12d). Idempotent. Kept out of the price-Brier.")
     ap.add_argument("--selftest", action="store_true",
                     help="Run synthetic Brier math selftest (no network)")
     args = ap.parse_args()
@@ -876,6 +1299,10 @@ def main() -> None:
 
     if args.backfill:
         cmd_backfill(args)
+        return
+
+    if args.backfill_validation_fp:
+        cmd_backfill_validation_fp(args)
         return
 
     ap.print_help()
