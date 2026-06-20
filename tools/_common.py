@@ -23,7 +23,11 @@ def load_config() -> dict:
 
 CFG = load_config()
 UA = {"User-Agent": CFG["sec_user_agent"]}
-REPORTS = Path(CFG["output_dir"])
+# Batch runs: SMALLCAP_RUN (e.g. "2026-06-19_aginput") routes all outputs into a
+# per-run subdir so each run's candidates/cheappass/deepdive/valuation/reports stay
+# together and runs (and skill versions) can be compared. Unset => flat (legacy).
+_RUN = os.environ.get("SMALLCAP_RUN", "").strip().strip("/\\")
+REPORTS = (Path(CFG["output_dir"]) / _RUN) if _RUN else Path(CFG["output_dir"])
 REPORTS.mkdir(parents=True, exist_ok=True)
 
 def init_edgar() -> None:

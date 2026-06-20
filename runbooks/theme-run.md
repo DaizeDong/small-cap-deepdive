@@ -26,6 +26,18 @@ This is the only required field — all other keys have defaults.
 
 ---
 
+## Open a run batch (do this at the start of every run)
+
+```bash
+export SMALLCAP_RUN=$(python tools/new_run.py --label <theme>)   # e.g. --label aginput
+```
+
+All outputs for this run then land together in `reports/smallcap/<date>_<label>/`, with a
+`_run.json` manifest (date, skill git commit, config snapshot) so runs stay comparable across
+skill versions. Unset `SMALLCAP_RUN` → flat `reports/smallcap/` (legacy).
+
+---
+
 ## Recommended: One-Command Theme Run
 
 The easiest way to run the full mechanical pipeline (discover → cheap_pass → SIC filter):
