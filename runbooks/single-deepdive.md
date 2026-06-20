@@ -22,6 +22,14 @@ cp reference/config.example.json \
 Set `"sec_user_agent"` in `config.json` to your real name and email.
 EDGAR blocks requests with a missing or obviously fake User-Agent.
 
+Then open a run batch (start of every run) so outputs stay grouped and version-comparable:
+
+```bash
+export SMALLCAP_RUN=$(python tools/new_run.py --label <ticker>)   # e.g. --label EGAN
+```
+
+→ outputs land in `reports/smallcap/<date>_<label>/` with a `_run.json` manifest. Unset → flat (legacy).
+
 ---
 
 ## Step 1 — Mechanical De-Risk First
