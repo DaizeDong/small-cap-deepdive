@@ -230,6 +230,14 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     if der.get("wrong_entity_suspected"):
         _we_reason = der.get("wrong_entity_reason", "")
         dq.append(f"wrong_entity_suspected:{_we_reason}")
+    # P-B: low_revenue_loss_ratio is a DATA-QUALITY LABEL ONLY (early/pre-revenue resource
+    # pattern: present-but-tiny revenue + large genuine loss). It surfaces in data_quality so a
+    # PM sees the real cause (right entity, tiny revenue) instead of the old wrong_entity misfire.
+    # It does NOT by itself flip buy_eligible — those names stay blocked by their null/negative
+    # FCF (MoS null) as before, NOT by this label.
+    if der.get("low_revenue_loss_ratio"):
+        _lrl_detail = der.get("low_revenue_loss_ratio_detail", "")
+        dq.append(f"low_revenue_loss_ratio:{_lrl_detail}")
 
     # --- C2: financial-SIC guard — exclude financial sector from FCF-cap model ---
     # SIC prefixes: 60=banks, 61=non-depository credit, 63=insurance carriers,
@@ -622,6 +630,21 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
             f"latest_below_avg={der.get('latest_below_avg')}"
         )
 
+    # --- P-A: peak_contamination veto (downgrade-only, independent of rev_slope_sign) ---
+    # Read the producer's peak_contamination_flag (contamination_ratio<0.8 AND latest_below_avg
+    # AND latest_net_income<0). This is the V-shape value-trap catch (trough->peak->rollover)
+    # that fundamental_decline_flag MISSES because that flag is gated on rev_slope_sign<0; on a
+    # V-shape the whole-window slope is +1 so fundamental_decline_flag stays False (NRP). When set,
+    # a static-MoS BUY must be downgraded BUY->WATCH, exactly like fundamental_decline_flag.
+    # Downgrade-only: it NEVER manufactures a BUY and never upgrades.
+    _peak_contamination_flag = bool(der.get("peak_contamination_flag", False))
+    if _peak_contamination_flag:
+        dq.append(
+            f"peak_contamination_veto:contamination_ratio={_contamination_ratio},"
+            f"latest_below_avg={der.get('latest_below_avg')},"
+            f"latest_net_income={der.get('latest_net_income')}"
+        )
+
     # --- P3: concentration kill-flag (read from producer) ---
     # concentration_flag is composed by the producer from XBRL segment members:
     #   "kill"  if top_program_pct>60 OR top_customer_pct>40
@@ -660,6 +683,9 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         _buy_ineligible_reasons.append("concentration_kill")
     if _fundamental_decline_flag:
         _buy_ineligible_reasons.append("fundamental_decline_flag")
+    # P-A: peak_contamination_flag downgrades BUY->WATCH like fundamental_decline_flag.
+    if _peak_contamination_flag:
+        _buy_ineligible_reasons.append("peak_contamination_flag")
     _buy_eligible = len(_buy_ineligible_reasons) == 0
 
     # --- Assemble output ---
@@ -713,6 +739,12 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         # P6: fundamental-trajectory veto (read from producer derived)
         "fundamental_decline_flag": _fundamental_decline_flag,
         "contamination_ratio": _contamination_ratio,
+        # P-A: V-shape value-trap veto (read from producer derived; independent of slope)
+        "peak_contamination_flag": _peak_contamination_flag,
+        # P-B: early/pre-revenue resource label (data-quality only; does NOT flip buy_eligible)
+        "low_revenue_loss_ratio": bool(der.get("low_revenue_loss_ratio", False)),
+        # P-G: filing-form provenance (10-K/20-F/40-F) for the trust banner
+        "form_used": der.get("form_used"),
         # P3: concentration kill/watch (read from producer derived)
         "concentration_flag": _concentration_flag,
         "top_customer_pct": der.get("top_customer_pct"),
@@ -841,6 +873,8 @@ def _print_valuation_summary(block: dict) -> None:
           f"(cust={block.get('top_customer_pct')} prog={block.get('top_program_pct')})")
     print(f"  Decline flag:    {block.get('fundamental_decline_flag')} "
           f"(contamination={block.get('contamination_ratio')})  Lumpy-OCF: {block.get('lumpy_ocf_normalization_suspect')}")
+    print(f"  Peak-contam flag:{block.get('peak_contamination_flag')}  "
+          f"Low-rev-loss: {block.get('low_revenue_loss_ratio')}  Form: {block.get('form_used')}")
     print(f"  EBIT source:     {block.get('ebit_source')}")
     dq = block.get("data_quality", [])
     if dq:
@@ -1257,6 +1291,9 @@ def _selftest():
             "rev_accel_sign": 0,
             "latest_below_avg": False,
             "contamination_ratio": 1.05,
+            "peak_contamination_flag": False,
+            "low_revenue_loss_ratio": False,
+            "form_used": "10-K",
         },
         "financials": {
             "assets": [{"end": "2024-12-31", "val": 200_000_000}],
@@ -1288,7 +1325,22 @@ def _selftest():
     assert _block_clean.get("ev_ebitda") is not None and _block_clean.get("ev_ebitda") > 0, (
         f"P9: ev_ebitda must compute on a clean name, got {_block_clean.get('ev_ebitda')}"
     )
+    # P-A/P-B/P-G corollary on the clean name: the new fields propagate with safe defaults and
+    # the clean name is NOT blocked by either new flag.
+    assert _block_clean.get("peak_contamination_flag") is False, (
+        f"P-A: clean name must have peak_contamination_flag=False, got {_block_clean.get('peak_contamination_flag')}"
+    )
+    assert "peak_contamination_flag" not in _block_clean.get("buy_ineligible_reasons", []), (
+        "P-A: clean name must NOT carry peak_contamination_flag in buy_ineligible_reasons"
+    )
+    assert _block_clean.get("low_revenue_loss_ratio") is False, (
+        f"P-B: clean name must have low_revenue_loss_ratio=False, got {_block_clean.get('low_revenue_loss_ratio')}"
+    )
+    assert _block_clean.get("form_used") == "10-K", (
+        f"P-G: form_used must propagate from producer derived, got {_block_clean.get('form_used')!r}"
+    )
     print("  P1 clean name: buy_eligible=True, no reasons; P9 ev_ebitda computes  OK")
+    print("  P-A/P-B/P-G clean name: peak_flag=False low_rev_loss=False form=10-K propagated  OK")
 
     # (ii) fundamental_decline_flag => buy_eligible False (downgrade veto)
     _dd_decline = dict(_dd_clean_base)
@@ -1331,6 +1383,150 @@ def _selftest():
         "P3: concentration_kill must appear in data_quality list"
     )
     print("  P3 concentration kill: forces buy_eligible=False  OK")
+
+    # --- P-A: peak_contamination_flag => buy_eligible False (V-shape value-trap veto) ---
+    # NRP-class: a clean MECHANICAL BUY (rev_slope_sign=+1 so fundamental_decline_flag stays
+    # False) that is actually a melting ice cube — the producer set peak_contamination_flag on
+    # the V-shape (contamination<0.8 AND latest_below_avg AND latest_NI<0). valuation must read
+    # the flag, downgrade BUY->WATCH, and surface the veto — WITHOUT fundamental_decline_flag.
+    _dd_peak = dict(_dd_clean_base)
+    _dd_peak["derived"] = dict(_dd_clean_base["derived"])
+    _dd_peak["ticker"] = "TEST_NRP_VSHAPE"
+    _dd_peak["derived"]["peak_contamination_flag"] = True
+    _dd_peak["derived"]["fundamental_decline_flag"] = False   # V-shape: slope is +1
+    _dd_peak["derived"]["rev_slope_sign"] = 1
+    _dd_peak["derived"]["latest_below_avg"] = True
+    _dd_peak["derived"]["contamination_ratio"] = 0.7445       # NRP documented value
+    _dd_peak["derived"]["latest_net_income"] = -84_800_000    # NRP latest NI
+    _block_peak = compute_valuation(_dd_peak, 120_000_000, cfg)
+    assert _block_peak.get("peak_contamination_flag") is True, (
+        "P-A: producer peak_contamination_flag must be read into the valuation block"
+    )
+    assert _block_peak.get("fundamental_decline_flag") is False, (
+        "P-A: fundamental_decline_flag must stay False on the V-shape (independent catch)"
+    )
+    assert _block_peak.get("buy_eligible") is False, (
+        "P-A: peak_contamination_flag must force buy_eligible=False (downgrade BUY->WATCH)"
+    )
+    assert "peak_contamination_flag" in _block_peak.get("buy_ineligible_reasons", []), (
+        "P-A: peak_contamination_flag must appear in buy_ineligible_reasons"
+    )
+    assert "fundamental_decline_flag" not in _block_peak.get("buy_ineligible_reasons", []), (
+        "P-A: the V-shape must be blocked by peak_contamination_flag ALONE, not decline_flag"
+    )
+    assert any("peak_contamination_veto" in str(x) for x in _block_peak.get("data_quality", [])), (
+        "P-A: peak_contamination_veto must appear in data_quality list"
+    )
+    print("  P-A peak_contamination veto: V-shape buy_eligible=False via peak flag ALONE "
+          "(decline_flag stays False)  OK")
+
+    # --- P-B: low_revenue_loss_ratio is DATA-QUALITY ONLY and does NOT flip buy_eligible ---
+    # A name carrying ONLY low_revenue_loss_ratio (no other blocking flag) must surface the label
+    # in data_quality but NOT add it to buy_ineligible_reasons. CRITICAL: it must not relabel a
+    # previously-blocked name into buy_eligible=true, and it must not itself create a block.
+    _dd_lrl = dict(_dd_clean_base)
+    _dd_lrl["derived"] = dict(_dd_clean_base["derived"])
+    _dd_lrl["ticker"] = "TEST_LOW_REV_LOSS"
+    _dd_lrl["derived"]["low_revenue_loss_ratio"] = True
+    _dd_lrl["derived"]["low_revenue_loss_ratio_detail"] = (
+        "latest_net_income=-120.0M vs revenue=45.0M (|NI|/rev=2.7x) — early/pre-revenue resource pattern, right entity"
+    )
+    _block_lrl = compute_valuation(_dd_lrl, 120_000_000, cfg)
+    assert _block_lrl.get("low_revenue_loss_ratio") is True, (
+        "P-B: producer low_revenue_loss_ratio must be read into the valuation block"
+    )
+    assert any("low_revenue_loss_ratio" in str(x) for x in _block_lrl.get("data_quality", [])), (
+        "P-B: low_revenue_loss_ratio must surface in the data_quality list"
+    )
+    assert "low_revenue_loss_ratio" not in _block_lrl.get("buy_ineligible_reasons", []), (
+        "P-B: low_revenue_loss_ratio is a label ONLY — must NOT enter buy_ineligible_reasons"
+    )
+    # The label alone (clean-name base, fcf_cap route) leaves buy_eligible unchanged from clean.
+    assert _block_lrl.get("buy_eligible") == _block_clean.get("buy_eligible"), (
+        "P-B: low_revenue_loss_ratio must NOT change buy_eligible vs the otherwise-identical clean name"
+    )
+    print("  P-B low_revenue_loss_ratio: surfaced in data_quality, does NOT flip buy_eligible  OK")
+
+    # P-B regression: the relabel must not flip a PREVIOUSLY-BLOCKED name to buy_eligible=true.
+    # Take the real-world early-revenue resource pattern (null FCF -> MoS null, the historical
+    # block) and assert that even WITH low_revenue_loss_ratio set it stays NOT buy_eligible.
+    _dd_blocked = {
+        "ticker": "TEST_URG_LIKE",
+        "derived": {
+            "latest_cash": 30_000_000,
+            "latest_total_debt": 50_000_000,
+            "latest_revenue": 45_000_000,
+            "latest_net_income": -120_000_000,
+            "latest_ocf": None,               # no OCF -> FCF null -> MoS null (the real block)
+            "latest_ebit": None,
+            "latest_dep_amort": None,
+            "latest_capex": None,
+            "latest_ebitda": None,
+            "latest_fcf": None,
+            "fcf_is_ocf_proxy": False,
+            "latest_goodwill": 0,
+            "latest_intangibles": 0,
+            "sic": "1040",                    # gold/metal mining, non-financial
+            "debt_truncation_suspected": False,
+            "debt_stale": False,
+            "wrong_entity_suspected": False,  # P-B: NOT mislabeled as wrong entity anymore
+            "low_revenue_loss_ratio": True,   # P-B: surfaced as the correct label instead
+            "low_revenue_loss_ratio_detail": "early-revenue resource pattern, right entity",
+            "data_quality_warn": None,
+            "debt_source": "LongTermDebt",
+            "ebit_source": None,
+            "concentration_flag": None,
+            "top_customer_pct": None,
+            "top_program_pct": None,
+            "fundamental_decline_flag": False,
+            "peak_contamination_flag": False,
+            "rev_slope_sign": 1,
+            "rev_accel_sign": 0,
+            "latest_below_avg": False,
+            "contamination_ratio": None,
+            "form_used": "10-K",
+        },
+        "financials": {
+            "assets": [{"end": "2024-12-31", "val": 400_000_000}],
+            "equity": [{"end": "2024-12-31", "val": 250_000_000}],
+            "ocf": [],                        # empty -> no FCF
+            "revenue": [{"end": "2024-12-31", "val": 45_000_000}],
+            "shares_outstanding": [{"end": "2024-12-31", "val": 350_000_000}],
+        },
+    }
+    _block_blocked = compute_valuation(_dd_blocked, 200_000_000, cfg)
+    # CRITICAL (per data contract): the relabel removed the OLD wrong_entity_suspected misfire
+    # from buy_ineligible_reasons, so it must NOT have introduced low_revenue_loss_ratio as a
+    # block, and — most importantly — the name must remain a NON-tradeable BUY because its FCF/MoS
+    # is null. A tradeable BUY downstream requires mos_basis=="fcf_cap" AND a NUMERIC MoS>=30; a
+    # null MoS can never satisfy that. We assert the real block (MoS null) holds regardless of
+    # whatever buy_eligible reports, AND that low_revenue_loss_ratio never became a block reason.
+    assert "low_revenue_loss_ratio" not in _block_blocked.get("buy_ineligible_reasons", []), (
+        "P-B CRITICAL: low_revenue_loss_ratio must NEVER be a buy_ineligible reason"
+    )
+    assert "wrong_entity_suspected" not in _block_blocked.get("buy_ineligible_reasons", []), (
+        "P-B: wrong_entity_suspected must no longer block the early-revenue resource pattern"
+    )
+    assert _block_blocked.get("margin_of_safety_pct") is None, (
+        f"P-B CRITICAL: the early-revenue resource name must keep null FCF MoS (the real, "
+        f"unchanged block — a null MoS can never reach the BUY trigger's MoS>=30 gate), "
+        f"got {_block_blocked.get('margin_of_safety_pct')}"
+    )
+    # Belt-and-suspenders: a null MoS cannot constitute a tradeable BUY no matter what
+    # buy_eligible says — encode that the BUY trigger (mos_basis==fcf_cap AND MoS>=30) fails.
+    _mos_blocked = _block_blocked.get("margin_of_safety_pct")
+    _tradeable_buy = (
+        _block_blocked.get("buy_eligible") is True
+        and _block_blocked.get("mos_basis") == "fcf_cap"
+        and _mos_blocked is not None and _mos_blocked >= 0.30
+    )
+    assert _tradeable_buy is False, (
+        f"P-B CRITICAL: the relabel must NOT flip the previously-blocked early-revenue name into "
+        f"a tradeable BUY; got buy_eligible={_block_blocked.get('buy_eligible')} "
+        f"mos_basis={_block_blocked.get('mos_basis')} mos={_mos_blocked}"
+    )
+    print("  P-B relabel safety: previously-blocked early-rev name stays NON-tradeable "
+          "(MoS null; low_rev_loss never a block)  OK")
 
     # --- P10: lumpy-OCF normalization guard fires on a peak year > 2x median ---
     # Cyclical series with one BARDA-like peak (95M) vs others (~11-49M); contamination<1.

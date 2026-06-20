@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -155,6 +156,35 @@ def _mos_field(v) -> str:
         return "null"
 
 
+# P-E — a prose `<...>` token (e.g. "<One sentence ...>", "<e.g. ...>") that the agent never
+# filled. Non-greedy, no nested '<', so the `—` em-dashes and inline quotes inside a placeholder
+# are tolerated. The fenced rating block uses ' # ' comments (not angle brackets) and the trust
+# banner has no '<...>', so this NEVER touches the machine-decision layer.
+_PLACEHOLDER_RE = re.compile(r"<[^<>]*>")
+_PLACEHOLDER_FILLER = "_(待补)_"  # neutral "to be filled" marker — never a literal <...> token
+
+
+def strip_placeholders(md: str) -> str:
+    """Replace every unfilled prose `<...>` placeholder with a neutral '_(待补)_' marker so a PM
+    never reads a literal angle-bracket template token (P-E), then tidy lines that became just a
+    label + marker or an empty list bullet.
+
+    The machine-decision block (fenced ```rating``` contract + DATA-QUALITY TRUST BANNER) carries
+    no `<...>` tokens, so it is preserved byte-for-byte. Idempotent: a report with no placeholders
+    is returned unchanged.
+    """
+    out_lines: list[str] = []
+    for line in md.splitlines():
+        new = _PLACEHOLDER_RE.sub(_PLACEHOLDER_FILLER, line)
+        # A bullet/line that is now ONLY the filler (the entire content was a placeholder) is
+        # noise — drop a bare "- _(待补)_" but keep "Label: _(待补)_" (the label is informative).
+        stripped = new.strip()
+        if stripped in ("- " + _PLACEHOLDER_FILLER, _PLACEHOLDER_FILLER):
+            continue
+        out_lines.append(new)
+    return "\n".join(out_lines)
+
+
 def build_trust_banner(flags: list[str]) -> str:
     """The DATA-QUALITY TRUST BANNER rendered under the rating. Always present (even when
     clean) so a PM knows the check ran — an empty banner is itself a signal."""
@@ -262,7 +292,9 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
         "- <assumption that is load-bearing but unverified>",
         "",
     ]
-    return "\n".join(parts)
+    # P-E: strip unfilled prose `<...>` placeholders (the machine-decision block has none, so it
+    # is preserved). A PM never sees literal template tokens; numbers already pre-filled remain.
+    return strip_placeholders("\n".join(parts))
 
 
 def _find_deepdive(ticker: str, reports_dir: Path) -> Path | None:
@@ -380,6 +412,21 @@ def _selftest() -> None:
     assert parsed_clean["buy_eligible"] is True, "clean buy_eligible true"
     assert parsed_clean["killflag_count"] == 0, "clean killflag_count 0"
 
+    # P-E: rendered report must contain NO literal `<...>` prose placeholder tokens — a PM never
+    # sees template skeletons. The machine-decision block (rating contract + trust banner) must
+    # still be intact and parseable after stripping.
+    assert _PLACEHOLDER_RE.search(md) is None, "no literal <...> placeholder may survive (P-E)"
+    assert "<One sentence" not in md and "<e.g." not in md, "specific placeholders stripped"
+    assert "```rating" in md and "DATA-QUALITY TRUST BANNER" in md, \
+        "machine-decision block survives placeholder stripping"
+    assert parse_rating_block(md)["mos_basis"] == "fcf_cap", "rating block still parses after strip"
+    # strip_placeholders is idempotent and surgical: a clean line is untouched; a bare bullet drops.
+    assert strip_placeholders("plain line") == "plain line", "clean line unchanged"
+    assert strip_placeholders("- <foo>") == "", "bare placeholder bullet dropped"
+    assert strip_placeholders("Catalyst: <x>") == "Catalyst: " + _PLACEHOLDER_FILLER, \
+        "labelled placeholder keeps label + marker"
+    assert _PLACEHOLDER_RE.search(md_clean) is None, "clean-company report also placeholder-free"
+
     # 4. UTF-8 read helper round-trips (GBK friction — G5).
     import tempfile, os
     fd, p = tempfile.mkstemp(suffix=".json")
@@ -389,7 +436,8 @@ def _selftest() -> None:
     os.unlink(p)
 
     print("make_report selftest PASS (trust banner surfaces flags + fenced rating contract parses "
-          "+ clean-banner + killflag count incl. concentration + utf-8 read)")
+          "+ clean-banner + killflag count incl. concentration + utf-8 read + P-E no literal "
+          "<...> placeholders survive while machine-decision block preserved)")
 
 
 # parse_rating_block is defined in finalize_run; import lazily for selftest reuse to keep a
