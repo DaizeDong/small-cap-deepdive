@@ -117,19 +117,70 @@ def load_hard_data(ticker: str, reports_dir=None) -> dict:
             "material_weakness": tk.get("has_material_weakness")}
 
 
-def compute_funnel_stats() -> tuple[int, int]:
-    """Compute actual funnel numbers from files present.
+def compute_funnel_stats(reports_dir=None) -> dict:
+    """Compute the run's honest funnel from the files present in reports_dir.
 
-    Returns:
-        (universe_count, deepdive_count) — count of report_*.md and deepdive_*.json files
+    P-H: the old narration read "{report_count} 召回 → {deepdive_count} 小盘候选", which on the
+    uranium run rendered "9 召回 → 10 小盘候选" — recall < candidates is nonsensical and both
+    labels were wrong (both numbers were just the deep-dived count). The real funnel narrows
+    candidates -> deep-band -> deep-dived, so we read the candidates JSON for the true upstream
+    counts instead of mislabeling the report/deepdive file counts.
+
+    Returns a dict:
+        candidates   — rows in candidates_*.json (theme universe after gates), or None if absent
+        deep_band    — rows with band == "deep" in candidates_*.json, or None if absent
+        deepdived    — number of deepdive_*.json files (names that got a full deep-dive)
+        reports      — number of report_*.md files (names with a decision-ready report)
+    Counts that can't be derived are None so the template can omit that stage rather than print a
+    contradictory number.
     """
-    reports = glob.glob(str(REPORTS / "report_*.md"))
-    deepdives = glob.glob(str(REPORTS / "deepdive_*.json"))
+    base = reports_dir if reports_dir is not None else REPORTS
+    reports = glob.glob(str(base / "report_*.md"))
+    deepdives = glob.glob(str(base / "deepdive_*.json"))
 
-    universe = len(reports)
-    deepdive = len(deepdives)
+    candidates = None
+    deep_band = None
+    # Prefer the theme candidates file (candidates_<slug>.json); fall back to all_candidates.json.
+    cand_files = [f for f in glob.glob(str(base / "candidates_*.json"))
+                  if "gate2_survivors" not in Path(f).name] \
+        or glob.glob(str(base / "all_candidates.json"))
+    rows: list = []
+    for cf in sorted(cand_files):
+        try:
+            d = json.load(open(cf, encoding="utf-8"))
+        except Exception:
+            continue
+        r = d if isinstance(d, list) else d.get("candidates", [])
+        if isinstance(r, list):
+            rows.extend(x for x in r if isinstance(x, dict))
+    if rows:
+        candidates = len(rows)
+        deep_band = sum(1 for x in rows if x.get("band") == "deep")
 
-    return universe, deepdive
+    return {
+        "candidates": candidates,
+        "deep_band": deep_band,
+        "deepdived": len(deepdives),
+        "reports": len(reports),
+    }
+
+
+def funnel_line(stats: dict, survivors: int) -> str:
+    """Render the funnel narration as a single monotonically-narrowing chain (P-H).
+
+    Only stages with a real count are shown, in narrowing order, so the line can never read a
+    larger number downstream of a smaller one. `survivors` is the cheap-pass survivor count
+    (rows in the ranked frame).
+    """
+    stages: list[str] = []
+    if stats.get("candidates") is not None:
+        stages.append(f"{stats['candidates']} 候选")
+    if stats.get("deep_band") is not None:
+        stages.append(f"{stats['deep_band']} 小盘(deep band)")
+    stages.append(f"{stats['deepdived']} 家逐一 deep dive")
+    if survivors != stats["deepdived"]:
+        stages.append(f"cheap pass 幸存 {survivors}")
+    return "> 漏斗:" + " → ".join(stages) + "。AVOID/kill-flag≥2 一律沉底。**研究输出,非投资建议。**"
 
 
 def rank_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -190,7 +241,38 @@ def _selftest() -> None:
     df_nohard = pd.DataFrame([{"ticker": "RPT", "rating_score": 2, "confidence": 60}])
     out = rank_frame(df_nohard)
     assert bool(out.iloc[0]["sink"]) is False, "report-only row (no killflags col) survives, no crash"
-    print("rank selftest PASS (extract_rating parsing + sink/ordering: AVOID & kill-flag>=2 sink)")
+
+    # P-H: funnel narration is a monotonically-narrowing chain with TRUE labels — never the old
+    # garbled "9 召回 → 10 小盘候选" (recall < candidates). Reconstruct the uranium funnel.
+    uranium = {"candidates": 68, "deep_band": 42, "deepdived": 9, "reports": 9}
+    fl = funnel_line(uranium, survivors=9)
+    assert "68 候选" in fl and "42 小盘" in fl and "9 家逐一 deep dive" in fl, f"funnel stages: {fl}"
+    assert "召回" not in fl, "old mislabel '召回' must be gone (P-H)"
+    # the chain must be strictly non-increasing in the numbers it prints (no 9->10 inversion)
+    nums = [int(x) for x in re.findall(r"(\d+)", fl)]
+    assert nums == sorted(nums, reverse=True), f"funnel numbers must narrow monotonically: {nums}"
+    # compute_funnel_stats reads candidates JSON for true counts (not the report/deepdive counts).
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        rd = Path(td)
+        json.dump([{"ticker": "A", "band": "deep"}, {"ticker": "B", "band": "deep"},
+                   {"ticker": "C", "band": "watch"}],
+                  open(rd / "candidates_theme.json", "w", encoding="utf-8"))
+        # a gate2_survivors file must NOT be counted as the candidate universe
+        json.dump([{"ticker": "A", "band": "deep"}],
+                  open(rd / "candidates_gate2_survivors.json", "w", encoding="utf-8"))
+        (rd / "deepdive_A_2026-06-20.json").write_text("{}", encoding="utf-8")
+        (rd / "report_A.md").write_text("x", encoding="utf-8")
+        st = compute_funnel_stats(rd)
+        assert st["candidates"] == 3, f"candidates from theme file (gate2_survivors excluded): {st}"
+        assert st["deep_band"] == 2, f"deep-band count: {st}"
+        assert st["deepdived"] == 1 and st["reports"] == 1, f"deepdive/report counts: {st}"
+    # no candidates file -> candidates/deep_band None, line omits those stages (no crash/contradiction)
+    fl2 = funnel_line({"candidates": None, "deep_band": None, "deepdived": 5, "reports": 5}, 5)
+    assert "候选" not in fl2 and "5 家逐一 deep dive" in fl2, f"funnel omits absent stages: {fl2}"
+
+    print("rank selftest PASS (extract_rating parsing + sink/ordering: AVOID & kill-flag>=2 sink "
+          "+ P-H funnel narration narrows monotonically with true labels)")
 
 
 def main():
@@ -236,16 +318,13 @@ def main():
     # 排序:AVOID(rating_score=1)或 kill-flag>=2 沉底;其余按 评级分*置信度
     df = rank_frame(df)
 
-    # Compute actual funnel numbers from the selected reports_dir
-    report_all = glob.glob(str(reports_dir / "report_*.md"))
-    deepdive_all = glob.glob(str(reports_dir / "deepdive_*.json"))
-    universe_count, deepdive_count = len(report_all), len(deepdive_all)
+    # Compute the honest funnel from the selected reports_dir (P-H: narrowing chain, true labels).
+    stats = compute_funnel_stats(reports_dir)
 
     date = today()
     slug_label = f" [{args.slug}]" if args.slug else ""
     lines = [f"# 小盘深度调研排序{slug_label} — {date}", "",
-             f"> 漏斗:{universe_count} 召回 → {deepdive_count} 小盘候选 → cheap pass 幸存 {len(df)} →",
-             f"> {len(df)} 家微盘逐一 deep dive。AVOID/kill-flag≥2 一律沉底。**研究输出,非投资建议。**", "",
+             funnel_line(stats, len(df)), "",
              "## 排序", "",
              "| 排名 | 代码 | 评级 | 置信 | 营收 | 净利 | OCF | 增速 | 稀释 | 内部人 | kill-flag |",
              "|---|---|---|---|---|---|---|---|---|---|---|"]

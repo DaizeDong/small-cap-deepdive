@@ -54,6 +54,83 @@ def read_text_utf8(path: str | Path) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
+# ---------------------------------------------------------------------------
+# P-C — path-doubling guard. The uranium run wrote valuation_*.json to
+# reports/smallcap/<run>/reports/smallcap/<run>/ because a run-relative --out/SMALLCAP_RUN
+# was prefixed twice across invocation styles. Two defenses:
+#   (1) collapse_run_path() — idempotent normalization of a run dir: if a path already ends
+#       with the run-dir tail twice (.../reports/smallcap/<run>/reports/smallcap/<run>),
+#       collapse to a single occurrence so re-resolution never doubles.
+#   (2) repair_nested_run_tree() — if a finalized run dir contains a nested
+#       reports/smallcap/.../reports/smallcap/... subtree (the doubled artifacts), lift the
+#       leaf files up into the real run dir and prune the empty nested skeleton.
+# ---------------------------------------------------------------------------
+
+# Matches a doubled segment: [.../]reports/smallcap/<run>/reports/smallcap/<run> where the
+# <run> segment is repeated. Anchored at a path boundary (start, or after a '/') so a run dir
+# literally named "smallcap" can't be mistaken for the marker.
+_DOUBLED_RE = re.compile(
+    r"(?P<head>(?:.*/)?reports/smallcap/(?P<run>[^/]+))"
+    r"/reports/smallcap/(?P=run)(?P<tail>(?:/.*)?)$"
+)
+
+
+def collapse_run_path(path: str | Path) -> Path:
+    """Idempotently collapse a doubled run-dir prefix to a single occurrence.
+
+    `[.../]reports/smallcap/<run>/reports/smallcap/<run>[/x]` -> `[.../]reports/smallcap/<run>[/x]`.
+    A non-doubled path is returned unchanged. Applied repeatedly until stable so triple-nesting
+    (theoretically possible across >2 invocation styles) also collapses.
+    """
+    s = str(path).replace("\\", "/")
+    while True:
+        m = _DOUBLED_RE.match(s)
+        if not m:
+            break
+        s = m.group("head") + m.group("tail")
+    return Path(s)
+
+
+def repair_nested_run_tree(reports_dir: Path) -> list[Path]:
+    """Repair a doubled output tree under reports_dir.
+
+    If reports_dir contains a nested `reports/smallcap/<run>/` subtree (the path-doubling
+    artifact), move every file from the deepest nested leaf up into reports_dir (without
+    clobbering an existing same-named file) and remove the now-empty nested skeleton.
+    Returns the list of files relocated. No-op (empty list) when no nested tree exists.
+    """
+    moved: list[Path] = []
+    nested_root = reports_dir / "reports" / "smallcap"
+    if not nested_root.is_dir():
+        return moved
+    # Each child of nested_root is a doubled <run> dir; lift its files (recursively) up.
+    for run_sub in sorted(nested_root.iterdir()):
+        if not run_sub.is_dir():
+            continue
+        for src in sorted(run_sub.rglob("*")):
+            if not src.is_file():
+                continue
+            dest = reports_dir / src.name
+            if dest.exists():
+                # Don't clobber a correctly-placed artifact; leave the dupe in place but report.
+                sys.stderr.write(
+                    f"WARNING: nested-tree repair skipped {src} (dest {dest} already exists)\n")
+                continue
+            src.replace(dest)
+            moved.append(dest)
+    # Prune the now-empty nested skeleton (reports/smallcap[/<run>...]).
+    try:
+        for d in sorted(nested_root.rglob("*"), reverse=True):
+            if d.is_dir() and not any(d.iterdir()):
+                d.rmdir()
+        for d in (nested_root, reports_dir / "reports"):
+            if d.is_dir() and not any(d.iterdir()):
+                d.rmdir()
+    except OSError:
+        pass
+    return moved
+
+
 def read_json_utf8(path: str | Path) -> dict | list:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -193,11 +270,78 @@ def report_tickers(reports_dir: Path) -> set[str]:
     return out
 
 
+def _tickers_from_json(path: str) -> set[str]:
+    """Best-effort: collect ticker/symbol values from a list-or-{candidates:[...]} JSON file."""
+    out: set[str] = set()
+    try:
+        data = read_json_utf8(path)
+    except Exception:
+        return out
+    rows = data if isinstance(data, list) else data.get("results", data.get("candidates", []))
+    if not isinstance(rows, list):
+        return out
+    for row in rows:
+        if isinstance(row, dict):
+            tk = row.get("ticker") or row.get("symbol")
+            if tk:
+                out.add(str(tk).upper())
+    return out
+
+
+def gate2_misrecall_tickers(reports_dir: Path) -> set[str]:
+    """Tickers that Gate 2 resolved (theme misrecall) and therefore intentionally did NOT deep-dive.
+
+    P-F: a deep-band name dropped by the Gate-2 theme-fit pass is RESOLVED, not a forgotten
+    deep-dive. finalize_run must subtract these from 'missing' so the completeness check stops
+    emitting the spurious "33 missing" warning. Two persisted representations are supported, since
+    runs differ in what they wrote:
+
+      1. gate2_results.json with explicit per-row theme_fit == 'misrecall' (royalty run).
+      2. candidates_gate2_survivors.json listing the names that PASSED Gate 2 — every deep-band
+         candidate NOT among the survivors was gated out as misrecall (uranium run, which never
+         tagged theme_fit). Derived as deep_band_tickers - survivors.
+
+    Absence of both => empty set (no change in behaviour).
+    """
+    out: set[str] = set()
+
+    # (1) explicit theme_fit == misrecall in gate2_results.json
+    for gf in glob.glob(str(reports_dir / "gate2_results.json")):
+        try:
+            data = read_json_utf8(gf)
+        except Exception:
+            continue
+        rows = data if isinstance(data, list) else data.get("results", data.get("candidates", []))
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict) and row.get("theme_fit") == "misrecall":
+                tk = row.get("ticker") or row.get("symbol")
+                if tk:
+                    out.add(str(tk).upper())
+
+    # (2) gate2-survivors file => deep-band names not among survivors were gated out.
+    survivor_files = glob.glob(str(reports_dir / "candidates_gate2_survivors.json"))
+    if survivor_files:
+        survivors: set[str] = set()
+        for sf in survivor_files:
+            survivors |= _tickers_from_json(sf)
+        if survivors:
+            out |= {t for t in deep_band_tickers(reports_dir) if t not in survivors}
+
+    return out
+
+
 def assert_reports_complete(reports_dir: Path) -> tuple[set[str], set[str]]:
-    """Return (deep_band, missing). Caller decides whether missing is fatal."""
+    """Return (deep_band, missing). Caller decides whether missing is fatal.
+
+    A deep-band name without a report counts as 'missing' UNLESS it was dropped at Gate 2 as a
+    theme misrecall (P-F) — those are resolved-by-gating, not forgotten deep-dives.
+    """
     deep = deep_band_tickers(reports_dir)
     have = report_tickers(reports_dir)
-    missing = {t for t in deep if t not in have}
+    gated = gate2_misrecall_tickers(reports_dir)
+    missing = {t for t in deep if t not in have and t not in gated}
     return deep, missing
 
 
@@ -304,8 +448,18 @@ def main() -> None:
         _selftest()
         return
 
-    reports_dir = Path(args.input) if args.input else REPORTS
+    # P-C: standardize run-dir resolution so a run-relative prefix is never doubled. REPORTS
+    # already carries SMALLCAP_RUN; an explicit --input may double it across invocation styles.
+    reports_dir = collapse_run_path(Path(args.input) if args.input else REPORTS)
     run_date = today()
+
+    # P-C: repair any nested reports/smallcap/.../reports/smallcap/... tree left by a doubled
+    # write before asserting completeness (so lifted reports/valuations count as present).
+    relocated = repair_nested_run_tree(reports_dir)
+    if relocated:
+        sys.stderr.write(
+            f"WARNING: repaired path-doubled tree — lifted {len(relocated)} file(s) into "
+            f"{reports_dir}\n")
 
     deep, missing = assert_reports_complete(reports_dir)
     if missing:
@@ -326,7 +480,9 @@ def main() -> None:
         ok = rebuild_ranking(reports_dir)
         print(f"RANKING rebuilt: {reports_dir / 'RANKING.md'}" if ok else "RANKING rebuild FAILED")
 
-    print(f"deep-band candidates: {len(deep)}, reports: {len(have)}, missing: {len(missing)}")
+    gated = gate2_misrecall_tickers(reports_dir)
+    print(f"deep-band candidates: {len(deep)}, reports: {len(have)}, "
+          f"gate2-misrecall (resolved, not deep-dived): {len(gated)}, missing: {len(missing)}")
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +519,20 @@ def _selftest() -> None:
     assert parse_rating_block("```rating\nrating: TBD\n```")["rating"] is None, "TBD -> unset"
     assert parse_rating_block("no fence here")["found"] is False, "missing fence -> found False"
     assert parse_rating_block("```rating\nbuy_eligible: false\n```")["buy_eligible"] is False, "false bool"
+
+    # P-C: collapse_run_path is idempotent and only fires on a genuine doubled prefix.
+    doubled = ("reports/smallcap/2026-06-20_uranium-miners/reports/smallcap/"
+               "2026-06-20_uranium-miners/valuation_URG_2026-06-20.json")
+    collapsed = collapse_run_path(doubled).as_posix()
+    assert collapsed == ("reports/smallcap/2026-06-20_uranium-miners/"
+                         "valuation_URG_2026-06-20.json"), f"doubled prefix collapsed: {collapsed}"
+    # idempotent: collapsing an already-clean path is a no-op
+    assert collapse_run_path(collapsed).as_posix() == collapsed, "collapse idempotent"
+    clean_run = "reports/smallcap/2026-06-20_uranium-miners"
+    assert collapse_run_path(clean_run).as_posix() == clean_run, "non-doubled path unchanged"
+    # a run dir whose own name is 'smallcap' must NOT be falsely collapsed
+    assert collapse_run_path("reports/smallcap/smallcap").as_posix() == \
+        "reports/smallcap/smallcap", "non-doubled lookalike unchanged"
 
     with tempfile.TemporaryDirectory() as td:
         rd = Path(td)
@@ -434,8 +604,64 @@ def _selftest() -> None:
         v_missing = build_verdict("MGPI", rd, "2026-06-20")
         assert v_missing["rating"] == "观察", "missing report defaults to WATCH"
 
+        # P-F: a deep-band name flagged Gate-2 misrecall is RESOLVED, not 'missing'.
+        # Mark MGPI as misrecall in gate2_results.json; it should drop out of `missing`.
+        (rd / "gate2_results.json").write_text(json.dumps([
+            {"ticker": "SIGA", "theme_fit": "pure_play", "band": "deep"},
+            {"ticker": "MGPI", "theme_fit": "misrecall", "band": "deep"},
+        ], ensure_ascii=False), encoding="utf-8")
+        gated = gate2_misrecall_tickers(rd)
+        assert gated == {"MGPI"}, f"gate2 misrecall set: {gated}"
+        deepb, missing = assert_reports_complete(rd)
+        assert missing == set(), f"misrecall MGPI must not be 'missing' (P-F): {missing}"
+        # Absent gate2 file -> empty set, original behaviour preserved.
+        (rd / "gate2_results.json").unlink()
+        assert gate2_misrecall_tickers(rd) == set(), "no gate2 file -> empty misrecall set"
+        deepb, missing = assert_reports_complete(rd)
+        assert missing == {"MGPI"}, f"without gate2, MGPI is missing again: {missing}"
+
+        # P-F representation #2: a candidates_gate2_survivors.json listing only the survivors —
+        # deep-band names NOT among survivors are gated-out misrecall (uranium run shape, which
+        # never tagged theme_fit). SIGA survives; MGPI absent => gated, not missing.
+        (rd / "candidates_gate2_survivors.json").write_text(json.dumps(
+            [{"ticker": "SIGA", "band": "deep"}], ensure_ascii=False), encoding="utf-8")
+        assert gate2_misrecall_tickers(rd) == {"MGPI"}, "survivors-derived misrecall = deep - survivors"
+        deepb, missing = assert_reports_complete(rd)
+        assert missing == set(), f"survivors-derived gating resolves MGPI (P-F repr2): {missing}"
+        (rd / "candidates_gate2_survivors.json").unlink()
+
+    # P-C: repair_nested_run_tree lifts a doubled subtree and prunes the empty skeleton.
+    with tempfile.TemporaryDirectory() as td2:
+        run = Path(td2) / "reports" / "smallcap" / "2026-06-20_uranium-miners"
+        nested = run / "reports" / "smallcap" / "2026-06-20_uranium-miners"
+        nested.mkdir(parents=True)
+        (nested / "valuation_URG_2026-06-20.json").write_text("{}", encoding="utf-8")
+        (nested / "valuation_EU_2026-06-20.json").write_text("{}", encoding="utf-8")
+        moved = repair_nested_run_tree(run)
+        assert (run / "valuation_URG_2026-06-20.json").exists(), "URG lifted up into run dir"
+        assert (run / "valuation_EU_2026-06-20.json").exists(), "EU lifted up into run dir"
+        assert {p.name for p in moved} == {"valuation_URG_2026-06-20.json",
+                                           "valuation_EU_2026-06-20.json"}, \
+            f"both files moved: {[p.name for p in moved]}"
+        assert not (run / "reports").exists(), "empty nested skeleton pruned"
+        # idempotent: a clean run dir is a no-op
+        assert repair_nested_run_tree(run) == [], "no nested tree -> no-op"
+
+    # P-C: a correctly-placed artifact is NEVER clobbered by the lift (dupe left in place).
+    with tempfile.TemporaryDirectory() as td3:
+        run = Path(td3) / "reports" / "smallcap" / "r"
+        nested = run / "reports" / "smallcap" / "r"
+        nested.mkdir(parents=True)
+        (nested / "valuation_EU.json").write_text("{}", encoding="utf-8")
+        (run / "valuation_EU.json").write_text('{"keep":true}', encoding="utf-8")
+        moved = repair_nested_run_tree(run)
+        assert moved == [], "clobbering file is not moved"
+        assert (run / "valuation_EU.json").read_text(encoding="utf-8") == '{"keep":true}', \
+            "existing correctly-placed artifact not clobbered"
+
     print("finalize_run selftest PASS (fenced rating parse incl. english/TBD/false + deep-band "
-          "completeness detects missing report + verdict block matches track_forward contract)")
+          "completeness detects missing report + verdict block matches track_forward contract + "
+          "P-C path-doubling collapse/repair + P-F gate2-misrecall resolved-not-missing)")
 
 
 if __name__ == "__main__":
