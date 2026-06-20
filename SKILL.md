@@ -175,8 +175,11 @@ theme-fit gate needed — form-type enumeration replaces keyword over-recall):
    **Catalyst re-verify (mandatory):** the pre-populated `catalyst` field is a
    discovery-stage hint (T2), NOT rubric-compliant evidence.  The agent MUST independently
    verify the forced-trading mechanism + T1 source (EDGAR 10-12B / Form 4) and re-populate
-   the rubric catalyst field per `judgment-rubric.md`'s five-requirement checklist before
-   the catalyst BUY modifier may apply.
+   the rubric catalyst field per `judgment-rubric.md`'s five-requirement checklist.
+   **Catalyst MoS-waiver FROZEN (iteration 1):** even a fully re-verified catalyst yields
+   **WATCH-with-catalyst, not BUY** — it no longer waives the MoS threshold. A BUY here still
+   requires the MoS / NAV path AND `buy_eligible == true`. (Freeze is temporary, pending
+   mechanism-verification + per-category Brier in iteration 2.)
    **No theme-fit gate:** skip Gate 1 (SIC) and Gate 2 (LLM theme-fit) — form-type
    precision replaces keyword precision; every record is a valid event by construction.
 
@@ -219,17 +222,23 @@ Both gates are mandatory. Neither can be skipped or merged into a single pass.
 
 ### Symmetric BUY Trigger (Phase 3) — three-way `mos_basis` handling
 
-Run `python tools/valuation.py` before rating; read `mos_basis`, `margin_of_safety_pct`, `nav_margin_of_safety_pct`. The model (reverse-DCF, cyclical-trough normalization, NAV path, data-quality guards) is specified in `reference/valuation.md`.
+Run `python tools/valuation.py` before rating; read `mos_basis`, `margin_of_safety_pct`, `nav_margin_of_safety_pct`, the mechanical `buy_eligible` / `buy_ineligible_reasons` composite, and the deepdive `derived` change-detection fields `concentration_flag` and `fundamental_decline_flag`. The model (reverse-DCF, cyclical-trough normalization, NAV path, data-quality guards, eligibility composite) is specified in `reference/valuation.md` and `reference/judgment-rubric.md`.
 
 | `mos_basis` | BUY condition | Notes |
 |---|---|---|
-| `fcf_cap` | `margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | Full confidence weight 1.0; capped by data_quality flags |
-| `nav` | `nav_margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis | Multiply raw conviction by 0.6 before recording `confidence` field; surface as "asset-heavy / NAV basis" |
+| `fcf_cap` | `margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis AND `buy_eligible == true` | Full confidence weight 1.0; capped by data_quality flags |
+| `nav` | `nav_margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis AND `buy_eligible == true` | Multiply raw conviction by 0.6 before recording `confidence` field; surface as "asset-heavy / NAV basis" |
 | `abstain` | No MoS BUY/AVOID trigger; rank on EV/EBITDA + EV/Sales only | Never penalize for model mismatch |
 
-**Catalyst modifier (closed enumerated list — no other types qualify):** (a) spinoff filing Form 10-12B/15-12B with documented index-fund forced-selling mechanism; (b) cluster open-market insider purchases Form 4 ≥2–3 insiders within 90 days, cash purchases only — not option exercises/grants; (c) court-ordered asset sale or special distribution per 8-K with scheduled completion date; (d) exchange delisting-avoidance / deficiency event per 8-K creating forced selling. Each requires a dated trigger. Earnings guidance, product launches, customer wins, and any organic-growth narrative do NOT qualify. Populate `catalyst` field with category, T1 source, and dated trigger; null otherwise.
+**`buy_eligible` mechanical gate (ANDed into every BUY):** `valuation.py` emits `buy_eligible = (not extreme_mos_review_required) AND (not large_cap_out_of_scope) AND (not fcf_sustainability_uncertain) AND (not financial_sic forced-unsuitable) AND (not debt_truncation_suspected) AND (not wrong_entity_suspected) AND (concentration_flag != "kill") AND (not fundamental_decline_flag)`, plus `buy_ineligible_reasons` (list[str]). These guards previously existed only as advisory strings the trigger never blocked on; they now bite. When `buy_eligible == false`, the rating downgrades to WATCH (AVOID if a hard kill-flag is also present) and the BUY-trigger line must list `buy_ineligible_reasons` verbatim. Full source of truth: `reference/judgment-rubric.md`.
 
-**Perpetual-veto prohibition:** "cyclical turn not yet realized in T1" may NOT veto a BUY when MoS ≥ 30%. Normalized FCF already accounts for cycle conservatism.
+**Concentration kill/watch (P3):** `concentration_flag = "kill"` when `top_program_pct > 60` OR `top_customer_pct > 40` (forces `buy_eligible = false`, caps Dim 3 at 2); `"watch"` when either ratio is in the 40–60 band (surfaced, does not block BUY by itself); null otherwise. Magnitude-based from XBRL `RevenueFromContractWithCustomer` segment members — replaces the old English substring.
+
+**Fundamental-decline veto (P6, mechanical carve-out):** `fundamental_decline_flag = true` when `rev_slope_sign < 0` AND `contamination_ratio < 1.0` AND `latest_below_avg == true`. It downgrades a would-be BUY to WATCH even at MoS ≥ 30% — the melting-ice-cube defense. This is a measured-data veto, explicitly distinct from (and NOT) the qualitative cyclical-turn forward judgment the perpetual-veto prohibition still bans.
+
+**Catalyst modifier (closed enumerated list — no other types qualify):** (a) spinoff filing Form 10-12B/15-12B with documented index-fund forced-selling mechanism; (b) cluster open-market insider purchases Form 4 ≥2–3 insiders within 90 days, cash purchases only — not option exercises/grants; (c) court-ordered asset sale or special distribution per 8-K with scheduled completion date; (d) exchange delisting-avoidance / deficiency event per 8-K creating forced selling. Each requires a dated trigger. Earnings guidance, product launches, customer wins, and any organic-growth narrative do NOT qualify. Populate `catalyst` field with category, T1 source, and dated trigger; null otherwise. **MoS-waiver FROZEN (iteration 1):** a verified catalyst yields **WATCH-with-catalyst, NOT BUY** — it no longer waives the MoS threshold. Temporary, pending mechanism-verification + per-category Brier in iteration 2 (§5-Q3 of the iteration-1 design).
+
+**Perpetual-veto prohibition (qualitative only):** the *qualitative forward* "cyclical turn not yet realized in T1" may NOT veto a BUY when MoS ≥ 30%. Normalized FCF already accounts for cycle conservatism. This prohibition does NOT cover the mechanical `fundamental_decline_flag` carve-out above, which IS permitted to downgrade.
 
 ### Downward Hard-Ceilings
 
@@ -244,7 +253,7 @@ by narrative quality or management explanation:
 | Net income driven by deferred tax release (not OCF) | **Score Dim 1 on OCF only**; note the driver |
 | AR growing faster than revenue | **Required red flag note** in Dim 1 basis |
 | S-3 shelf / ATM program active with < 4Q runway | **Dim 1 score = 1** |
-| Single customer > 40% of revenue | **Dim 3 capped at 2** |
+| Single customer > 40% OR single program > 60% (`concentration_flag == "kill"`) | **Dim 3 capped at 2**; forces `buy_eligible = false` (blocks BUY) |
 | `insider_net_sell` strongly negative AND dilution rate ≥ 15%/yr | **Dim 4 capped at 2** |
 | Critical data unavailable (runway, revenue, insider trades all null) | **Confidence capped at 40%** |
 | Company has no current theme revenue (pure concept-playing) | **Theme-fit dimension capped at 2**; cannot rate BUY |
@@ -252,8 +261,7 @@ by narrative quality or management explanation:
 
 Full hard-rule source of truth: `reference/judgment-rubric.md §Rating Hard-Rules`.
 
-Composite score = weighted average of 7 dimensions (weights in `reference/judgment-rubric.md`).
-Final composite is reported as 1–5 with one decimal. Ties broken by Dimension 1 (financial quality).
+Scorecard total = plain unweighted sum of the 7 dimension scores (no per-dimension weights exist in the repo). The scorecard does not by itself produce the rating: **rating = f(MoS / NAV MoS, kill-flags, hard-ceilings, `buy_eligible`)** — the mechanical decision layer in `reference/judgment-rubric.md` is authoritative. The scorecard total is a diagnostic summary reported as a /35 sum (or rescaled 1–5 with one decimal); ties broken by Dimension 1 (financial quality).
 
 ---
 

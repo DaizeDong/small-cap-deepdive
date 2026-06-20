@@ -15,7 +15,7 @@ Given a `deepdive_<ticker>_<date>.json` (produced by `deepdive_data.py`) and a c
 |---|---|---|
 | `ev` | market_cap + total_debt − cash | Partial if debt/cash unavailable; annotated in `ev_note` |
 | `ev_sales` | ev / latest_revenue | null if revenue ≤ 0 or ev ≤ 0 |
-| `ev_ebitda` | ev / latest_ebitda | Uses latest EBITDA; normalized EBITDA in `normalized_ebitda` |
+| `ev_ebitda` | ev / latest_ebitda | Uses latest EBITDA; normalized EBITDA in `normalized_ebitda`. EBIT recovered via the cascade below (`ebit_source` tags the concept used) so EV/EBITDA computes even when `OperatingIncomeLoss` is untagged |
 | `pe` | market_cap / net_income | null if net income ≤ 0 |
 | `fcf_yield` | fcf / market_cap | FCF = OCF − CapEx; if capex unavailable, OCF is used with flag |
 | `cyclical` | CV(EBITDA) > threshold | CV computed over available annual EBITDA series; see below |
@@ -29,6 +29,14 @@ Given a `deepdive_<ticker>_<date>.json` (produced by `deepdive_data.py`) and a c
 | `mos_basis` | `"fcf_cap"` / `"nav"` / `"abstain"` | Routing signal — see Phase 3 contract below |
 | `margin_of_safety_pct` | (intrinsic_low_equity − market_cap) / market_cap | FCF-cap MoS; null when mos_basis ≠ "fcf_cap" |
 | `nav_margin_of_safety_pct` | (nav_band_low − market_cap) / market_cap | NAV MoS; populated when mos_basis = "nav" |
+| `ebit_source` | str | The EBIT concept the cascade actually used (see "EBIT Concept Cascade" below); tags provenance so EV/EBITDA is auditable |
+| `rev_slope_sign` | sign(linear slope of multiyear revenue series) | −1 / 0 / 1; from `derived` trajectory block (P6) |
+| `rev_accel_sign` | sign(2nd difference of revenue series) | int; revenue acceleration/deceleration |
+| `latest_below_avg` | latest normalization base < trailing avg of base | bool; "is the most recent year below its own normalized average" |
+| `contamination_ratio` | latest normalization-base / 5yr-avg | float; < 1.0 means the normalized average is propped up by older/peak years (peak-contamination) |
+| `fundamental_decline_flag` | rev_slope_sign < 0 AND contamination_ratio < 1.0 AND latest_below_avg | bool; the deterministic melting-ice-cube veto (P6) — see below |
+| `buy_eligible` | composed boolean (see "buy_eligible Composition") | bool; the single mechanical gate Phase 3 ANDs into the BUY trigger |
+| `buy_ineligible_reasons` | list[str] | Each guard that fired, for the report TRUST BANNER and audit |
 
 ---
 
@@ -40,7 +48,11 @@ This is a hard contract — no exceptions based on narrative or management expla
 ### `mos_basis = "fcf_cap"`
 
 - **When:** `fcf_cap_model_unsuitable = false` (normal operating company).
-- **Phase 3 action:** use `margin_of_safety_pct` for the BUY trigger with full weight (1.0).
+- **Phase 3 action:** use `margin_of_safety_pct` for the BUY trigger with full weight (1.0),
+  **gated by `buy_eligible == true`**. A BUY requires `mos_basis == "fcf_cap"` AND MoS ≥ 30% AND
+  `buy_eligible == true`; `fundamental_decline_flag` or a `"kill"` `concentration_flag` (both folded
+  into `buy_eligible`) downgrade BUY → WATCH (→ AVOID if a kill-flag also fires). See the
+  "`buy_eligible` Composition" section and `judgment-rubric.md`.
 - **Interpretation:** positive MoS = market cap is below the conservative FCF-capitalized
   intrinsic value. The larger the positive MoS, the deeper the discount.
 
@@ -101,6 +113,92 @@ the coefficient-of-variation used to detect cyclicality and distorts the normali
 
 ---
 
+## Fundamental-Trajectory & Contamination Veto (P6)
+
+**The problem this solves.** The FCF-cap intrinsic value is a no-growth perpetuity on a trailing
+normalized FCF. With no trajectory term, the model up-weights exactly the names whose high current
+FCF yield is high *because* the market expects the cash flow to fall — the textbook value trap. A
+declining, peak-contaminated name (SIGA: revenue −31.8% YoY, BARDA-peak-averaged `norm_fcf`) scored
+a +76% MoS BUY while clean growers scored below threshold. The static MoS model has no structural
+defense against a melting ice cube.
+
+**The fix (deterministic, downgrade-only).** `compute_valuation()` emits a small trajectory block in
+`derived` from the multiyear revenue/normalization-base series and composes a single veto flag. It is
+purely mechanical — no forward judgment, no narrative — and it only ever *removes* a BUY, never
+creates one.
+
+| Field | Definition |
+|---|---|
+| `rev_slope_sign` | sign of the linear slope over the multiyear revenue series (−1 down / 0 flat / 1 up) |
+| `rev_accel_sign` | sign of the 2nd difference (revenue acceleration vs deceleration) |
+| `latest_below_avg` | True when the latest normalization base is below the trailing average of that base |
+| `contamination_ratio` | latest normalization-base ÷ 5yr-avg. < 1.0 means the average that anchors `norm_fcf`/`normalized_ebitda` is inflated by older/peak years |
+| `fundamental_decline_flag` | **`rev_slope_sign < 0` AND `contamination_ratio < 1.0` AND `latest_below_avg`** |
+
+When all three conditions hold, the most recent year is below its own normalized average AND the
+average is propped up by higher prior years AND the revenue trend is down — i.e. the deep "discount"
+is an artifact of normalizing on a contaminated peak. `fundamental_decline_flag = true` forces
+`buy_eligible = false` (and downstream, BUY → WATCH, or AVOID if a kill-flag also fires; see
+`judgment-rubric.md`).
+
+**Relationship to the rubric:222 carve-out.** `judgment-rubric.md` bans vetoing a 30%+ MoS on
+qualitative "cyclical-turn-not-realized" / forward-judgment grounds. This veto is the *narrow
+mechanical exception* explicitly carved out there: decline magnitude (`rev_slope_sign<0`) +
+latest-below-own-average + contamination < 1. It is NOT the qualitative forward call the rubric
+forbids; it is a deterministic arithmetic fact about the trailing series the normalization itself
+rests on.
+
+---
+
+## EBIT Concept Cascade (P9)
+
+Previously EBIT was a single XBRL pull (`OperatingIncomeLoss`), leaving EV/EBITDA null on ~47% of
+names — banks, insurers, IFRS filers, and some industrials that do not tag that concept. EV/EBITDA is
+the value PM's workhorse comp; missing it on half the universe forced over-reliance on the FCF-cap
+MoS. The module now recovers EBIT through a tagged cascade and records which concept supplied it in
+`ebit_source`:
+
+1. `OperatingIncomeLoss` (preferred) → `ebit_source = "OperatingIncomeLoss"`
+2. `IncomeLossFromContinuingOperationsBeforeIncomeTaxes` (+ interest expense addback when an interest
+   concept is available) → `ebit_source = "continuing_ops_pretax+interest"` (or the no-addback variant
+   when interest is unavailable)
+3. Pretax-income proxy → `ebit_source = "pretax_proxy"`
+
+When EBIT is recovered via any cascade level, `latest_ebitda` and therefore `ev_ebitda` compute
+(subject to the existing EBITDA > 0 and EV > 0 guards). `ebit_source` makes the provenance auditable
+so a PM can discount a pretax-proxy EBITDA appropriately. The cascade is provenance-tagged the same
+way `debt_source` and `da_source` already are.
+
+---
+
+## `buy_eligible` Composition (P1 — the gate Phase 3 ANDs in)
+
+The v0.2.1 guards (extreme-MoS, large-cap, FCF-sustainability) were advisory strings the BUY trigger
+never blocked on — a $5.4B name cleared BUY in a small-cap tool. They are now promoted into one
+mechanical boolean that the BUY trigger must AND in. `compute_valuation()` composes and EMITS:
+
+```
+buy_eligible =
+      (not extreme_mos_review_required)
+  AND (not large_cap_out_of_scope)
+  AND (not fcf_sustainability_uncertain)
+  AND (not financial_sic_forced_unsuitable)
+  AND (not debt_truncation_suspected)
+  AND (not wrong_entity_suspected)
+  AND (concentration_flag != "kill")
+  AND (not fundamental_decline_flag)
+```
+
+`buy_ineligible_reasons` is the list of guards that fired (e.g. `["large_cap_out_of_scope",
+"fundamental_decline_flag"]`), used for the report TRUST BANNER and audit. `buy_eligible = true`
+means *no guard objected* — it is necessary but not sufficient for a BUY (Phase 3 still requires
+`mos_basis == "fcf_cap"`, MoS ≥ 30%, zero kill-flags, and no Tier-3-load-bearing evidence; see
+`judgment-rubric.md`). The concentration kill-flag (`concentration_flag`) is produced in the deepdive
+`derived` block from XBRL `RevenueFromContractWithCustomer` segment members / concentration footnote
+numerics (P3) — see `data-sources.md` and `mechanical-checks.md` — not from the old English substring.
+
+---
+
 ## Inputs: Source and Fallback Chain
 
 All inputs come from SEC/XBRL (T1) except market cap (yfinance or override):
@@ -108,7 +206,7 @@ All inputs come from SEC/XBRL (T1) except market cap (yfinance or override):
 | Input | Primary XBRL concept | Fallback |
 |---|---|---|
 | `total_debt` | `LongTermDebtNoncurrent` + `LongTermDebtCurrent` | `LongTermDebt`; then `Liabilities` (proxy, flagged) |
-| `ebit` | `OperatingIncomeLoss` | — |
+| `ebit` | `OperatingIncomeLoss` | Cascade: `IncomeLossFromContinuingOperationsBeforeIncomeTaxes` (+interest addback if available) → pretax proxy; concept used recorded in `ebit_source` (see "EBIT Concept Cascade") |
 | `dep_amort` | `DepreciationAndAmortization`, `DepreciationAmortizationAndAccretionNet`, `DepreciationDepletionAndAmortization` (merged) | — |
 | `capex` | `PaymentsToAcquirePropertyPlantAndEquipment` | If unavailable, FCF = OCF (proxy, flagged) |
 | `assets` | `Assets` | — |
@@ -177,6 +275,9 @@ This table is the canonical list of ALL flags emitted by `compute_valuation()`:
 | `net_debt_excludes_cash` | Net debt = total_debt only (cash unavailable) |
 | `net_debt_excludes_debt_liabilities` | Net debt computed as −cash (debt unavailable) |
 | `nav_goodwill_or_intangibles_unavailable:...` | Goodwill or intangibles absent; tangible equity uses book equity as proxy |
+| `ebit_recovered_via_cascade:<ebit_source>` | EBIT was not from `OperatingIncomeLoss`; recovered via the P9 cascade (concept named) |
+| `fundamental_decline_veto` | `fundamental_decline_flag = true`; trajectory + contamination veto fired (P6); forces `buy_eligible = false` |
+| `buy_ineligible:<reason>` | One row per guard in `buy_ineligible_reasons` that set `buy_eligible = false` |
 
 ---
 
@@ -187,8 +288,16 @@ This table is the canonical list of ALL flags emitted by `compute_valuation()`:
 2. **Cyclicals use normalized, not peak/trough.** Hardcoded in `compute_valuation()`.
 3. **Band is deliberately conservative.** The MoS uses the high-cap-rate (low-value) end.
 4. **No recommendation emitted.** The module's JSON contains no buy/sell/avoid text.
-   Phase 3 reads `mos_basis` + `margin_of_safety_pct` / `nav_margin_of_safety_pct` and
-   applies the BUY trigger mechanically per the Phase 3 contract above.
+   Phase 3 reads `mos_basis` + `margin_of_safety_pct` / `nav_margin_of_safety_pct` + the
+   `buy_eligible` gate and applies the BUY trigger mechanically per the Phase 3 contract above.
+   `buy_eligible` is a mechanical eligibility boolean (a conjunction of guards), NOT a
+   recommendation — it can only block a BUY, never assert one.
+8. **Trajectory veto is downgrade-only and deterministic.** `fundamental_decline_flag` is a pure
+   function of the trailing series (slope sign + contamination ratio + latest-below-average). It
+   removes a BUY; it can never manufacture one. This is the narrow mechanical carve-out to
+   `judgment-rubric.md:222`, not the qualitative forward judgment that rule bans.
+9. **EBIT cascade is provenance-tagged.** EBIT recovered below `OperatingIncomeLoss` is labeled in
+   `ebit_source`; EV/EBITDA computed off a proxy is auditable, never silently presented as primary.
 5. **Divide-by-zero and non-positive guards.** Every division is guarded; results are
    null with a documented reason rather than NaN or exceptions.
 6. **EBITDA partial entries skipped.** Year-ends with only one of EBIT / D&A are excluded
@@ -203,6 +312,9 @@ This table is the canonical list of ALL flags emitted by `compute_valuation()`:
 
 - `mechanical-checks.md` — data-layer guards; valuation module respects all five.
 - `judgment-rubric.md` — human/agent judgment layer reads valuation block alongside scores.
-- Phase 3 (implemented) — reads `mos_basis` and the corresponding MoS field; applies BUY trigger
-  per the three-way contract documented in "Margin-of-Safety Basis & Phase 3 Contract" above.
+- Phase 3 (implemented) — reads `mos_basis`, the corresponding MoS field, and the `buy_eligible`
+  gate; applies BUY trigger per the three-way contract documented in "Margin-of-Safety Basis &
+  Phase 3 Contract" above.
+- `data-sources.md` — origin of the P3 `concentration_flag` (XBRL `RevenueFromContractWithCustomer`
+  segment members) that `buy_eligible` consumes.
 - `config.example.json` — all valuation config keys with defaults.

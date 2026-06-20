@@ -137,6 +137,44 @@ reference changes, not in parallel.
 
 ---
 
+## Operationalizing the diffusion thesis · 让"信息扩散"论点落地
+
+The edge claim above — "delayed information diffusion," a real fundamental change the market has not
+yet priced — was for a long time **stated everywhere and measured nowhere**: the docs claimed an
+inflection thesis while the code ran a static cheapness + kill-flag screen. A no-growth perpetuity on
+trailing XBRL has zero forward signal; with no trajectory term, the engine up-weights exactly the
+melting-ice-cube names whose high FCF yield is high *because* the market already expects decline. That
+doc/code gap was itself a violation of the generative test below (the thesis made the narrative more
+convincing without moving output closer to truth). The thesis is now being **operationalized**, split
+into two halves on the philosophy line:
+
+- **Conservative half — SHIPPED (iteration 1).** A deterministic, downgrade-only
+  trajectory/contamination veto (`fundamental_decline_flag` = revenue slope down AND
+  contamination_ratio < 1.0 AND latest-below-own-average; see `reference/valuation.md` P6). It is pure
+  T1 arithmetic on the trailing series, it can only *remove* a false-positive BUY (never manufacture
+  one), and it is the philosophy-faithful way to defend against the value trap. It fully respects
+  P3 (discipline-as-moat) and the generative test.
+- **Expansive half — APPROVED, NOT YET BUILT (iteration 2).** A firewalled diagnostic side-channel
+  that may CORROBORATE a between-filings fundamental change using free coarse alt-data (TrendsMCP /
+  GDELT / news-volume; see `reference/data-sources.md`), under a strict architectural firewall:
+  corroboration-only, T2-labeled, **never originates or up-weights a BUY**, and track-forward-gated
+  until it has earned its own Brier score. This is the part that imports signals T1-purism exists to
+  suppress, so it is gated behind explicit approval and a firewall — get the firewall wrong and you
+  rebuild the confident-but-wrong narrative engine this skill exists to prevent.
+
+This note closes the prior doc/code gap: the docs no longer claim an inflection capability the code
+lacks. Iteration 1 makes the conservative half real; the expansive half is named, scoped, approved,
+and explicitly deferred to iteration 2.
+
+> - **保守半边（迭代 1 已交付）：** 确定性、只降级的轨迹/污染否决（`fundamental_decline_flag`，纯 T1
+>   算术，只能移除假阳性 BUY，绝不制造 BUY）——这是抵御价值陷阱的、忠于哲学的方式。
+> - **扩张半边（已批准，迭代 2 未建）：** 受防火墙隔离的诊断旁路，用免费粗粒度 alt-data（TrendsMCP /
+>   GDELT / 新闻量）**仅做佐证**，标记 T2，**绝不发起或加权 BUY**，须先用 track-forward 跑出自己的
+>   Brier 才放行。
+> - **意义：** 此节弥合了此前"文档声称、代码未做"的缺口——文档不再宣称代码不具备的拐点能力。
+
+---
+
 ## The generative test · 生成式检验
 
 Every future change to this skill — a new tool, a new invariant, a new kill-flag — must pass

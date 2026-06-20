@@ -87,9 +87,28 @@ These are explicitly out of scope for the free-source tier. If a judgment requir
 | Smart money / 13F institutional flows | 13F filings are public but parsing 3-month lag; sector aggregation services are paid | Cannot get real-time institutional positioning |
 | On-chain / crypto asset valuations | Not applicable to traditional small-caps; specialized chain data is paid | N/A for standard theme deepdives |
 | Credit default swap / bond spreads | Paid data vendor | Cannot assess credit market signal for distressed names |
-| Alternative data (card spend, web traffic, job postings) | Paid vendors (Bloomberg 2nd Party, Similarweb, LinkUp) | Cannot independently verify revenue trajectory between quarters |
+| Premium alternative data (card-spend panels, full clickstream/web-traffic panels, job-posting feeds) | Paid vendors (Bloomberg 2nd Party, Similarweb, LinkUp) for the high-resolution panels | Cannot get panel-grade revenue reconstruction. **But free coarse proxies DO exist** — see note below; this row covers only the paid high-resolution tier |
 | Glassdoor employee sentiment | Anti-scraping measures + litigation risk as of 2026 | Use insider trades + compensation instead |
 | LinkedIn data | Anti-scraping enforcement | Use Form 4 + DEF 14A instead |
+
+**Correction — free coarse alt-data exists (philosophy-neutral note).** The blind-spots table above
+is about *panel-grade* paid alt-data. It is NOT true that all between-quarters demand signal is
+paid-vendors-only. Free, session-level sources of coarse demand/attention proxies exist and are live:
+
+- **TrendsMCP** (free tier) — growth-rate (not just level) across Google Search / News / Shopping /
+  YouTube / Wikipedia / TikTok / Amazon / app-downloads / Steam / npm / news-sentiment / news-volume.
+- **GDELT** — global news tone and volume, ~15-minute cadence, free.
+- **google-news-trends-mcp** and free app/play-store scrapers — coarse rank/review/volume signal.
+
+These are coarse and noisy relative to paid panels, but they exist for free. **Stating that they
+exist is philosophy-neutral and is corrected here. *Acting* on them is NOT yet wired into the
+mechanical pipeline.** The firewalled diagnostic side-channel that would consume these (corroboration-
+only, never originates or up-weights a BUY, track-forward-gated until it has its own Brier) is
+**APPROVED for iteration 2 but NOT YET BUILT**. Iteration 1 ships only the deterministic, T1-only
+trajectory/contamination veto (`fundamental_decline_flag`; see `valuation.md` P6). Until the iter-2
+side-channel is built, the mechanical data layer remains T1-only (EDGAR/XBRL + price); these free
+alt-data sources may be used as on-demand human/agent color but must not feed any gate. See
+`PHILOSOPHY.md` ("Operationalizing the diffusion thesis") for the conservative/expansive split.
 
 ---
 

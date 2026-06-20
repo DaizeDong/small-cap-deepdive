@@ -315,8 +315,24 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     if n_ebitda_partial > 0:
         dq.append(f"ebitda_series_partial_entries:{n_ebitda_partial}")
 
-    ev_ebitda: float | None = None
+    # --- P9: EBIT concept cascade → EBITDA recovery ---
+    # The producer tags ebit_source (the concept actually used: OperatingIncomeLoss /
+    # pretax+interest_addback / pretax_proxy). When latest_ebitda is missing but EBIT
+    # was recovered via the cascade, reconstruct latest EBITDA = recovered_EBIT + D&A so
+    # EV/EBITDA computes on the ~47% of names that previously came back null.
+    ebit_source = der.get("ebit_source")
     latest_ebitda = der.get("latest_ebitda")
+    if latest_ebitda is None and ebit_source:
+        # Prefer the latest full EBIT+D&A pair from the constructed series; fall back to
+        # derived latest_ebit + latest_da.
+        _recovered_ebitda = ebitda_series[-1]["val"] if ebitda_series else None
+        if _recovered_ebitda is None and latest_ebit is not None and latest_da is not None:
+            _recovered_ebitda = latest_ebit + latest_da
+        if _recovered_ebitda is not None:
+            latest_ebitda = _recovered_ebitda
+            dq.append(f"ebitda_recovered_via_ebit_cascade:ebit_source={ebit_source}")
+
+    ev_ebitda: float | None = None
     if ev and ev > 0 and latest_ebitda and latest_ebitda > 0:
         ev_ebitda = round(ev / latest_ebitda, 2)
     elif ev and ev > 0 and latest_ebitda:
@@ -536,20 +552,115 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
             _fcf_sustainability_uncertain = True
             dq.append(f"fcf_sustainability_uncertain:rdcf_growth={rdcf_growth:.3f}<-0.15")
 
-        # (ii) OCF-proxy FCF on capital-intensive company (PP&E-heavy proxy):
-        # capital-intensive heuristic: latest_assets > 5 * latest_revenue (large asset base)
-        if fcf_is_proxy and latest_assets is not None and latest_revenue and latest_revenue > 0:
-            asset_rev_ratio = latest_assets / latest_revenue
-            if asset_rev_ratio > 5.0:
-                _fcf_sustainability_uncertain = True
-                dq.append(
-                    f"fcf_sustainability_uncertain:ocf_proxy_on_capital_intensive"
-                    f"(assets/rev={asset_rev_ratio:.1f})"
-                )
-        elif fcf_is_proxy:
-            # Even without asset data, any OCF-proxy on unknown capex is uncertain
+        # (ii) P2: EVERY OCF-proxy FCF is uncertain — true FCF after capex is unknown
+        # and structurally <= OCF. assets/rev>5 is used ONLY to escalate severity,
+        # NEVER as a gate (the old dead `elif` silently skipped capital-light proxies
+        # with assets present but ratio<=5 — ~18% of the universe went unflagged).
+        if fcf_is_proxy:
             _fcf_sustainability_uncertain = True
-            dq.append("fcf_sustainability_uncertain:ocf_proxy_capex_unknown")
+            if latest_assets is not None and latest_revenue and latest_revenue > 0:
+                asset_rev_ratio = latest_assets / latest_revenue
+                if asset_rev_ratio > 5.0:
+                    dq.append(
+                        f"fcf_sustainability_uncertain:ocf_proxy_on_capital_intensive"
+                        f"(assets/rev={asset_rev_ratio:.1f})"
+                    )
+                else:
+                    dq.append(
+                        f"fcf_sustainability_uncertain:ocf_proxy_capex_unknown"
+                        f"(assets/rev={asset_rev_ratio:.1f})"
+                    )
+            else:
+                # No asset/revenue data — still uncertain (unknown capex on unknown base)
+                dq.append("fcf_sustainability_uncertain:ocf_proxy_capex_unknown")
+
+    # --- P10: lumpy-OCF normalization guard (specced in I1, never coded until now) ---
+    # When a cyclical name is normalized on a trailing 5yr average, a single peak year
+    # (e.g. SIGA's 2023 BARDA delivery, ~8x the trough) over-inflates norm_fcf and
+    # manufactures a false MoS. Flag-and-downgrade — NEVER silently delete the year.
+    # A year is "lumpy" when its OCF > 2x the median of the OTHER years in the window.
+    # This overlaps P6 contamination; we read the producer's contamination_ratio as the
+    # corroborating signal (latest below its own 5yr-avg base => over-normalized peak).
+    _lumpy_ocf_normalization_suspect = False
+    if cyclical and mos_basis == "fcf_cap":
+        _ocf_window_vals = [v["val"] for v in ocf_series if v.get("val") is not None][-n_years:]
+        if len(_ocf_window_vals) >= 3:
+            for i, _yv in enumerate(_ocf_window_vals):
+                _others = _ocf_window_vals[:i] + _ocf_window_vals[i + 1:]
+                _others_pos = [o for o in _others if o is not None]
+                if not _others_pos:
+                    continue
+                _med = statistics.median(_others_pos)
+                if _med > 0 and _yv > 2.0 * _med:
+                    _lumpy_ocf_normalization_suspect = True
+                    dq.append(
+                        f"lumpy_ocf_normalization_suspect:peak_year_ocf={_yv/1e6:.1f}M"
+                        f">2x_median_of_others={_med/1e6:.1f}M"
+                    )
+                    break
+    # Corroborate with the producer's contamination_ratio (latest base / 5yr-avg < 1.0
+    # means the normalization base is averaging in a peak the latest year no longer earns).
+    _contamination_ratio = der.get("contamination_ratio")
+    if (
+        _lumpy_ocf_normalization_suspect
+        and _contamination_ratio is not None
+        and _contamination_ratio < 1.0
+    ):
+        dq.append(f"lumpy_ocf_corroborated_by_contamination:ratio={_contamination_ratio}")
+
+    # --- P6: fundamental-trajectory veto (downgrade-only) ---
+    # Read the producer's deterministic fundamental_decline_flag (rev_slope_sign<0 AND
+    # contamination_ratio<1.0 AND latest_below_avg). When set, a static-MoS BUY must be
+    # downgraded BUY->WATCH. This is downgrade-only: it NEVER manufactures a BUY and never
+    # upgrades. It is the mechanical carve-out to rubric:222 (decline magnitude +
+    # latest-below-own-average + contamination<1), NOT a qualitative forward judgment.
+    _fundamental_decline_flag = bool(der.get("fundamental_decline_flag", False))
+    if _fundamental_decline_flag:
+        dq.append(
+            f"fundamental_decline_veto:rev_slope_sign={der.get('rev_slope_sign')},"
+            f"contamination_ratio={_contamination_ratio},"
+            f"latest_below_avg={der.get('latest_below_avg')}"
+        )
+
+    # --- P3: concentration kill-flag (read from producer) ---
+    # concentration_flag is composed by the producer from XBRL segment members:
+    #   "kill"  if top_program_pct>60 OR top_customer_pct>40
+    #   "watch" if either in 40-60
+    # A "kill" forces buy_eligible=False (catches SIGA's ~90% BARDA dependence).
+    _concentration_flag = der.get("concentration_flag")
+    if _concentration_flag == "kill":
+        dq.append(
+            f"concentration_kill:top_customer_pct={der.get('top_customer_pct')},"
+            f"top_program_pct={der.get('top_program_pct')}"
+        )
+    elif _concentration_flag == "watch":
+        dq.append(
+            f"concentration_watch:top_customer_pct={der.get('top_customer_pct')},"
+            f"top_program_pct={der.get('top_program_pct')}"
+        )
+
+    # --- P1: compose buy_eligible — the single mechanical boolean the BUY trigger ANDs ---
+    # buy_eligible is True ONLY when every blocking guard is clear. The rubric/SKILL BUY
+    # trigger additionally requires mos_basis=="fcf_cap" AND MoS>=30 AND zero Tier-3-load-
+    # bearing; buy_eligible is the deterministic guard-composite half of that contract.
+    _buy_ineligible_reasons: list[str] = []
+    if _extreme_mos_review_required:
+        _buy_ineligible_reasons.append("extreme_mos_review_required")
+    if _large_cap_out_of_scope:
+        _buy_ineligible_reasons.append("large_cap_out_of_scope")
+    if _fcf_sustainability_uncertain:
+        _buy_ineligible_reasons.append("fcf_sustainability_uncertain")
+    if _financial_sic_forced_unsuitable:
+        _buy_ineligible_reasons.append("financial_sic_forced_unsuitable")
+    if der.get("debt_truncation_suspected"):
+        _buy_ineligible_reasons.append("debt_truncation_suspected")
+    if der.get("wrong_entity_suspected"):
+        _buy_ineligible_reasons.append("wrong_entity_suspected")
+    if _concentration_flag == "kill":
+        _buy_ineligible_reasons.append("concentration_kill")
+    if _fundamental_decline_flag:
+        _buy_ineligible_reasons.append("fundamental_decline_flag")
+    _buy_eligible = len(_buy_ineligible_reasons) == 0
 
     # --- Assemble output ---
     block = {
@@ -597,6 +708,20 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "large_cap_out_of_scope": _large_cap_out_of_scope,
         # I1: FCF sustainability guard
         "fcf_sustainability_uncertain": _fcf_sustainability_uncertain,
+        # P10: lumpy-OCF normalization guard
+        "lumpy_ocf_normalization_suspect": _lumpy_ocf_normalization_suspect,
+        # P6: fundamental-trajectory veto (read from producer derived)
+        "fundamental_decline_flag": _fundamental_decline_flag,
+        "contamination_ratio": _contamination_ratio,
+        # P3: concentration kill/watch (read from producer derived)
+        "concentration_flag": _concentration_flag,
+        "top_customer_pct": der.get("top_customer_pct"),
+        "top_program_pct": der.get("top_program_pct"),
+        # P9: EBIT cascade source actually used
+        "ebit_source": ebit_source,
+        # P1: composed mechanical BUY-eligibility (BUY trigger ANDs this in)
+        "buy_eligible": _buy_eligible,
+        "buy_ineligible_reasons": _buy_ineligible_reasons,
         # C2: financial SIC flag
         "financial_sic_fcf_unsuitable": _financial_sic_forced_unsuitable,
         "sic_used": sic_code if sic_code else None,
@@ -710,6 +835,13 @@ def _print_valuation_summary(block: dict) -> None:
         print(f"  FCF MoS:         null ({mos_reason})")
     else:  # abstain
         print(f"  MoS:             abstain ({mos_reason})")
+    print(f"  buy_eligible:    {block.get('buy_eligible')}"
+          + (f"  reasons={block.get('buy_ineligible_reasons')}" if block.get("buy_ineligible_reasons") else ""))
+    print(f"  Concentration:   {block.get('concentration_flag')} "
+          f"(cust={block.get('top_customer_pct')} prog={block.get('top_program_pct')})")
+    print(f"  Decline flag:    {block.get('fundamental_decline_flag')} "
+          f"(contamination={block.get('contamination_ratio')})  Lumpy-OCF: {block.get('lumpy_ocf_normalization_suspect')}")
+    print(f"  EBIT source:     {block.get('ebit_source')}")
     dq = block.get("data_quality", [])
     if dq:
         print(f"  Data Quality:    {dq}")
@@ -1033,6 +1165,259 @@ def _selftest():
         print(f"  I1 FCF sustainability guard: fires for rdcf_growth={rdcf_g:.3f}  OK")
     else:
         print(f"  I1 FCF sustainability guard: rdcf_growth={rdcf_g}, skipping assertion (market_cap too high for -0.15 trigger)")
+
+    # --- P2: EVERY OCF-proxy now flags (the dead `elif` is fixed) ---
+    # Build a clean, capital-light OCF-proxy name with assets present and assets/rev <= 5
+    # (the exact path the old code silently skipped). It MUST now flag uncertain.
+    _dd_proxy_light = {
+        "ticker": "TEST_PROXY_LIGHT",
+        "derived": {
+            "latest_cash": 5_000_000,
+            "latest_total_debt": 0,
+            "latest_revenue": 50_000_000,
+            "latest_net_income": 8_000_000,
+            "latest_ocf": 10_000_000,
+            "latest_ebit": 9_000_000,
+            "latest_dep_amort": 500_000,
+            "latest_capex": None,             # capex missing -> OCF proxy
+            "latest_ebitda": 9_500_000,
+            "latest_fcf": 10_000_000,
+            "fcf_is_ocf_proxy": True,         # OCF proxy
+            "latest_goodwill": 0,
+            "latest_intangibles": 0,
+            "sic": "3990",                    # non-financial
+            "debt_truncation_suspected": False,
+            "debt_stale": False,
+            "wrong_entity_suspected": False,
+            "data_quality_warn": None,
+            "debt_source": "LongTermDebt",
+        },
+        "financials": {
+            # assets/rev = 80M/50M = 1.6 (<=5): the old `elif` would NEVER fire here
+            "assets": [{"end": "2024-12-31", "val": 80_000_000}],
+            "equity": [{"end": "2024-12-31", "val": 70_000_000}],
+            "ebit": [{"end": "2024-12-31", "val": 9_000_000}],
+            "dep_amort": [{"end": "2024-12-31", "val": 500_000}],
+            "ocf": [{"end": "2024-12-31", "val": 10_000_000}],
+            "capex": [],                      # no capex series -> proxy
+            "revenue": [{"end": "2024-12-31", "val": 50_000_000}],
+            "shares_outstanding": [{"end": "2024-12-31", "val": 10_000_000}],
+        },
+    }
+    # Market cap chosen so mos_basis=fcf_cap and a numeric MoS exists.
+    _block_proxy = compute_valuation(_dd_proxy_light, 100_000_000, cfg)
+    assert _block_proxy.get("mos_basis") == "fcf_cap", (
+        f"P2: light proxy fixture must route fcf_cap, got {_block_proxy.get('mos_basis')!r}"
+    )
+    assert _block_proxy.get("fcf_sustainability_uncertain") is True, (
+        "P2: capital-light OCF-proxy (assets/rev<=5) must NOW flag fcf_sustainability_uncertain "
+        "(was silently skipped by the dead elif)"
+    )
+    assert any("fcf_sustainability_uncertain" in str(x) for x in _block_proxy.get("data_quality", [])), (
+        "P2: ocf-proxy uncertainty must appear in data_quality list"
+    )
+    assert "fcf_sustainability_uncertain" in _block_proxy.get("buy_ineligible_reasons", []), (
+        "P2: ocf-proxy must propagate into buy_ineligible_reasons"
+    )
+    assert _block_proxy.get("buy_eligible") is False, (
+        "P2: an OCF-proxy name cannot be buy_eligible"
+    )
+    print("  P2 OCF-proxy: capital-light proxy now flags uncertain + blocks buy_eligible  OK")
+
+    # --- P1+P6: fundamental_decline_flag forces buy_eligible=False ---
+    # Clean non-proxy name (would otherwise be eligible) + producer decline flag set.
+    _dd_clean_base = {
+        "ticker": "TEST_CLEAN",
+        "derived": {
+            "latest_cash": 20_000_000,
+            "latest_total_debt": 10_000_000,
+            "latest_revenue": 100_000_000,
+            "latest_net_income": 15_000_000,
+            "latest_ocf": 20_000_000,
+            "latest_ebit": 18_000_000,
+            "latest_dep_amort": 4_000_000,
+            "latest_capex": 5_000_000,
+            "latest_ebitda": 22_000_000,
+            "latest_fcf": 15_000_000,
+            "fcf_is_ocf_proxy": False,
+            "latest_goodwill": 0,
+            "latest_intangibles": 0,
+            "sic": "3990",                    # non-financial
+            "debt_truncation_suspected": False,
+            "debt_stale": False,
+            "wrong_entity_suspected": False,
+            "data_quality_warn": None,
+            "debt_source": "LongTermDebt",
+            "ebit_source": "OperatingIncomeLoss",
+            "concentration_flag": None,
+            "top_customer_pct": None,
+            "top_program_pct": None,
+            "fundamental_decline_flag": False,
+            "rev_slope_sign": 1,
+            "rev_accel_sign": 0,
+            "latest_below_avg": False,
+            "contamination_ratio": 1.05,
+        },
+        "financials": {
+            "assets": [{"end": "2024-12-31", "val": 200_000_000}],
+            "equity": [{"end": "2024-12-31", "val": 150_000_000}],
+            "ebit": [{"end": "2024-12-31", "val": 18_000_000}],
+            "dep_amort": [{"end": "2024-12-31", "val": 4_000_000}],
+            "ocf": [{"end": "2024-12-31", "val": 20_000_000}],
+            "capex": [{"end": "2024-12-31", "val": 5_000_000}],
+            "revenue": [{"end": "2024-12-31", "val": 100_000_000}],
+            "shares_outstanding": [{"end": "2024-12-31", "val": 10_000_000}],
+        },
+    }
+    # (iv) Clean name keeps buy_eligible=True (small-cap mktcap, non-proxy, no flags).
+    _block_clean = compute_valuation(_dd_clean_base, 120_000_000, cfg)
+    assert _block_clean.get("mos_basis") == "fcf_cap", (
+        f"P1: clean fixture must route fcf_cap, got {_block_clean.get('mos_basis')!r}"
+    )
+    assert _block_clean.get("buy_eligible") is True, (
+        f"P1: a clean name with zero flags must keep buy_eligible=True, "
+        f"reasons={_block_clean.get('buy_ineligible_reasons')}"
+    )
+    assert _block_clean.get("buy_ineligible_reasons") == [], (
+        f"P1: clean name must have empty buy_ineligible_reasons, got {_block_clean.get('buy_ineligible_reasons')}"
+    )
+    # P9 corollary: ebit_source propagates and ev_ebitda computes.
+    assert _block_clean.get("ebit_source") == "OperatingIncomeLoss", (
+        f"P9: ebit_source must propagate, got {_block_clean.get('ebit_source')!r}"
+    )
+    assert _block_clean.get("ev_ebitda") is not None and _block_clean.get("ev_ebitda") > 0, (
+        f"P9: ev_ebitda must compute on a clean name, got {_block_clean.get('ev_ebitda')}"
+    )
+    print("  P1 clean name: buy_eligible=True, no reasons; P9 ev_ebitda computes  OK")
+
+    # (ii) fundamental_decline_flag => buy_eligible False (downgrade veto)
+    _dd_decline = dict(_dd_clean_base)
+    _dd_decline["derived"] = dict(_dd_clean_base["derived"])
+    _dd_decline["derived"]["fundamental_decline_flag"] = True
+    _dd_decline["derived"]["rev_slope_sign"] = -1
+    _dd_decline["derived"]["latest_below_avg"] = True
+    _dd_decline["derived"]["contamination_ratio"] = 0.68  # SIGA-like
+    _block_decline = compute_valuation(_dd_decline, 120_000_000, cfg)
+    assert _block_decline.get("fundamental_decline_flag") is True, (
+        "P6: producer fundamental_decline_flag must be read into the valuation block"
+    )
+    assert _block_decline.get("buy_eligible") is False, (
+        "P6: fundamental_decline_flag must force buy_eligible=False"
+    )
+    assert "fundamental_decline_flag" in _block_decline.get("buy_ineligible_reasons", []), (
+        "P6: fundamental_decline_flag must appear in buy_ineligible_reasons"
+    )
+    assert any("fundamental_decline_veto" in str(x) for x in _block_decline.get("data_quality", [])), (
+        "P6: fundamental_decline_veto must appear in data_quality list"
+    )
+    print("  P6 trajectory veto: fundamental_decline_flag forces buy_eligible=False  OK")
+
+    # (iii) concentration kill => buy_eligible False
+    _dd_conc = dict(_dd_clean_base)
+    _dd_conc["derived"] = dict(_dd_clean_base["derived"])
+    _dd_conc["derived"]["concentration_flag"] = "kill"
+    _dd_conc["derived"]["top_customer_pct"] = 75.0   # SIGA-like single-counterparty
+    _block_conc = compute_valuation(_dd_conc, 120_000_000, cfg)
+    assert _block_conc.get("concentration_flag") == "kill", (
+        "P3: concentration_flag kill must be read into the valuation block"
+    )
+    assert _block_conc.get("buy_eligible") is False, (
+        "P3: concentration kill must force buy_eligible=False"
+    )
+    assert "concentration_kill" in _block_conc.get("buy_ineligible_reasons", []), (
+        "P3: concentration_kill must appear in buy_ineligible_reasons"
+    )
+    assert any("concentration_kill" in str(x) for x in _block_conc.get("data_quality", [])), (
+        "P3: concentration_kill must appear in data_quality list"
+    )
+    print("  P3 concentration kill: forces buy_eligible=False  OK")
+
+    # --- P10: lumpy-OCF normalization guard fires on a peak year > 2x median ---
+    # Cyclical series with one BARDA-like peak (95M) vs others (~11-49M); contamination<1.
+    _dd_lumpy = {
+        "ticker": "TEST_LUMPY",
+        "derived": {
+            "latest_cash": 10_000_000,
+            "latest_total_debt": 0,
+            "latest_revenue": 60_000_000,
+            "latest_net_income": 20_000_000,
+            "latest_ocf": 43_500_000,
+            "latest_ebit": 25_000_000,
+            "latest_dep_amort": 2_000_000,
+            "latest_capex": 1_000_000,
+            "latest_ebitda": 27_000_000,
+            "latest_fcf": 42_500_000,
+            "fcf_is_ocf_proxy": False,
+            "latest_goodwill": 0,
+            "latest_intangibles": 0,
+            "sic": "2836",                    # biological products (SIGA-like), non-financial
+            "debt_truncation_suspected": False,
+            "debt_stale": False,
+            "wrong_entity_suspected": False,
+            "data_quality_warn": None,
+            "debt_source": "LongTermDebt",
+            "ebit_source": "OperatingIncomeLoss",
+            "contamination_ratio": 0.68,      # latest base below its own 5yr-avg
+            "fundamental_decline_flag": False,
+            "rev_slope_sign": 0,
+            "latest_below_avg": True,
+        },
+        "financials": {
+            "assets": [{"end": "2024-12-31", "val": 200_000_000}],
+            "equity": [{"end": "2024-12-31", "val": 180_000_000}],
+            "ebit": [
+                {"end": "2020-12-31", "val": 8_000_000},
+                {"end": "2021-12-31", "val": 35_000_000},
+                {"end": "2022-12-31", "val": 80_000_000},
+                {"end": "2023-12-31", "val": 30_000_000},
+                {"end": "2024-12-31", "val": 25_000_000},
+            ],
+            "dep_amort": [
+                {"end": "2020-12-31", "val": 2_000_000},
+                {"end": "2021-12-31", "val": 2_000_000},
+                {"end": "2022-12-31", "val": 2_000_000},
+                {"end": "2023-12-31", "val": 2_000_000},
+                {"end": "2024-12-31", "val": 2_000_000},
+            ],
+            # OCF: 2022 peak = 94.8M is > 2x the median of the others (~43.5M)
+            "ocf": [
+                {"end": "2020-12-31", "val": 11_500_000},
+                {"end": "2021-12-31", "val": 41_600_000},
+                {"end": "2022-12-31", "val": 94_800_000},
+                {"end": "2023-12-31", "val": 48_800_000},
+                {"end": "2024-12-31", "val": 43_500_000},
+            ],
+            "capex": [
+                {"end": "2020-12-31", "val": 1_000_000},
+                {"end": "2021-12-31", "val": 1_000_000},
+                {"end": "2022-12-31", "val": 1_000_000},
+                {"end": "2023-12-31", "val": 1_000_000},
+                {"end": "2024-12-31", "val": 1_000_000},
+            ],
+            "revenue": [
+                {"end": "2020-12-31", "val": 30_000_000},
+                {"end": "2021-12-31", "val": 60_000_000},
+                {"end": "2022-12-31", "val": 120_000_000},
+                {"end": "2023-12-31", "val": 70_000_000},
+                {"end": "2024-12-31", "val": 60_000_000},
+            ],
+            "shares_outstanding": [{"end": "2024-12-31", "val": 70_000_000}],
+        },
+    }
+    _block_lumpy = compute_valuation(_dd_lumpy, 300_000_000, cfg)
+    assert _block_lumpy.get("cyclical") is True, (
+        f"P10: lumpy fixture must be cyclical, got {_block_lumpy.get('cyclical')}"
+    )
+    assert _block_lumpy.get("lumpy_ocf_normalization_suspect") is True, (
+        "P10: a year with OCF > 2x median of others must set lumpy_ocf_normalization_suspect"
+    )
+    assert any("lumpy_ocf_normalization_suspect" in str(x) for x in _block_lumpy.get("data_quality", [])), (
+        "P10: lumpy_ocf_normalization_suspect must appear in data_quality list"
+    )
+    assert any("lumpy_ocf_corroborated_by_contamination" in str(x) for x in _block_lumpy.get("data_quality", [])), (
+        "P10: lumpy guard must corroborate with producer contamination_ratio<1.0"
+    )
+    print("  P10 lumpy-OCF guard: peak-year>2x-median flags + corroborates contamination  OK")
 
     print("\nvaluation selftest PASS")
 
