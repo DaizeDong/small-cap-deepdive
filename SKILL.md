@@ -52,6 +52,16 @@ disclosure non-filers — before any analyst time is spent.
 
 ## Four Entry Workflows
 
+> **Open a run batch first (all entries).** Before the first tool call of any run, open a
+> timestamped batch so this run's candidates / cheappass / deepdive / valuation / report files
+> stay together and runs stay comparable across skill versions:
+> ```bash
+> export SMALLCAP_RUN=$(python tools/new_run.py --label <theme-or-event>)
+> # → all outputs now land in reports/smallcap/<date>_<label>/ with a _run.json manifest
+> #   (records date, skill git commit, and the valuation config snapshot)
+> ```
+> Leaving `SMALLCAP_RUN` unset writes flat to `reports/smallcap/` (legacy behaviour).
+
 ### Entry 1 — `theme <主题>` (thematic universe screen)
 
 **Use when:** you have an investment theme and want a ranked shortlist of small-cap pure-plays.
