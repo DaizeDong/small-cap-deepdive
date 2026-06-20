@@ -73,6 +73,51 @@ DA_CONCEPTS = [
 # CapEx: standard XBRL concept; present for WLFC and LNN.
 CAPEX_CONCEPT = "PaymentsToAcquirePropertyPlantAndEquipment"
 
+# P9 — EBIT concept cascade. ~47% of names had null EV/EBITDA because EBIT was a single
+# OperatingIncomeLoss pull (banks/insurers, IFRS filers, some industrials don't tag it).
+# Cascade order (earlier = higher priority): operating income first; if absent, fall back to
+# pretax income (continuing ops), optionally adding back interest expense to approximate EBIT.
+# Each path tags `ebit_source` so the consumer knows which concept produced the number.
+EBIT_PRIMARY_CONCEPT = "OperatingIncomeLoss"
+EBIT_PRETAX_CONCEPTS = [
+    # IncomeLossFromContinuingOperationsBeforeIncomeTaxes... has several long variants;
+    # list older/narrower first, preferred last (concept_series later-overrides-earlier).
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+]
+EBIT_INTEREST_CONCEPTS = [
+    "InterestExpense",
+    "InterestAndDebtExpense",
+    "InterestExpenseDebt",
+]
+
+# P3 — concentration extraction. Magnitude-based, sourced from concentration-footnote numerics
+# in the filing text (companyconcept XBRL does NOT expose dimensional segment members, so the
+# segment-member breakdown is only recoverable from the footnote text). Replaces the old
+# substring detector ("customers accounted for") which SIGA's filing never used.
+# A single named counterparty (government, "one customer", named largest client) = top_customer_pct.
+# A single product/program/segment/drug share of revenue = top_program_pct.
+_CONC_SINGLE_CUSTOMER = re.compile(
+    r"u\.?\s*s\.?\s*government|federal government|one customer|single customer|"
+    r"largest customer|one client|single client|largest client|its largest|our largest|"
+    r"a single (?:customer|client|counterpart)|one (?:counterpart|payor|payer)|barda",
+    re.IGNORECASE,
+)
+_CONC_SINGLE_PROGRAM = re.compile(
+    r"one (?:product|program|segment|drug|contract)|single (?:product|program|segment|drug|contract)|"
+    r"largest (?:product|program|segment|drug)|our (?:lead|sole|primary|principal) (?:product|program|drug)|"
+    r"a single (?:product|program|segment|drug)",
+    re.IGNORECASE,
+)
+_CONC_REVENUE_TERM = re.compile(
+    r"revenue|net sales|product sales|of (?:our |its |total )?sales|"
+    r"accounts receivable|receivable",
+    re.IGNORECASE,
+)
+_CONC_PCT = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*%")
+# How far (chars) a percentage may sit from its qualifying context phrase.
+_CONC_WINDOW = 180
+
 
 def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap") -> list:
     """拉单个 XBRL 概念的年度序列。
@@ -427,6 +472,236 @@ def _da_series(cik: str, n: int = 8) -> tuple[list, str]:
     return series, label
 
 
+def _ebit_with_source(cik: str, op_income_series: list, n: int = 8) -> tuple[list, str | None]:
+    """P9 — EBIT concept cascade with `ebit_source` tagging.
+
+    Recovers an EBIT series for the ~47% of names that don't tag OperatingIncomeLoss
+    (banks/insurers, IFRS filers, some industrials), so EV/EBITDA can compute.
+
+    Cascade (each path tagged):
+      1. OperatingIncomeLoss                              -> ebit_source="OperatingIncomeLoss"
+      2. PretaxContinuingOps + interest expense addback   -> ebit_source="pretax+interest_addback"
+      3. PretaxContinuingOps (no interest available)      -> ebit_source="pretax_proxy"
+
+    Returns (series, ebit_source). series entries: {"end", "val"}.
+    ebit_source is None when nothing recovers (caller leaves ebit empty).
+    The pretax addback is matched by end date; interest is added back (interest reduces
+    pretax income, so EBIT ~= pretax + interest expense).
+    """
+    # Path 1: OperatingIncomeLoss (already pulled by caller)
+    if op_income_series:
+        return op_income_series[-n:], EBIT_PRIMARY_CONCEPT
+
+    # Path 2/3: pretax continuing-ops income as the EBIT base
+    pretax = concept_series(cik, EBIT_PRETAX_CONCEPTS, n=n)
+    time.sleep(0.15)
+    if not pretax:
+        return [], None
+
+    # Try interest addback (EBIT = pretax + interest expense). Interest is reported as a
+    # positive expense; adding it back to pretax income approximates operating income.
+    interest = concept_series(cik, EBIT_INTEREST_CONCEPTS, n=n)
+    time.sleep(0.15)
+    if interest:
+        int_map = {v["end"]: v["val"] for v in interest}
+        series = []
+        any_addback = False
+        for v in pretax:
+            iv = int_map.get(v["end"])
+            if iv is not None:
+                series.append({"end": v["end"], "val": v["val"] + iv})
+                any_addback = True
+            else:
+                series.append({"end": v["end"], "val": v["val"]})
+        if any_addback:
+            return series[-n:], "pretax+interest_addback"
+
+    # Path 3: pretax proxy (no interest series to add back)
+    series = [{"end": v["end"], "val": v["val"]} for v in pretax]
+    return series[-n:], "pretax_proxy"
+
+
+def _extract_concentration(tenk_text: str) -> tuple[float | None, float | None, str | None]:
+    """P3 — magnitude-based revenue/customer concentration from filing footnote numerics.
+
+    companyconcept XBRL does NOT expose dimensional segment members, so the only mechanical
+    source for the magnitude is the concentration-footnote text the filing already provides.
+    This replaces the old English substring detector ("customers accounted for"), which SIGA's
+    ~90%-BARDA-dependent filing never used.
+
+    Strategy: scan every percentage in the text; keep one whose context window contains BOTH
+    a revenue/sales/receivable term AND a single-counterparty phrase (top_customer_pct) or a
+    single-product/program phrase (top_program_pct). Take the max per class (worst-case
+    concentration). A counterparty match takes precedence over a program match for the same
+    percentage (named-customer dependence is the harder kill-flag).
+
+    Returns (top_customer_pct, top_program_pct, detail) — pcts are floats 0-100 or None.
+    The kill/watch flag is composed by the caller (_concentration_flag).
+    """
+    if not tenk_text:
+        return None, None, None
+    low = tenk_text.lower()
+    top_customer: float | None = None
+    top_program: float | None = None
+    cust_ctx: str | None = None
+    prog_ctx: str | None = None
+    def _nearest_dist(pat, window, anchor):
+        """Smallest char distance from `anchor` (pct position within window) to any match of pat."""
+        best = None
+        for mm in pat.finditer(window):
+            mid = (mm.start() + mm.end()) // 2
+            dist = abs(mid - anchor)
+            if best is None or dist < best:
+                best = dist
+        return best
+
+    for m in _CONC_PCT.finditer(low):
+        try:
+            pct = float(m.group(1))
+        except ValueError:
+            continue
+        if not (0 < pct <= 100):
+            continue
+        lo = max(0, m.start() - _CONC_WINDOW)
+        hi = min(len(low), m.end() + _CONC_WINDOW)
+        window = low[lo:hi]
+        if not _CONC_REVENUE_TERM.search(window):
+            continue
+        anchor = m.start() - lo  # pct position relative to window start
+        cust_d = _nearest_dist(_CONC_SINGLE_CUSTOMER, window, anchor)
+        prog_d = _nearest_dist(_CONC_SINGLE_PROGRAM, window, anchor)
+        if cust_d is None and prog_d is None:
+            continue
+        # Bind the percentage to whichever qualifying phrase is NEAREST. Ties (and customer-only)
+        # resolve to customer — named-counterparty dependence is the harder kill-flag.
+        if prog_d is not None and (cust_d is None or prog_d < cust_d):
+            cls = "program"
+        else:
+            cls = "customer"
+        snippet = tenk_text[max(0, m.start() - 70):m.end() + 30].replace("\n", " ").strip()
+        if cls == "customer":
+            if top_customer is None or pct > top_customer:
+                top_customer = pct
+                cust_ctx = snippet
+        else:
+            if top_program is None or pct > top_program:
+                top_program = pct
+                prog_ctx = snippet
+    parts = []
+    if top_customer is not None:
+        parts.append(f"top_customer={top_customer:.0f}% [{cust_ctx}]")
+    if top_program is not None:
+        parts.append(f"top_program={top_program:.0f}% [{prog_ctx}]")
+    detail = " ; ".join(parts) if parts else None
+    return top_customer, top_program, detail
+
+
+def _concentration_flag(top_customer_pct: float | None, top_program_pct: float | None) -> str | None:
+    """P3 — compose the concentration kill/watch flag per the data contract.
+
+    kill  if top_program_pct > 60 OR top_customer_pct > 40
+    watch if either lands in the 40-60 band (and no kill)
+    None  otherwise.
+    """
+    def _val(x):
+        return x if x is not None else -1.0
+    cust = _val(top_customer_pct)
+    prog = _val(top_program_pct)
+    if prog > 60 or cust > 40:
+        return "kill"
+    if (40 <= cust <= 60) or (40 <= prog <= 60):
+        return "watch"
+    return None
+
+
+def _annual_vals(series: list) -> list:
+    """Dedup a {end,val} series to one value per fiscal year (latest end within each calendar
+    year wins), dropping sub-annual stubs and duplicate-year mislabels that corrupt a trend
+    slope. Returns values sorted ascending by year. Used by _trajectory_fields so an ancient
+    scale-up at the front of the raw series cannot invert the recent-trajectory sign."""
+    by_year: dict = {}
+    for s in series:
+        v = s.get("val")
+        end = s.get("end") or ""
+        if v is None or len(end) < 4:
+            continue
+        yr = end[:4]
+        if yr not in by_year or end > by_year[yr][0]:
+            by_year[yr] = (end, v)
+    return [by_year[y][1] for y in sorted(by_year)]
+
+
+def _trajectory_fields(rev_series: list, norm_base_series: list) -> dict:
+    """P6 — deterministic revenue trajectory + contamination derived fields.
+
+    Computed from the multiyear series already pulled (no new network calls).
+
+    - rev_slope_sign (int -1/0/1): sign of the simple linear slope over the revenue series.
+    - rev_accel_sign (int -1/0/1): sign of the mean 2nd difference (acceleration) of revenue.
+    - latest_below_avg (bool): latest normalization-base value < trailing average of the
+      prior normalization-base values.
+    - contamination_ratio (float|None): latest normalization-base / 5yr-avg of the base.
+    - fundamental_decline_flag (bool): rev_slope_sign<0 AND contamination_ratio<1.0 AND
+      latest_below_avg. The melting-ice-cube / lumpy-OCF value-trap veto (SIGA contamination ~0.68).
+
+    `norm_base_series` is the series the valuation layer normalizes on (OCF/FCF); revenue is the
+    trajectory carrier. Both are lists of {"end","val"} sorted ascending by end date.
+    """
+    out = {
+        "rev_slope_sign": 0,
+        "rev_accel_sign": 0,
+        "latest_below_avg": False,
+        "contamination_ratio": None,
+        "fundamental_decline_flag": False,
+    }
+
+    # RECENT-window trajectory. The raw multiyear series can be contaminated at the FRONT by
+    # sub-annual stubs / mislabeled fiscal years (e.g. SIGA's 9-month 8.1M stub + a duplicate-year
+    # tag), whose ancient ramp inverts the all-time least-squares slope to +1 even when the company
+    # is currently rolling over. Annualize, then slope over the trailing <=5 years so the veto
+    # measures CURRENT trajectory rather than an ancient scale-up.
+    rev_window = _annual_vals(rev_series)[-5:]
+    # Revenue slope sign via least-squares slope over index 0..n-1 of the recent window.
+    if len(rev_window) >= 2:
+        n = len(rev_window)
+        xs = list(range(n))
+        mx = sum(xs) / n
+        my = sum(rev_window) / n
+        denom = sum((x - mx) ** 2 for x in xs)
+        if denom != 0:
+            slope = sum((xs[i] - mx) * (rev_window[i] - my) for i in range(n)) / denom
+            out["rev_slope_sign"] = (1 if slope > 0 else -1 if slope < 0 else 0)
+    # Revenue acceleration sign via mean 2nd difference of the recent window.
+    if len(rev_window) >= 3:
+        second_diffs = [
+            rev_window[i + 2] - 2 * rev_window[i + 1] + rev_window[i]
+            for i in range(len(rev_window) - 2)
+        ]
+        accel = sum(second_diffs) / len(second_diffs)
+        out["rev_accel_sign"] = (1 if accel > 0 else -1 if accel < 0 else 0)
+
+    # Contamination + latest-below-avg on the normalization base.
+    base_vals = [s["val"] for s in norm_base_series if s.get("val") is not None]
+    if len(base_vals) >= 2:
+        latest = base_vals[-1]
+        prior = base_vals[:-1]
+        trailing_avg = sum(prior) / len(prior)
+        out["latest_below_avg"] = latest < trailing_avg
+        # 5yr-avg = average of up to the last 5 base values (inclusive of latest).
+        window5 = base_vals[-5:]
+        avg5 = sum(window5) / len(window5)
+        if avg5 != 0:
+            out["contamination_ratio"] = round(latest / avg5, 4)
+
+    cr = out["contamination_ratio"]
+    out["fundamental_decline_flag"] = bool(
+        out["rev_slope_sign"] < 0
+        and cr is not None and cr < 1.0
+        and out["latest_below_avg"]
+    )
+    return out
+
+
 def insider_trades(ticker: str, cik: str = "") -> dict:
     """内部人交易净方向(最硬的管理层诚实信号)。
     源由 CFG["insider_source"] 控制,默认 openinsider(已测试路径)。
@@ -655,9 +930,20 @@ def tenk_sections(ticker: str, cik: str = "") -> dict:
         )
         out["has_material_weakness"] = "material weakness" in low and _mw_affirmative
         out["has_death_spiral"] = "variable conversion" in low
-        # 客户集中度信号
-        out["customer_concentration_flag"] = "customers accounted for" in low or \
-            "customer accounted for" in low
+        # P3 — magnitude-based concentration from the full filing text (the only mechanical
+        # source for the segment-member magnitude; companyconcept XBRL has no dimensional
+        # members). Replaces the old "customers accounted for" substring, which SIGA's
+        # ~90%-BARDA-dependent filing never used. Done here because txt (full body) is in scope.
+        _tc, _tp, _cd = _extract_concentration(txt)
+        out["top_customer_pct"] = _tc
+        out["top_program_pct"] = _tp
+        out["concentration_detail"] = _cd
+        # Backward-compat boolean: True when any concentration magnitude was extracted OR the
+        # legacy substring is present (preserves existing consumers reading this flag).
+        out["customer_concentration_flag"] = (
+            _tc is not None or _tp is not None
+            or "customers accounted for" in low or "customer accounted for" in low
+        )
         # 截取 risk factors 开头(供 agent 读真实风险)
         idx = low.find("risk factors")
         out["risk_excerpt"] = txt[idx:idx + 3000] if idx >= 0 else ""
@@ -690,7 +976,11 @@ def pull(ticker: str, cik: str) -> dict:
     print(f"  拉估值输入序列(债务/EBIT/D&A/CapEx/Goodwill/Intangibles)...", file=sys.stderr)
     debt, debt_source = _debt_series(cik)
     time.sleep(0.2)
-    ebit = concept_series(cik, "OperatingIncomeLoss"); time.sleep(0.2)
+    # P9: EBIT concept cascade. Pull OperatingIncomeLoss first; if absent, _ebit_with_source
+    # falls back to pretax-continuing-ops (+interest addback) so EV/EBITDA recovers.
+    _op_income = concept_series(cik, EBIT_PRIMARY_CONCEPT); time.sleep(0.2)
+    ebit, ebit_source = _ebit_with_source(cik, _op_income)
+    time.sleep(0.2)
     da, da_source = _da_series(cik)
     time.sleep(0.2)
     capex_raw = concept_series(cik, CAPEX_CONCEPT); time.sleep(0.2)
@@ -789,6 +1079,26 @@ def pull(ticker: str, cik: str) -> dict:
         ticker, cik, rev, shares, ni
     )
 
+    # P9: ebit_source tagged by the cascade (None when no EBIT base recovered).
+    _ebit_source = ebit_source if ebit else None
+
+    # 10-K sections pulled BEFORE derived so P3 concentration can read the footnote text.
+    print(f"  拉 10-K 章节...", file=sys.stderr)
+    # A1: tenk_sections uses CIK fallback when ticker absent
+    d["tenk"] = tenk_sections(ticker, cik=cik)
+
+    # P3: magnitude-based concentration. tenk_sections extracts the magnitudes from the full
+    # filing body (the only mechanical source — companyconcept XBRL has no dimensional members);
+    # here we read them back and compose the kill/watch flag per the data contract.
+    _top_customer_pct = d["tenk"].get("top_customer_pct")
+    _top_program_pct = d["tenk"].get("top_program_pct")
+    _conc_detail = d["tenk"].get("concentration_detail")
+    _conc_flag = _concentration_flag(_top_customer_pct, _top_program_pct)
+
+    # P6: deterministic trajectory + contamination. Revenue carries the slope/accel; OCF is the
+    # normalization base the valuation layer averages on (contamination = latest / 5yr-avg).
+    _traj = _trajectory_fields(rev, ocf)
+
     d["derived"] = {
         "revenue_growth_pct": pct_growth(rev),
         "shares_growth_pct": pct_growth(shares),  # 正=稀释
@@ -804,6 +1114,8 @@ def pull(ticker: str, cik: str) -> dict:
         "latest_total_debt": debt[-1]["val"] if debt else None,
         "debt_source": debt_source,
         "latest_ebit": ebit[-1]["val"] if ebit else None,
+        # P9: which concept the EBIT cascade actually used (consumer reads to recover EV/EBITDA)
+        "ebit_source": _ebit_source,
         "latest_dep_amort": da[-1]["val"] if da else None,
         "da_source": da_source,
         "latest_capex": latest_capex,
@@ -822,6 +1134,17 @@ def pull(ticker: str, cik: str) -> dict:
         "wrong_entity_reason": _wrong_entity_reason,
         # C2: SIC code for financial-sector routing in valuation
         "sic": sic_code,
+        # P3: concentration (magnitude-based; replaces the substring detector)
+        "top_customer_pct": _top_customer_pct,
+        "top_program_pct": _top_program_pct,
+        "concentration_flag": _conc_flag,
+        "concentration_detail": _conc_detail,
+        # P6: trajectory + contamination (deterministic, from the multiyear series)
+        "rev_slope_sign": _traj["rev_slope_sign"],
+        "rev_accel_sign": _traj["rev_accel_sign"],
+        "latest_below_avg": _traj["latest_below_avg"],
+        "contamination_ratio": _traj["contamination_ratio"],
+        "fundamental_decline_flag": _traj["fundamental_decline_flag"],
     }
     print(f"  拉内部人交易...", file=sys.stderr)
     # A1: insider_trades queries openinsider by ticker; if no ticker, skip gracefully
@@ -830,9 +1153,6 @@ def pull(ticker: str, cik: str) -> dict:
         time.sleep(0.3)
     else:
         d["insider"] = {"available": False, "note": "no_ticker_pre_listing"}
-    print(f"  拉 10-K 章节...", file=sys.stderr)
-    # A1: tenk_sections uses CIK fallback when ticker absent
-    d["tenk"] = tenk_sections(ticker, cik=cik)
     return d
 
 
@@ -946,6 +1266,163 @@ def _selftest():
     _we2, _ = _validate_ticker_entity("", "0000000001", [], _normal_shares, [])
     assert not _we2, "C1b: wrong_entity_suspected must NOT fire for normal shares count"
     print(f"  C1b wrong_entity_suspected: does NOT fire for normal company  OK")
+
+    # --- P3: concentration extraction (magnitude-based, replaces substring) ---
+    # SIGA-like footnote: single counterparty (U.S. Government) at 75% → top_customer_pct.
+    _siga_text = (
+        "Note 9. At December 31, 2025 and 2024, 75% and 45%, respectively, of accounts "
+        "receivable represent receivables from the U.S. Government. Substantially all of "
+        "our product revenue is derived from contracts with BARDA."
+    )
+    _tc, _tp, _cd = _extract_concentration(_siga_text)
+    assert _tc is not None and _tc >= 75.0, (
+        f"P3: SIGA-like single-counterparty 75% must be captured as top_customer_pct, got {_tc}"
+    )
+    assert _cd is not None and "top_customer" in _cd, f"P3: detail must describe customer, got {_cd!r}"
+    assert _concentration_flag(_tc, _tp) == "kill", (
+        f"P3: top_customer_pct>40 must yield kill, got {_concentration_flag(_tc, _tp)}"
+    )
+    print(f"  P3 concentration: SIGA-like top_customer={_tc:.0f}% -> kill  OK")
+
+    # Program concentration >60% → kill; revenue-share phrasing.
+    _prog_text = (
+        "Our lead product accounted for approximately 82% of total revenue for the year. "
+        "No single customer represented more than 10% of net sales."
+    )
+    _tc2, _tp2, _cd2 = _extract_concentration(_prog_text)
+    assert _tp2 is not None and _tp2 >= 82.0, f"P3: program 82% must be captured, got {_tp2}"
+    assert _concentration_flag(_tc2, _tp2) == "kill", (
+        f"P3: top_program_pct>60 must yield kill, got {_concentration_flag(_tc2, _tp2)}"
+    )
+    print(f"  P3 concentration: lead-product top_program={_tp2:.0f}% -> kill  OK")
+
+    # Threshold semantics (kill precedence per contract: kill if cust>40 OR prog>60):
+    assert _concentration_flag(48.0, None) == "kill", "P3: customer 48% (>40) must be kill"
+    assert _concentration_flag(40.0, None) == "watch", "P3: customer exactly 40 must be watch (not >40)"
+    assert _concentration_flag(None, 55.0) == "watch", "P3: program 55% (40-60) must be watch"
+    assert _concentration_flag(None, 65.0) == "kill", "P3: program 65% (>60) must be kill"
+    assert _concentration_flag(None, None) is None, "P3: no concentration must be None flag"
+    assert _concentration_flag(30.0, 30.0) is None, "P3: 30%/30% (below band) must be None"
+    print(f"  P3 concentration_flag: kill/watch/None thresholds correct  OK")
+
+    # --- P9: EBIT cascade tagging (no live call — exercise the source labels) ---
+    # Path 1: OperatingIncomeLoss present → tagged OperatingIncomeLoss (offline; pass op income).
+    _op = [{"end": "2024-12-31", "val": 50_000_000}]
+    _ebit1, _src1 = _ebit_with_source("0000000001", _op)
+    assert _src1 == "OperatingIncomeLoss" and _ebit1 == _op, (
+        f"P9: OperatingIncomeLoss path must tag OperatingIncomeLoss, got {_src1}"
+    )
+    # Empty op-income with a CIK that has no pretax either → no recovery, source None.
+    _ebit0, _src0 = _ebit_with_source("0000000001", [])
+    assert _ebit0 == [] and _src0 is None, f"P9: unrecoverable EBIT must yield ([], None), got {_src0}"
+    print(f"  P9 ebit_source: OperatingIncomeLoss path + unrecoverable path tagged correctly  OK")
+
+    # Live cascade: ASIX (CIK 1739104) and BBW (CIK 1113809) do NOT tag OperatingIncomeLoss
+    # (the ~47% null-EV/EBITDA case). The cascade must recover a non-empty EBIT series tagged
+    # as a pretax fallback so EV/EBITDA can compute.
+    _op_asix = concept_series("1739104", EBIT_PRIMARY_CONCEPT)
+    _ebit_asix, _src_asix = _ebit_with_source("1739104", _op_asix)
+    assert not _op_asix, "P9: ASIX must NOT tag OperatingIncomeLoss (cascade precondition)"
+    assert _ebit_asix and _src_asix in ("pretax+interest_addback", "pretax_proxy"), (
+        f"P9: ASIX EBIT must recover via pretax cascade, got source={_src_asix} n={len(_ebit_asix)}"
+    )
+    print(f"  P9 ebit_source: ASIX recovers via {_src_asix} (n={len(_ebit_asix)})  OK")
+
+    # --- P6: trajectory + contamination derived fields ---
+    # Declining revenue + lumpy OCF with a BARDA-style peak (SIGA contamination ~0.68).
+    _rev_decline = [
+        {"end": "2021-12-31", "val": 130_000_000},
+        {"end": "2022-12-31", "val": 120_000_000},
+        {"end": "2023-12-31", "val": 110_000_000},
+        {"end": "2024-12-31", "val": 95_000_000},
+        {"end": "2025-12-31", "val": 89_000_000},
+    ]
+    # OCF base: peak year (94.8) inflates the 5yr-avg so latest (43.5) is contaminated.
+    _ocf_lumpy = [
+        {"end": "2021-12-31", "val": 11_500_000},
+        {"end": "2022-12-31", "val": 41_600_000},
+        {"end": "2023-12-31", "val": 94_800_000},
+        {"end": "2024-12-31", "val": 48_800_000},
+        {"end": "2025-12-31", "val": 43_500_000},
+    ]
+    _t = _trajectory_fields(_rev_decline, _ocf_lumpy)
+    assert _t["rev_slope_sign"] == -1, f"P6: declining revenue must give slope_sign -1, got {_t['rev_slope_sign']}"
+    assert isinstance(_t["rev_accel_sign"], int) and _t["rev_accel_sign"] in (-1, 0, 1), (
+        f"P6: rev_accel_sign must be int in (-1,0,1), got {_t['rev_accel_sign']!r}"
+    )
+    assert _t["latest_below_avg"] is True, "P6: latest OCF below trailing avg must be True"
+    assert _t["contamination_ratio"] is not None and _t["contamination_ratio"] < 1.0, (
+        f"P6: contamination_ratio (latest/5yr-avg) must be <1.0 for the lumpy series, "
+        f"got {_t['contamination_ratio']}"
+    )
+    # latest 43.5 / 5yr-avg(11.5,41.6,94.8,48.8,43.5)=48.04 = 0.9055 per the contract formula.
+    assert abs(_t["contamination_ratio"] - 0.9055) < 0.001, (
+        f"P6: contamination_ratio must equal latest/5yr-avg=0.9055, got {_t['contamination_ratio']}"
+    )
+    assert _t["fundamental_decline_flag"] is True, (
+        "P6: fundamental_decline_flag must fire when slope<0 AND contamination<1 AND latest_below_avg"
+    )
+    print(f"  P6 trajectory: slope=-1 accel={_t['rev_accel_sign']} "
+          f"contamination={_t['contamination_ratio']} decline_flag=True  OK")
+
+    # P6 regression: the REAL SIGA revenue series is contaminated at the front by a 9-month stub
+    # and a duplicate-year mislabel; the raw all-time slope is +1, masking the decline. The
+    # annualize + trailing-5 cleaning must recover slope=-1 so the veto fires (this is the bug the
+    # phase-1 reviewer caught that the hand-cleaned _rev_decline crystal above could not surface).
+    _rev_siga = [
+        {"end": "2019-09-30", "val": 8_111_000},     # 9-month stub
+        {"end": "2019-12-31", "val": 26_742_085},    # mislabeled FY, same calendar year as stub
+        {"end": "2020-12-31", "val": 124_959_304},
+        {"end": "2021-12-31", "val": 133_670_454},
+        {"end": "2022-12-31", "val": 110_775_610},
+        {"end": "2023-12-31", "val": 139_917_220},
+        {"end": "2024-12-31", "val": 138_719_350},
+        {"end": "2025-12-31", "val": 94_574_902},     # real decline, -31.8% YoY
+    ]
+    _ts = _trajectory_fields(_rev_siga, _ocf_lumpy)
+    assert _ts["rev_slope_sign"] == -1, (
+        f"P6 regression: contaminated SIGA series must annualize+trail to slope -1 "
+        f"(raw all-time slope was +1), got {_ts['rev_slope_sign']}"
+    )
+    assert _ts["fundamental_decline_flag"] is True, (
+        "P6 regression: SIGA must fire fundamental_decline_flag after series cleaning"
+    )
+    print("  P6 regression: contaminated SIGA series -> slope=-1, decline_flag=True  OK")
+
+    # Healthy grower: rising revenue, stable/rising OCF → no decline flag.
+    _rev_grow = [
+        {"end": "2021-12-31", "val": 80_000_000},
+        {"end": "2022-12-31", "val": 95_000_000},
+        {"end": "2023-12-31", "val": 110_000_000},
+        {"end": "2024-12-31", "val": 130_000_000},
+        {"end": "2025-12-31", "val": 155_000_000},
+    ]
+    _ocf_grow = [
+        {"end": "2021-12-31", "val": 10_000_000},
+        {"end": "2022-12-31", "val": 13_000_000},
+        {"end": "2023-12-31", "val": 16_000_000},
+        {"end": "2024-12-31", "val": 20_000_000},
+        {"end": "2025-12-31", "val": 26_000_000},
+    ]
+    _tg = _trajectory_fields(_rev_grow, _ocf_grow)
+    assert _tg["rev_slope_sign"] == 1, f"P6: growing revenue must give slope_sign 1, got {_tg['rev_slope_sign']}"
+    assert _tg["latest_below_avg"] is False, "P6: latest OCF above trailing avg must be False for grower"
+    assert _tg["contamination_ratio"] is not None and _tg["contamination_ratio"] > 1.0, (
+        f"P6: grower contamination_ratio must be >1.0, got {_tg['contamination_ratio']}"
+    )
+    assert _tg["fundamental_decline_flag"] is False, (
+        "P6: fundamental_decline_flag must NOT fire for a healthy grower"
+    )
+    print(f"  P6 trajectory: grower slope=1 contamination={_tg['contamination_ratio']} "
+          f"decline_flag=False  OK")
+
+    # Edge: short series (1 point) must not crash and must yield neutral/safe defaults.
+    _short = _trajectory_fields([{"end": "2025-12-31", "val": 100}], [{"end": "2025-12-31", "val": 5}])
+    assert _short["rev_slope_sign"] == 0 and _short["contamination_ratio"] is None, (
+        f"P6: single-point series must give neutral defaults, got {_short}"
+    )
+    assert _short["fundamental_decline_flag"] is False, "P6: single-point must not fire decline flag"
+    print(f"  P6 trajectory: short-series safe defaults  OK")
 
     print("deepdive_data selftest PASS")
 
