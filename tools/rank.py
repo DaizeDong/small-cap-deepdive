@@ -99,6 +99,39 @@ def compute_funnel_stats() -> tuple[int, int]:
     return universe, deepdive
 
 
+def rank_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply the ranking rule: AVOID (rating_score<=1) OR kill-flag>=2 sinks to the bottom;
+    survivors order by rating_score * confidence. Pure function — used by main() and selftest."""
+    df = df.copy()
+    df["sink"] = (df["rating_score"] <= 1) | (df["killflags"].fillna(0) >= 2)
+    df["combined"] = df["rating_score"] * (df["confidence"].fillna(50) / 100)
+    return df.sort_values(["sink", "combined"], ascending=[True, False])
+
+
+def _selftest() -> None:
+    """Verify rating parsing + the sink/ordering rule with synthetic data (no files/network)."""
+    # extract_rating: tolerant parsing of multiple writings
+    assert extract_rating("评级:买入\n置信度: 70%")["rating_score"] == 3, "买入 -> 3"
+    assert extract_rating("评级:买入\n置信度: 70%")["confidence"] == 70, "confidence parse"
+    assert extract_rating("评级:【避开】")["rating_score"] == 1, "避开 bracketed -> 1"
+    assert extract_rating("评级： 观察")["rating_score"] == 2, "观察 fullwidth colon -> 2"
+    assert extract_rating("no rating here")["rating_score"] == 0, "no rating -> 0"
+    # rank_frame: sink (AVOID + kill-flag>=2) + ordering
+    df = pd.DataFrame([
+        {"ticker": "BUY0KF", "rating_score": 3, "confidence": 80, "killflags": 0},
+        {"ticker": "WATCH",  "rating_score": 2, "confidence": 60, "killflags": 0},
+        {"ticker": "AVOID",  "rating_score": 1, "confidence": 90, "killflags": 0},
+        {"ticker": "BUY2KF", "rating_score": 3, "confidence": 99, "killflags": 2},
+    ])
+    order = rank_frame(df)["ticker"].tolist()
+    assert order[0] == "BUY0KF", f"clean BUY must rank first, got {order}"
+    assert order[1] == "WATCH", f"WATCH second, got {order}"
+    assert set(order[2:]) == {"AVOID", "BUY2KF"}, f"AVOID + kill-flag>=2 must sink, got {order}"
+    ranked = rank_frame(df).set_index("ticker")
+    assert bool(ranked.loc["BUY2KF", "sink"]) is True, "kill-flag>=2 sinks even a 买入"
+    print("rank selftest PASS (extract_rating parsing + sink/ordering: AVOID & kill-flag>=2 sink)")
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="rank.py — aggregate deep-dive reports and produce a ranked shortlist."
@@ -112,7 +145,13 @@ def main():
         "--input", default="",
         help="Optional path to the reports directory (default: REPORTS from config).",
     )
+    ap.add_argument("--selftest", action="store_true",
+                    help="Run self-test (rating parsing + sink/ranking logic) and exit")
     args = ap.parse_args()
+
+    if args.selftest:
+        _selftest()
+        return
 
     reports_dir = Path(args.input) if args.input else REPORTS
 
@@ -134,9 +173,7 @@ def main():
     df = pd.DataFrame(rows)
 
     # 排序:AVOID(rating_score=1)或 kill-flag>=2 沉底;其余按 评级分*置信度
-    df["sink"] = (df["rating_score"] <= 1) | (df["killflags"].fillna(0) >= 2)
-    df["combined"] = df["rating_score"] * (df["confidence"].fillna(50) / 100)
-    df = df.sort_values(["sink", "combined"], ascending=[True, False])
+    df = rank_frame(df)
 
     # Compute actual funnel numbers from the selected reports_dir
     report_all = glob.glob(str(reports_dir / "report_*.md"))

@@ -219,7 +219,7 @@ Both gates are mandatory. Neither can be skipped or merged into a single pass.
 
 ### Symmetric BUY Trigger (Phase 3) — three-way `mos_basis` handling
 
-Run `python tools/valuation.py` before rating; read `mos_basis`, `margin_of_safety_pct`, `nav_margin_of_safety_pct`.
+Run `python tools/valuation.py` before rating; read `mos_basis`, `margin_of_safety_pct`, `nav_margin_of_safety_pct`. The model (reverse-DCF, cyclical-trough normalization, NAV path, data-quality guards) is specified in `reference/valuation.md`.
 
 | `mos_basis` | BUY condition | Notes |
 |---|---|---|
