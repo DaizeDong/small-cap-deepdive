@@ -256,24 +256,31 @@ def _get_sec_tickers() -> dict:
 
 
 def _validate_ticker_entity(ticker: str, resolved_cik: str, rev_series: list, shares_series: list, ni_series: list) -> tuple[bool, str | None]:
-    """C1b wrong-entity guard.
+    """C1b wrong-entity guard (P-B refined).
 
     Returns (wrong_entity_suspected, reason_str).
 
-    Heuristics:
+    Reserved for GENUINE unit-mistag / wrong-CIK signatures only:
     1. Ticker absent from SEC company_tickers.json → suspected wrong entity.
-    2. shares_outstanding < 1000 → suspiciously small (sub-entity or wrong CIK).
-    3. |net_income| / revenue > 2.0 for the latest period → structurally impossible
-       for an operating company (indicates wrong-entity or unit anomaly).
-    4. revenue is present but absurdly small given any available context (below $1000,
-       indicating a unit-of-1 mis-tag or the wrong subsidiary).
+    2. Ticker→CIK mismatch vs the SEC canonical mapping → wrong CIK.
+    3. shares_outstanding < 1000 → suspiciously small (sub-entity or wrong CIK).
+    4. |net_income| / revenue > 50 for the latest period → unit-scale anomaly
+       (e.g. $32B NI vs $32M revenue; a real loss-vs-tiny-revenue ratio is far smaller).
+    5. revenue is present but absurdly small (<$1000) → unit-of-1 mis-tag or wrong subsidiary.
+
+    P-B change: the old ratio>2.0 heuristic mislabeled the pre-/early-revenue resource pattern
+    (large genuine loss vs tiny but real revenue: URG/ASPI/IMSR/XOMA) as "wrong entity" though
+    they are the right entity. That pattern is now surfaced as low_revenue_loss_ratio (a
+    data-quality label, see _low_revenue_loss_ratio) and the wrong_entity threshold is raised to
+    the unit-scale-anomaly level (>50). wrong_entity_suspected stays reserved for genuine
+    unit-mistag / wrong-CIK.
 
     Returns (False, None) when no issue detected.
     Returns (True, reason) when any heuristic fires.
     """
     reasons = []
 
-    # Heuristic 1: ticker→CIK cross-check
+    # Heuristic 1/2: ticker→CIK cross-check
     if ticker:
         tickers_map = _get_sec_tickers()
         if tickers_map:  # only validate when we successfully fetched the map
@@ -288,26 +295,53 @@ def _validate_ticker_entity(ticker: str, resolved_cik: str, rev_series: list, sh
                         f"cik_mismatch:sec_canonical={canonical_cik},resolved={resolved_stripped}"
                     )
 
-    # Heuristic 2: shares < 1000
+    # Heuristic 3: shares < 1000
     if shares_series:
         latest_shares = shares_series[-1]["val"]
         if latest_shares is not None and latest_shares < 1000:
             reasons.append(f"shares_lt_1000:{latest_shares:.0f}")
 
-    # Heuristic 3: |net_income| / revenue > 2.0
+    # Heuristic 4: |net_income| / revenue > 50 (unit-scale anomaly — NOT a real large loss).
+    # P-B: threshold raised from 2.0 to 50.0 so a genuine early-revenue resource loss
+    # (handled by low_revenue_loss_ratio) is no longer mislabeled as a wrong entity.
     latest_ni = ni_series[-1]["val"] if ni_series else None
     latest_rev = rev_series[-1]["val"] if rev_series else None
     if latest_ni is not None and latest_rev is not None and latest_rev > 0:
         ratio = abs(latest_ni) / latest_rev
-        if ratio > 2.0:
-            reasons.append(f"ni_to_revenue_ratio_absurd:{ratio:.1f}")
+        if ratio > 50.0:
+            reasons.append(f"ni_to_revenue_unit_anomaly:{ratio:.1f}")
 
-    # Heuristic 4: revenue absurdly low (below $1000 = unit mis-tag)
+    # Heuristic 5: revenue absurdly low (below $1000 = unit mis-tag)
     if latest_rev is not None and 0 < latest_rev < 1000:
         reasons.append(f"revenue_absurdly_low:{latest_rev:.0f}")
 
     if reasons:
         return True, ";".join(reasons)
+    return False, None
+
+
+def _low_revenue_loss_ratio(rev_series: list, ni_series: list) -> tuple[bool, str | None]:
+    """P-B — early/pre-revenue resource pattern: revenue present but small, large loss vs it.
+
+    Fires when revenue is present (>0) AND abs(net_income)/revenue > 2.0. This is the
+    DATA-QUALITY label that REPLACES the old wrong_entity_suspected misfire for genuine
+    early-revenue resource producers (URG/ASPI/IMSR/XOMA): they ARE the right entity, they
+    just have a large genuine loss against tiny real revenue. It is surfaced for the trust
+    banner; it does NOT by itself flip buy_eligible (those names stay blocked by null/negative
+    FCF -> MoS null, as before).
+
+    Returns (low_revenue_loss_ratio, detail_str).
+    """
+    latest_ni = ni_series[-1]["val"] if ni_series else None
+    latest_rev = rev_series[-1]["val"] if rev_series else None
+    if (latest_ni is not None and latest_rev is not None and latest_rev > 0):
+        ratio = abs(latest_ni) / latest_rev
+        if ratio > 2.0:
+            detail = (
+                f"latest_net_income={latest_ni/1e6:.1f}M vs revenue={latest_rev/1e6:.1f}M "
+                f"(|NI|/rev={ratio:.1f}x) — early/pre-revenue resource pattern, right entity"
+            )
+            return True, detail
     return False, None
 
 
@@ -321,9 +355,16 @@ def _check_debt_quality(
 
     Returns (debt_truncation_suspected, debt_stale, detail_str).
 
-    debt_truncation_suspected: reported total_debt < 0.5 * implied_debt
+    debt_truncation_suspected: reported total_debt < 0.1 * implied_debt
       where implied_debt = total_liabilities - stockholders_equity
       (or total_assets - stockholders_equity when liabilities absent).
+
+    P-B: the truncation ratio was tightened from 0.5 to 0.1. (liabilities - equity) includes
+    plenty of non-debt liabilities (deferred revenue, asset-retirement obligations, payables,
+    operating-lease liabilities) for a real producer, so reported debt legitimately sitting at
+    30-49% of (liab-equity) is NOT a truncated XBRL tag — flagging it relabeled real producers'
+    plausible partial debt as "truncation". Only a near-total mismatch (reported < 10% of implied)
+    is a credible sign the debt concept under-captured the balance sheet.
 
     debt_stale: latest debt end-date is >18 months older than latest assets/revenue end-date.
     """
@@ -373,7 +414,7 @@ def _check_debt_quality(
             implied_debt = asset_map[latest_end] - eq_map[latest_end]
 
     if implied_debt is not None and implied_debt > 0 and latest_debt_val is not None:
-        if latest_debt_val < 0.5 * implied_debt:
+        if latest_debt_val < 0.1 * implied_debt:
             debt_truncation_suspected = True
             detail = (
                 f"reported_total_debt={latest_debt_val/1e6:.1f}M, "
@@ -631,7 +672,7 @@ def _annual_vals(series: list) -> list:
     return [by_year[y][1] for y in sorted(by_year)]
 
 
-def _trajectory_fields(rev_series: list, norm_base_series: list) -> dict:
+def _trajectory_fields(rev_series: list, norm_base_series: list, ni_series: list | None = None) -> dict:
     """P6 — deterministic revenue trajectory + contamination derived fields.
 
     Computed from the multiyear series already pulled (no new network calls).
@@ -643,9 +684,18 @@ def _trajectory_fields(rev_series: list, norm_base_series: list) -> dict:
     - contamination_ratio (float|None): latest normalization-base / 5yr-avg of the base.
     - fundamental_decline_flag (bool): rev_slope_sign<0 AND contamination_ratio<1.0 AND
       latest_below_avg. The melting-ice-cube / lumpy-OCF value-trap veto (SIGA contamination ~0.68).
+    - peak_contamination_flag (bool): contamination_ratio<0.8 AND latest_below_avg AND
+      latest_net_income<0. P-A — the V-shape value-trap catch (trough->peak->rollover) that
+      fundamental_decline_flag MISSES because that flag is gated on rev_slope_sign<0. On a V-shape
+      the whole-window slope is +1 (so fundamental_decline_flag stays False), but the normalization
+      base is past-peak-contaminated AND the company is now loss-making — a clean mechanical BUY that
+      is actually a melting ice cube (NRP: contamination=0.7445, latest_below_avg, NI=-84.8M).
+      Computed INDEPENDENT of rev_slope_sign. Requires latest_net_income passed in via ni_series.
 
     `norm_base_series` is the series the valuation layer normalizes on (OCF/FCF); revenue is the
     trajectory carrier. Both are lists of {"end","val"} sorted ascending by end date.
+    `ni_series` (net income {"end","val"}) feeds peak_contamination_flag's latest_net_income<0 test;
+    pass [] (default) to keep that flag False when net income is unavailable.
     """
     out = {
         "rev_slope_sign": 0,
@@ -653,6 +703,7 @@ def _trajectory_fields(rev_series: list, norm_base_series: list) -> dict:
         "latest_below_avg": False,
         "contamination_ratio": None,
         "fundamental_decline_flag": False,
+        "peak_contamination_flag": False,
     }
 
     # RECENT-window trajectory. The raw multiyear series can be contaminated at the FRONT by
@@ -698,6 +749,23 @@ def _trajectory_fields(rev_series: list, norm_base_series: list) -> dict:
         out["rev_slope_sign"] < 0
         and cr is not None and cr < 1.0
         and out["latest_below_avg"]
+    )
+
+    # P-A: peak_contamination_flag — independent of rev_slope_sign. Catches the V-shape value
+    # trap (trough->peak->rollover) where the all-window slope is +1 so fundamental_decline_flag
+    # never fires, yet the normalization base is past-peak-contaminated (<0.8) AND the company is
+    # currently loss-making. NRP: cr=0.7445, latest_below_avg=True, NI=-84.8M -> True while its
+    # rev_slope_sign=+1 keeps fundamental_decline_flag=False.
+    latest_ni = None
+    if ni_series:
+        for s in reversed(ni_series):
+            if s.get("val") is not None:
+                latest_ni = s["val"]
+                break
+    out["peak_contamination_flag"] = bool(
+        cr is not None and cr < 0.8
+        and out["latest_below_avg"]
+        and latest_ni is not None and latest_ni < 0
     )
     return out
 
@@ -1079,6 +1147,10 @@ def pull(ticker: str, cik: str) -> dict:
         ticker, cik, rev, shares, ni
     )
 
+    # P-B: low_revenue_loss_ratio — early/pre-revenue resource pattern (present-but-tiny
+    # revenue + large genuine loss). Data-quality label only; replaces the wrong_entity misfire.
+    _low_rev_loss, _low_rev_loss_detail = _low_revenue_loss_ratio(rev, ni)
+
     # P9: ebit_source tagged by the cascade (None when no EBIT base recovered).
     _ebit_source = ebit_source if ebit else None
 
@@ -1097,7 +1169,8 @@ def pull(ticker: str, cik: str) -> dict:
 
     # P6: deterministic trajectory + contamination. Revenue carries the slope/accel; OCF is the
     # normalization base the valuation layer averages on (contamination = latest / 5yr-avg).
-    _traj = _trajectory_fields(rev, ocf)
+    # P-A: ni passed so peak_contamination_flag can test latest_net_income<0 (V-shape catch).
+    _traj = _trajectory_fields(rev, ocf, ni)
 
     d["derived"] = {
         "revenue_growth_pct": pct_growth(rev),
@@ -1132,6 +1205,11 @@ def pull(ticker: str, cik: str) -> dict:
         # C1b: wrong-entity flags
         "wrong_entity_suspected": _wrong_entity_suspected,
         "wrong_entity_reason": _wrong_entity_reason,
+        # P-B: low_revenue_loss_ratio (data-quality label; does NOT flip buy_eligible)
+        "low_revenue_loss_ratio": _low_rev_loss,
+        "low_revenue_loss_ratio_detail": _low_rev_loss_detail,
+        # P-G: form_used (10-K/20-F/40-F) for the trust-banner provenance line
+        "form_used": d["tenk"].get("filing_form"),
         # C2: SIC code for financial-sector routing in valuation
         "sic": sic_code,
         # P3: concentration (magnitude-based; replaces the substring detector)
@@ -1145,6 +1223,8 @@ def pull(ticker: str, cik: str) -> dict:
         "latest_below_avg": _traj["latest_below_avg"],
         "contamination_ratio": _traj["contamination_ratio"],
         "fundamental_decline_flag": _traj["fundamental_decline_flag"],
+        # P-A: V-shape value-trap catch (independent of rev_slope_sign)
+        "peak_contamination_flag": _traj["peak_contamination_flag"],
     }
     print(f"  拉内部人交易...", file=sys.stderr)
     # A1: insider_trades queries openinsider by ticker; if no ticker, skip gracefully
@@ -1422,19 +1502,244 @@ def _selftest():
         f"P6: single-point series must give neutral defaults, got {_short}"
     )
     assert _short["fundamental_decline_flag"] is False, "P6: single-point must not fire decline flag"
+    assert _short["peak_contamination_flag"] is False, "P-A: single-point must not fire peak flag"
     print(f"  P6 trajectory: short-series safe defaults  OK")
 
+    # --- P-A: peak_contamination_flag — V-shape value trap, independent of rev_slope_sign ---
+    # Regression crystal feeding NRP's REAL V-shape revenue series: trough 2020 ~120M -> peak
+    # 2022 ~307M -> rolling over to 2024 ~232M. The whole-window linear fit is UPWARD so
+    # rev_slope_sign=+1 and fundamental_decline_flag stays False — peak_contamination_flag is the
+    # independent catch. OCF normalization base is past-peak-contaminated (<0.8) and latest NI<0.
+    _rev_nrp = [
+        {"end": "2020-12-31", "val": 120_000_000},   # trough
+        {"end": "2021-12-31", "val": 240_000_000},
+        {"end": "2022-12-31", "val": 307_000_000},   # peak
+        {"end": "2023-12-31", "val": 270_000_000},
+        {"end": "2024-12-31", "val": 232_000_000},   # rolling over, but still > 2020 trough
+    ]
+    # OCF base contaminated by the 2022 peak; latest 2024 base well below the 5yr-avg ->
+    # contamination_ratio < 0.8 (here ~0.73, in NRP's documented ~0.7445 band).
+    _ocf_nrp = [
+        {"end": "2020-12-31", "val": 90_000_000},
+        {"end": "2021-12-31", "val": 200_000_000},
+        {"end": "2022-12-31", "val": 260_000_000},   # peak inflates the 5yr-avg
+        {"end": "2023-12-31", "val": 150_000_000},
+        {"end": "2024-12-31", "val": 119_120_000},   # latest, contaminated
+    ]
+    _ni_nrp = [
+        {"end": "2023-12-31", "val": 40_000_000},
+        {"end": "2024-12-31", "val": -84_800_000},   # NRP real latest NI = -84.8M
+    ]
+    _tn = _trajectory_fields(_rev_nrp, _ocf_nrp, _ni_nrp)
+    assert _tn["rev_slope_sign"] == 1, (
+        f"P-A: NRP V-shape whole-window slope must be +1 (upward fit), got {_tn['rev_slope_sign']}"
+    )
+    assert _tn["fundamental_decline_flag"] is False, (
+        "P-A: fundamental_decline_flag must stay False on the V-shape (slope is +1) — "
+        "peak_contamination_flag is the independent catch"
+    )
+    assert _tn["contamination_ratio"] is not None and _tn["contamination_ratio"] < 0.8, (
+        f"P-A: NRP contamination_ratio must be <0.8, got {_tn['contamination_ratio']}"
+    )
+    assert _tn["latest_below_avg"] is True, "P-A: NRP latest OCF base must be below trailing avg"
+    assert _tn["peak_contamination_flag"] is True, (
+        "P-A: peak_contamination_flag MUST fire on NRP V-shape (cr<0.8 AND latest_below_avg "
+        f"AND latest_NI<0), got {_tn['peak_contamination_flag']} (cr={_tn['contamination_ratio']})"
+    )
+    print(f"  P-A peak_contamination: NRP V-shape slope=+1 decline_flag=False "
+          f"peak_flag=True (cr={_tn['contamination_ratio']})  OK")
+
+    # P-A negatives: must NOT fire when any of the three conditions is absent.
+    #  (1) loss-making + contaminated base but contamination >= 0.8 -> no peak flag
+    _ocf_mild = [
+        {"end": "2021-12-31", "val": 100_000_000},
+        {"end": "2022-12-31", "val": 110_000_000},
+        {"end": "2023-12-31", "val": 105_000_000},
+        {"end": "2024-12-31", "val": 98_000_000},
+        {"end": "2025-12-31", "val": 95_000_000},   # latest/5yr-avg ~0.92 (>0.8)
+    ]
+    _tn2 = _trajectory_fields(_rev_nrp, _ocf_mild, _ni_nrp)
+    assert _tn2["peak_contamination_flag"] is False, (
+        f"P-A: peak flag must NOT fire when contamination>=0.8 (got cr={_tn2['contamination_ratio']})"
+    )
+    #  (2) deeply contaminated base but latest NI positive -> no peak flag
+    _ni_pos = [{"end": "2024-12-31", "val": 30_000_000}]
+    _tn3 = _trajectory_fields(_rev_nrp, _ocf_nrp, _ni_pos)
+    assert _tn3["peak_contamination_flag"] is False, (
+        "P-A: peak flag must NOT fire when latest net income is positive"
+    )
+    #  (3) no ni_series passed (default) -> peak flag stays False
+    _tn4 = _trajectory_fields(_rev_nrp, _ocf_nrp)
+    assert _tn4["peak_contamination_flag"] is False, (
+        "P-A: peak flag must stay False when net income unavailable (ni_series omitted)"
+    )
+    # The existing healthy-grower crystal must also NOT fire the peak flag.
+    assert _tg["peak_contamination_flag"] is False, "P-A: grower must not fire peak flag"
+    print("  P-A peak_contamination: negatives (cr>=0.8 / NI>=0 / no-NI / grower) all False  OK")
+
+    # --- P-B: low_revenue_loss_ratio + refined wrong_entity_suspected ---
+    # Early/pre-revenue resource pattern: present-but-tiny revenue + large genuine loss.
+    # URG-like: revenue ~$45M, net loss ~$120M -> |NI|/rev=2.67 (>2.0).
+    # MUST set low_revenue_loss_ratio=True AND wrong_entity_suspected=False (it IS the right entity).
+    _urg_rev = [{"end": "2024-12-31", "val": 45_000_000}]
+    _urg_ni = [{"end": "2024-12-31", "val": -120_000_000}]
+    _urg_shares = [{"end": "2024-12-31", "val": 350_000_000}]
+    _lrl, _lrl_detail = _low_revenue_loss_ratio(_urg_rev, _urg_ni)
+    assert _lrl is True, (
+        f"P-B: low_revenue_loss_ratio must fire for URG-like tiny-rev+large-loss, detail={_lrl_detail}"
+    )
+    _we_urg, _we_urg_reason = _validate_ticker_entity("", "0000000002", _urg_rev, _urg_shares, _urg_ni)
+    assert _we_urg is False, (
+        f"P-B: wrong_entity_suspected must NOT fire for the early-revenue resource pattern "
+        f"(|NI|/rev=2.67, not a unit anomaly), got reason={_we_urg_reason}"
+    )
+    print(f"  P-B low_revenue_loss_ratio: URG-like tiny-rev+large-loss -> True, "
+          f"wrong_entity=False  OK")
+
+    # P-B: genuine unit anomaly MUST still fire wrong_entity_suspected.
+    #  (a) shares < 1000 -> wrong entity
+    _we_a, _ = _validate_ticker_entity("", "0000000003", [{"end": "2024-12-31", "val": 5_000_000}],
+                                       [{"end": "2024-12-31", "val": 200}],
+                                       [{"end": "2024-12-31", "val": -1_000_000}])
+    assert _we_a is True, "P-B: shares<1000 must still fire wrong_entity_suspected"
+    #  (b) |NI|/rev > 50 unit-scale anomaly -> wrong entity (NOT low_revenue_loss_ratio territory)
+    _anom_rev = [{"end": "2024-12-31", "val": 32_000_000}]
+    _anom_ni = [{"end": "2024-12-31", "val": 32_000_000_000}]  # 1000x -> unit mis-tag
+    _we_b, _we_b_reason = _validate_ticker_entity("", "0000000004", _anom_rev,
+                                                  [{"end": "2024-12-31", "val": 50_000_000}], _anom_ni)
+    assert _we_b is True and "unit_anomaly" in (_we_b_reason or ""), (
+        f"P-B: |NI|/rev>50 unit anomaly must fire wrong_entity_suspected, got reason={_we_b_reason}"
+    )
+    print(f"  P-B wrong_entity_suspected: shares<1000 AND |NI|/rev>50 unit anomaly -> True  OK")
+
+    # P-B: |NI|/rev in (2.0, 50] no longer mislabels as wrong entity (was the misfire).
+    _mid_rev = [{"end": "2024-12-31", "val": 10_000_000}]
+    _mid_ni = [{"end": "2024-12-31", "val": -100_000_000}]  # ratio=10 (>2, <50)
+    _we_mid, _ = _validate_ticker_entity("", "0000000005", _mid_rev,
+                                         [{"end": "2024-12-31", "val": 50_000_000}], _mid_ni)
+    assert _we_mid is False, "P-B: |NI|/rev=10 (2<r<=50) must NOT fire wrong_entity (now low_rev_loss)"
+    _lrl_mid, _ = _low_revenue_loss_ratio(_mid_rev, _mid_ni)
+    assert _lrl_mid is True, "P-B: |NI|/rev=10 must instead surface as low_revenue_loss_ratio"
+    print("  P-B: |NI|/rev in (2,50] routes to low_revenue_loss_ratio, not wrong_entity  OK")
+
+    # P-B: low_revenue_loss_ratio must NOT fire for a healthy company (small loss vs revenue).
+    _ok_lrl, _ = _low_revenue_loss_ratio([{"end": "2024-12-31", "val": 100_000_000}],
+                                         [{"end": "2024-12-31", "val": -5_000_000}])
+    assert _ok_lrl is False, "P-B: low_revenue_loss_ratio must NOT fire when loss is small vs revenue"
+
+    # --- P-B: debt_truncation refinement — plausible producer debt no longer relabeled ---
+    # Real producer: reported debt $300M, implied (liab-equity) $700M -> ratio 0.43.
+    # Old 0.5 threshold WOULD have flagged this; refined 0.1 threshold must NOT.
+    _prod_debt = [{"end": "2024-12-31", "val": 300_000_000}]
+    _prod_assets = [{"end": "2024-12-31", "val": 1_500_000_000}]
+    _prod_equity = [{"end": "2024-12-31", "val": 800_000_000}]
+    _prod_liab = [{"end": "2024-12-31", "val": 1_500_000_000}]  # liab-equity = 700M; 300/700=0.43
+    _pt, _ps, _pd = _check_debt_quality(_prod_debt, _prod_assets, _prod_equity, _prod_liab)
+    assert _pt is False, (
+        f"P-B: plausible producer debt (ratio 0.43) must NOT be relabeled as truncation, detail={_pd}"
+    )
+    # Severe mismatch (ratio < 0.1) must STILL fire (the original C1a HRI-like case below already
+    # asserts this at ratio 0.002; re-confirm a borderline-severe 0.08 case fires here).
+    _sev_debt = [{"end": "2024-12-31", "val": 56_000_000}]   # 56/700 = 0.08 < 0.1
+    _st, _, _ = _check_debt_quality(_sev_debt, _prod_assets, _prod_equity, _prod_liab)
+    assert _st is True, "P-B: severe debt mismatch (ratio<0.1) must still fire truncation"
+    print("  P-B debt_truncation: plausible producer (0.43) spared, severe (<0.1) still fires  OK")
+
+    # --- P-G: form_used provenance is set by tenk_sections (10-K/20-F/40-F) ---
+    # Live: EGAN (CIK 1066194) is a domestic 10-K filer -> form_used must be "10-K".
+    _tenk_egan = tenk_sections("EGAN", cik="1066194")
+    assert _tenk_egan.get("available"), "P-G: EGAN tenk must be available for form provenance check"
+    assert _tenk_egan.get("filing_form") in ("10-K", "20-F", "40-F"), (
+        f"P-G: form_used must be one of 10-K/20-F/40-F, got {_tenk_egan.get('filing_form')!r}"
+    )
+    assert _tenk_egan.get("filing_form") == "10-K", (
+        f"P-G: EGAN is a domestic filer -> form_used must be 10-K, got {_tenk_egan.get('filing_form')!r}"
+    )
+    print(f"  P-G form_used: EGAN -> {_tenk_egan.get('filing_form')}  OK")
+
+    # --- P-D: error artifact writer produces an auditable JSON on a simulated crash ---
+    _err_path = _write_error_artifact("ZZTESTONLY", "ZZTESTONLY", "9999999999",
+                                      RuntimeError("simulated rate-limit / pull crash"))
+    assert _err_path.exists(), f"P-D: error artifact must be written to {_err_path}"
+    _err_doc = json.loads(_err_path.read_text(encoding="utf-8"))
+    assert _err_doc.get("status") == "ERROR" and _err_doc.get("error_type") == "RuntimeError", (
+        f"P-D: error artifact must record status=ERROR + error_type, got {_err_doc}"
+    )
+    assert "simulated rate-limit" in _err_doc.get("error", ""), "P-D: error message must be recorded"
+    # verify the run-level errors log got the audited one-liner, then clean up both test artifacts
+    # so the synthetic ZZTESTONLY entry never pollutes a live run dir / audit log.
+    _err_log = REPORTS / "deepdive_errors.log"
+    if _err_log.exists():
+        _log_txt = _err_log.read_text(encoding="utf-8")
+        assert "ZZTESTONLY" in _log_txt, "P-D: errors log must record the crashed name"
+        _kept = [ln for ln in _log_txt.splitlines() if "ZZTESTONLY" not in ln]
+        if _kept:
+            _err_log.write_text("\n".join(_kept) + "\n", encoding="utf-8")
+        else:
+            try:
+                _err_log.unlink()
+            except Exception:
+                pass
+    try:
+        _err_path.unlink()
+    except Exception:
+        pass
+    print(f"  P-D error artifact: simulated crash -> auditable ERROR JSON written + parsed  OK")
+
     print("deepdive_data selftest PASS")
+
+
+def _write_error_artifact(label: str, ticker: str, cik: str, exc: Exception) -> Path:
+    """P-D — write an auditable deepdive_<label>_ERROR.json when a pull crashes/rate-limits.
+
+    The iter1 failure was ABR dying mid-pull leaving only a truncated log and NO JSON, so the
+    name was an invisible skip with no error in any manifest. Under the FULL-data / never-silently-
+    skip directive, a crashed/rate-limited deepdive must leave a machine-auditable error artifact.
+    Returns the path written. Best-effort: a failure to write the artifact is swallowed so it can
+    never mask the original exception.
+    """
+    import traceback
+    err = {
+        "ticker": ticker,
+        "cik": cik,
+        "label": label,
+        "pulled_at": today(),
+        "status": "ERROR",
+        "error_type": type(exc).__name__,
+        "error": str(exc),
+        "traceback": traceback.format_exc(),
+    }
+    err_path = REPORTS / f"deepdive_{label}_ERROR.json"
+    try:
+        err_path.write_text(json.dumps(err, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"  [P-D] wrote error artifact: {err_path}", file=sys.stderr)
+        # Also append a one-line entry to a run-level errors log for easy auditing.
+        log_line = json.dumps(
+            {"label": label, "ticker": ticker, "cik": cik, "at": today(),
+             "error_type": type(exc).__name__, "error": str(exc)},
+            ensure_ascii=False,
+        )
+        with (REPORTS / "deepdive_errors.log").open("a", encoding="utf-8") as fh:
+            fh.write(log_line + "\n")
+    except Exception as werr:
+        print(f"  [P-D][warn] could not write error artifact for {label}: {werr}", file=sys.stderr)
+    return err_path
 
 
 def _pull_and_save(ticker: str, cik: str) -> None:
     """Pull data for one ticker/CIK and write JSON to REPORTS dir.
 
     A1: ticker may be empty for pre-listing spinoffs; use CIK as filename key in that case.
+    P-D: the financials pull is wrapped so a crash/rate-limit writes an auditable ERROR artifact
+    (never a silent truncated-log-with-no-JSON) and re-raises so callers still surface it.
     """
     label = ticker if ticker else f"CIK{cik}"
     print(f"深度尽调数据拉取: {label} (CIK {cik})", file=sys.stderr)
-    d = pull(ticker, cik)
+    try:
+        d = pull(ticker, cik)
+    except Exception as exc:
+        _write_error_artifact(label, ticker, cik, exc)
+        raise
     out = REPORTS / f"deepdive_{label}_{today()}.json"
     out.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
     der = d["derived"]

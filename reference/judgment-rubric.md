@@ -16,7 +16,7 @@ Before touching the 7-dim scorecard, the subagent must complete these in order:
 1. **Base rate anchor** — state the reference class and its base rates (see `cognitive-priors.md`)
 2. **Disconfirmation search** — run WebSearch for `<company> short report OR fraud OR dilution OR lawsuit OR going concern`; record what was found or explicitly state "searched, nothing found"
 3. **Data staleness check** — if any mechanical field has `data_may_be_stale: true`, use WebSearch to verify current values before scoring
-4. **Valuation & margin of safety** — run `python tools/valuation.py --json <deepdive_json> --ticker <T>` (or read the pre-merged `valuation` block if already present in the deepdive JSON). Record `mos_basis`, `margin_of_safety_pct`, `nav_margin_of_safety_pct`, `ev_sales`, `ev_ebitda`, `reverse_dcf_implied_growth`, and any `data_quality` flags. **Also record the mechanical eligibility composite emitted by `valuation.py`: `buy_eligible` (bool) and `buy_ineligible_reasons` (list[str]); and the deepdive `derived` change-detection fields `concentration_flag` ("kill"/"watch"/null) and `fundamental_decline_flag` (bool).** These become mandatory inputs to the BUY trigger logic below; do not proceed to rating without them.
+4. **Valuation & margin of safety** — run `python tools/valuation.py --json <deepdive_json> --ticker <T>` (or read the pre-merged `valuation` block if already present in the deepdive JSON). Record `mos_basis`, `margin_of_safety_pct`, `nav_margin_of_safety_pct`, `ev_sales`, `ev_ebitda`, `reverse_dcf_implied_growth`, and any `data_quality` flags. **Also record the mechanical eligibility composite emitted by `valuation.py`: `buy_eligible` (bool) and `buy_ineligible_reasons` (list[str]); and the deepdive `derived` change-detection fields `concentration_flag` ("kill"/"watch"/null), `fundamental_decline_flag` (bool), and `peak_contamination_flag` (bool — the V-shape value-trap veto, see §5 and the BUY trigger).** Also note the data-quality-only labels `low_revenue_loss_ratio` (bool) and the provenance tag `form_used` (the filing form actually used — 10-K/20-F/40-F — surfaced in the trust banner). These become mandatory inputs to the BUY trigger logic below; do not proceed to rating without them.
 
 Only then open the 7-dim scorecard.
 
@@ -190,13 +190,15 @@ Disconfirmation search: [results or "searched, nothing found"]
 - has_death_spiral: [True/False] — <one line on instrument terms>
 - concentration_flag: [kill/watch/null] — <one line: top_customer_pct / top_program_pct and concentration_detail>
 - fundamental_decline_flag: [True/False] — <one line: rev_slope_sign, contamination_ratio, latest_below_avg>
+- peak_contamination_flag: [True/False] — <one line: contamination_ratio, latest_below_avg, latest_net_income — V-shape value-trap, independent of rev_slope_sign>
+- low_revenue_loss_ratio: [True/False] — <one line: revenue present-but-small + |net_income|/revenue>2.0 — data-quality label only, does not gate BUY>
 
 ## 6. Valuation: implied assumptions
 Current EV/Sales: __x   EV/EBITDA: __x   Peer median EV/Sales: __x
 Reverse DCF implied growth (5-yr): __%   Actual trailing growth: __%
 Assessment: <credible / stretched / heroic>
-MoS basis: <fcf_cap / nav / abstain>   MoS: __%   [NAV MoS: __%]   data_quality flags: <list or none>
-buy_eligible: <true/false>   buy_ineligible_reasons: <list or none>
+MoS basis: <fcf_cap / nav / abstain>   MoS: __%   [NAV MoS: __%]   data_quality flags: <list or none; include low_revenue_loss_ratio if set>   form_used: <10-K / 20-F / 40-F / null>
+buy_eligible: <true/false>   buy_ineligible_reasons: <list or none — includes peak_contamination_flag when the V-shape veto fires>
 Catalyst: <one sentence with dated trigger, or "none"> — note: catalyst MoS-waiver FROZEN (iteration 1) → a verified catalyst yields WATCH-with-catalyst, not BUY
 BUY trigger fires: <YES — state basis (MoS ≥ 30% AND buy_eligible AND zero kill-flags AND no T3) | NO — state which condition fails; if buy_eligible=false, list buy_ineligible_reasons verbatim>
 
@@ -223,9 +225,18 @@ BUY trigger fires: <YES — state basis (MoS ≥ 30% AND buy_eligible AND zero k
 
 `tools/valuation.py` composes and emits a single mechanical boolean, `buy_eligible`, that the BUY trigger below ANDs in. It is the OR of every BUY-blocking guard, negated — i.e. `buy_eligible` is true only when **none** of the following fire:
 
-`buy_eligible = (not extreme_mos_review_required) AND (not large_cap_out_of_scope) AND (not fcf_sustainability_uncertain) AND (not financial_sic forced-unsuitable) AND (not debt_truncation_suspected) AND (not wrong_entity_suspected) AND (concentration_flag != "kill") AND (not fundamental_decline_flag)`
+`buy_eligible = (not extreme_mos_review_required) AND (not large_cap_out_of_scope) AND (not fcf_sustainability_uncertain) AND (not financial_sic forced-unsuitable) AND (not debt_truncation_suspected) AND (not wrong_entity_suspected) AND (concentration_flag != "kill") AND (not fundamental_decline_flag) AND (not peak_contamination_flag)`
 
-When `buy_eligible` is false, `valuation.py` also emits `buy_ineligible_reasons` — a `list[str]` naming each guard that fired (e.g. `["concentration_flag=kill", "fundamental_decline_flag"]`). The judgment layer MUST copy `buy_ineligible_reasons` verbatim into the §6 BUY-trigger line whenever BUY does not fire for an eligibility reason, so the report states *why* mechanically rather than via narrative. These guards previously existed only as advisory strings the trigger never blocked on (the v0.2.1 gap); they now bite by construction.
+When `buy_eligible` is false, `valuation.py` also emits `buy_ineligible_reasons` — a `list[str]` naming each guard that fired (e.g. `["concentration_kill", "fundamental_decline_flag"]`). The judgment layer MUST copy `buy_ineligible_reasons` verbatim into the §6 BUY-trigger line whenever BUY does not fire for an eligibility reason, so the report states *why* mechanically rather than via narrative. These guards previously existed only as advisory strings the trigger never blocked on (the v0.2.1 gap); they now bite by construction.
+
+**Two of these guards were refined in iteration 2 to stop mislabeling genuine producers (P-B):**
+
+- **`wrong_entity_suspected` (REFINED — reserved for genuine identity errors).** Fires ONLY for a true unit-mistag / wrong-CIK: `shares_outstanding < 1000`, OR an `|net_income|/revenue > 50` unit-scale anomaly, OR the ticker is absent from `company_tickers.json`. It NO LONGER fires on the present-but-tiny-revenue + large-loss pattern (an established producer in its pre-/early-revenue ramp, e.g. an early-stage uranium miner) — that case previously surfaced a misleading "wrong entity" on the *right* company and is now carried by the distinct `low_revenue_loss_ratio` label below.
+- **`debt_truncation_suspected` (same spirit).** Do NOT relabel a real producer's partial/stale XBRL debt tag as truncation when the debt magnitudes are plausible relative to the balance sheet; reserve it for genuinely truncated/implausible debt numerics.
+
+**New data-quality-only label (does NOT gate buy_eligible):**
+
+- **`low_revenue_loss_ratio` (bool).** Fires when revenue is present but small AND `|net_income|/revenue > 2.0` — the early/pre-revenue resource pattern (a large loss against tiny revenue). This REPLACES the old `wrong_entity_suspected` misfire for that pattern. It is a **data-quality label surfaced in `data_quality` only**; it is NOT in the `buy_eligible` composite and does NOT by itself flip `buy_eligible` or downgrade a rating. Names exhibiting this pattern stay blocked by their own null/negative-FCF MoS (`margin_of_safety_pct` null) exactly as before — the relabel changes the *explanation*, not the disposition. Surface it in the Dim-1 / §6 data-quality line so a PM reads "early/pre-revenue, large loss vs tiny revenue" rather than the misleading "wrong entity."
 
 `buy_eligible` is a **necessary, not sufficient** condition: clearing it does not produce a BUY; the MoS / catalyst paths below still must independently pass.
 
@@ -240,7 +251,7 @@ When `buy_eligible` is false, `valuation.py` also emits `buy_ineligible_reasons`
 4. **`buy_eligible == true`** — the mechanical eligibility gate above must pass. In particular this means `concentration_flag != "kill"` and `fundamental_decline_flag == false`; a `kill` concentration or a fundamental-decline flag forces `buy_eligible = false` and BUY may not fire on MoS regardless of how large the MoS is. If `buy_eligible` is false, record `buy_ineligible_reasons` on the BUY-trigger line.
 5. Confidence is capped by valuation `data_quality` robustness: each data-quality flag that is load-bearing for the MoS computation (e.g., `capex_unavailable_fcf_uses_ocf_proxy`, `normalized_fcf_unavailable`) reduces confidence by 10 percentage points each, floor 30%
 
-**Downgrade rule (deterministic, downgrade-only):** if `margin_of_safety_pct ≥ 30%` and kill-flags = 0 but `buy_eligible == false`, the rating is **WATCH**, not BUY — except that if a hard kill-flag is also present the rating is **AVOID**. Specifically `fundamental_decline_flag == true` OR `concentration_flag == "kill"` downgrades a would-be BUY to **WATCH** (to **AVOID** if combined with any `going_concern`/`death_spiral`/`material_weakness`). This is the melting-ice-cube defense; it can only lower a rating, never raise one.
+**Downgrade rule (deterministic, downgrade-only):** if `margin_of_safety_pct ≥ 30%` and kill-flags = 0 but `buy_eligible == false`, the rating is **WATCH**, not BUY — except that if a hard kill-flag is also present the rating is **AVOID**. Specifically `fundamental_decline_flag == true` OR `peak_contamination_flag == true` OR `concentration_flag == "kill"` downgrades a would-be BUY to **WATCH** (to **AVOID** if combined with any `going_concern`/`death_spiral`/`material_weakness`). This is the melting-ice-cube defense; it can only lower a rating, never raise one.
 
 If `margin_of_safety_pct < 30%`, the company **cannot be rated BUY on MoS** — it is WATCH if fundamentals are clean, AVOID if kill-flags are present. The "cyclical turn not yet realized in T1" reasoning must NOT be used to veto a BUY when static MoS is already ≥30% — that perpetual-veto was the run-3 calibration bug; the threshold already uses conservative normalized FCF, so a realized turn that lifts MoS to ≥30% is sufficient.
 
@@ -251,13 +262,20 @@ If `margin_of_safety_pct < 30%`, the company **cannot be rated BUY on MoS** — 
 
 When `fundamental_decline_flag == true`, the would-be BUY is downgraded to WATCH (deterministic, downgrade-only) even at MoS ≥ 30% — because the MoS is built on a normalization base the company is no longer earning. This is a measured-data veto, NOT the forward-looking cyclical-turn judgment the prohibition bans. The distinction is exact: the banned veto asks the analyst to *predict* that a future turn will not arrive; this carve-out only observes that the historical series already declined AND the latest period sits below its own average AND the normalization average is peak-contaminated. No qualitative forecast is permitted to extend it.
 
+**V-shape sibling veto — `peak_contamination_flag` (P-A, mechanical, downgrade-only).** `fundamental_decline_flag` is gated on `rev_slope_sign < 0` and therefore MISSES the trough→peak→rollover V-shape: a company whose revenue troughed, spiked to a peak, then rolled over still has an *upward* whole-window linear fit (`rev_slope_sign = +1`), so the AND-of-three never fires even though the normalization base is peak-contaminated and the company has tipped back into losses. `peak_contamination_flag` is the independent catch. It fires when ALL THREE hold:
+- `contamination_ratio < 0.8` — the latest normalization base is well below the 5-yr average (deeper than the `< 1.0` threshold `fundamental_decline_flag` uses, because here the slope offers no corroboration);
+- `latest_below_avg == true` — the latest period sits below its own trailing average; AND
+- `latest_net_income < 0` — the company is now loss-making.
+
+Critically, `peak_contamination_flag` is **independent of `rev_slope_sign`** — it fires regardless of slope direction, which is exactly why it catches what `fundamental_decline_flag` cannot. When `peak_contamination_flag == true` it is ANDed into `buy_eligible` (forcing `buy_eligible = false`) and downgrades a would-be BUY to **WATCH** even at MoS ≥ 30% (to **AVOID** if combined with a hard kill-flag) — same downgrade-only discipline as `fundamental_decline_flag`. It is likewise a measured-data veto, not a forward forecast. **Worked example (NRP, Natural Resource Partners):** revenue troughed 2020 ($120M) → peaked 2022 ($307M) → rolled over to 2024 ($232M), so `rev_slope_sign = +1` and `fundamental_decline_flag = false`; but `contamination_ratio = 0.7445`, `latest_below_avg = true`, `latest_net_income = −$84.8M` → `peak_contamination_flag = true`. NRP was a clean *mechanical* BUY (`buy_eligible = true`, MoS +36.8%) caught in iteration 1 only by analyst judgment; the flag now moves that catch onto the machine and downgrades it to WATCH.
+
 #### `mos_basis = "nav"` — Asset-heavy company (finance, lessor, etc.)
 
 **BUY requires ALL of the following:**
 1. `nav_margin_of_safety_pct ≥ 30%`
 2. Zero effective kill-flags (same zero-tolerance as fcf_cap; no exceptions)
 3. No T3-load-bearing thesis
-4. **`buy_eligible == true`** — the mechanical eligibility gate applies to the NAV path identically. A `concentration_flag == "kill"` or `fundamental_decline_flag == true` forces `buy_eligible = false` and downgrades a would-be NAV BUY to WATCH (AVOID if also a hard kill-flag); record `buy_ineligible_reasons` on the BUY-trigger line.
+4. **`buy_eligible == true`** — the mechanical eligibility gate applies to the NAV path identically. A `concentration_flag == "kill"`, `fundamental_decline_flag == true`, or `peak_contamination_flag == true` forces `buy_eligible = false` and downgrades a would-be NAV BUY to WATCH (AVOID if also a hard kill-flag); record `buy_ineligible_reasons` on the BUY-trigger line.
 5. **Confidence must be multiplied by 0.6 before populating the `confidence` field.** NAV basis inherently carries accounting-convention and collateral-haircut uncertainty. Example: an 80% conviction NAV BUY is recorded as `confidence: 48`. This down-weight must be applied mechanically so `rank.py`'s `combined` score actually reflects it.
 6. Surface in the report explicitly as: "**Asset-heavy / NAV basis — human NAV judgment advised**"
 
@@ -305,7 +323,7 @@ These apply to every BUY outcome. In iteration 1 the only path to BUY is the MoS
 1. **T1 valuation only.** MoS is computed from SEC/XBRL inputs (T1). Market cap from yfinance is acceptable (labeled T2-adjacent; override with `--mktcap` for audit reproducibility). No T3 data may be substituted.
 2. **Cyclicals use normalized EBITDA/FCF.** `tools/valuation.py` enforces this in code; the judgment layer must not un-normalize.
 3. **BUY still requires pre-mortem + forced disconfirmation.** The anti-story protections (Disciplines 2 and 6 of `disclosure-discipline.md`) are not relaxed for BUY candidates. A BUY report with no pre-mortem section is invalid.
-4. **Perpetual-veto prohibition (qualitative only).** The *qualitative forward* argument "cyclical turn not yet realized in T1 → cannot buy" is explicitly prohibited as a veto when `margin_of_safety_pct ≥ 30%`. Normalized FCF already accounts for cycle conservatism. Applying an additional qualitative veto on top of the conservative metric defeats the mechanical trigger and recreates the run-3 calibration gap. **Exception (carve-out):** this prohibition does NOT cover the deterministic, magnitude-based `fundamental_decline_flag` (rev_slope_sign<0 AND contamination_ratio<1.0 AND latest_below_avg). That flag is a measured-data downgrade — it observes a realized decline that contaminates the normalization base — not a forward prediction, and it is permitted to downgrade BUY→WATCH even at MoS ≥ 30%.
+4. **Perpetual-veto prohibition (qualitative only).** The *qualitative forward* argument "cyclical turn not yet realized in T1 → cannot buy" is explicitly prohibited as a veto when `margin_of_safety_pct ≥ 30%`. Normalized FCF already accounts for cycle conservatism. Applying an additional qualitative veto on top of the conservative metric defeats the mechanical trigger and recreates the run-3 calibration gap. **Exception (carve-out):** this prohibition does NOT cover the deterministic, magnitude-based `fundamental_decline_flag` (rev_slope_sign<0 AND contamination_ratio<1.0 AND latest_below_avg) NOR its V-shape sibling `peak_contamination_flag` (contamination_ratio<0.8 AND latest_below_avg AND latest_net_income<0, independent of rev_slope_sign). Both are measured-data downgrades — they observe a realized decline / peak-contaminated normalization base, not a forward prediction — and both are permitted to downgrade BUY→WATCH even at MoS ≥ 30%.
 
 5. **Mechanical eligibility required.** Every BUY also requires `buy_eligible == true` (see "The `buy_eligible` mechanical gate"). The catalyst path no longer reaches BUY in iteration 1 (catalyst MoS-waiver frozen → WATCH-with-catalyst).
 
@@ -323,9 +341,11 @@ These rules override scorecard totals. A high aggregate score does not rescue a 
 | `buy_eligible == false` (any guard fired) when MoS ≥ 30% and kill-flags = 0 | **Cannot rate BUY** — downgrade to WATCH; record `buy_ineligible_reasons`. AVOID if a hard kill-flag is also present |
 | `concentration_flag == "kill"` (`top_program_pct > 60` OR `top_customer_pct > 40`) | Forces `buy_eligible = false` → **blocks BUY** (downgrade to WATCH; AVOID if hard kill-flag also present); Dim 3 capped at 2 |
 | `fundamental_decline_flag == true` (`rev_slope_sign<0` AND `contamination_ratio<1.0` AND `latest_below_avg`) | Forces `buy_eligible = false` → **downgrades would-be BUY to WATCH** even at MoS ≥ 30% (mechanical melting-ice-cube veto; AVOID if hard kill-flag also present) |
+| `peak_contamination_flag == true` (`contamination_ratio<0.8` AND `latest_below_avg` AND `latest_net_income<0`; **independent of `rev_slope_sign`**) | Forces `buy_eligible = false` → **downgrades would-be BUY to WATCH** even at MoS ≥ 30% (V-shape value-trap veto — catches trough→peak→rollover that `fundamental_decline_flag` misses; AVOID if hard kill-flag also present) |
+| `low_revenue_loss_ratio == true` (revenue present-but-small AND `\|net_income\|/revenue > 2.0`) | **Data-quality label only** — surfaced in `data_quality`; does NOT gate `buy_eligible` or change the rating. Replaces the prior `wrong_entity_suspected` misfire for the early/pre-revenue resource pattern |
 | T1-evidenced catalyst matching enumerated category (a)–(d) AND dated trigger AND kill-flags = 0 | **WATCH-with-catalyst** (catalyst MoS-waiver FROZEN, iteration 1) — does NOT lift sub-30% MoS to BUY; `catalyst` field must be populated with category, T1 source, dated trigger |
 | `margin_of_safety_pct < 30%` with no catalyst | Cannot rate BUY on MoS basis |
-| "Cyclical turn not yet realized in T1" used as QUALITATIVE forward veto when MoS ≥ 30% | **Prohibited** — perpetual-veto; normalized FCF already accounts for cycle conservatism. (Distinct from the mechanical `fundamental_decline_flag` carve-out, which IS permitted.) |
+| "Cyclical turn not yet realized in T1" used as QUALITATIVE forward veto when MoS ≥ 30% | **Prohibited** — perpetual-veto; normalized FCF already accounts for cycle conservatism. (Distinct from the mechanical `fundamental_decline_flag` and `peak_contamination_flag` carve-outs, which ARE permitted.) |
 | Any key claim rests solely on T3 evidence | Cannot rate BUY |
 | Any kill-flag present (`going_concern`, `death_spiral`, or `material_weakness`) | **Blocks BUY** — zero-tolerance, no adjudication escape hatch. `kill-flag count ≥ 2` → Default AVOID. |
 | `death_spiral` convertible detected | Dim 1 capped at 1; composite max = 2 |
