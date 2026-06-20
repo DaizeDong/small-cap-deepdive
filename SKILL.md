@@ -257,7 +257,7 @@ pip install -r tools/requirements.txt
 
 # 2. Configure the tool
 # A fresh clone has NO config.json — copy the example and fill in your details:
-cp skills/small-cap-deepdive/reference/config.example.json skills/small-cap-deepdive/reference/config.json
+cp reference/config.example.json reference/config.json
 # Edit config.json: set "sec_user_agent" to your real name and email address.
 # EDGAR requires a valid User-Agent header on every request (format: "Name email@domain.com").
 # Omission causes 403 errors. This is the only required config field.

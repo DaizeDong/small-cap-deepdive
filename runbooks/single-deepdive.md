@@ -15,8 +15,8 @@ Complete this once before any run:
 
 ```bash
 pip install -r tools/requirements.txt
-cp skills/small-cap-deepdive/reference/config.example.json \
-   skills/small-cap-deepdive/reference/config.json
+cp reference/config.example.json \
+   reference/config.json
 ```
 
 Set `"sec_user_agent"` in `config.json` to your real name and email.

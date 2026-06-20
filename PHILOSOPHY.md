@@ -115,7 +115,7 @@ failure modes. The discipline is not cosmetic; it is the product.
 
 ## P4 — Single source of truth, reference before orchestration · 单一真相源，reference 先于编排
 
-The methodology invariants live in `skills/small-cap-deepdive/reference/*.md`. These files are
+The methodology invariants live in `reference/*.md`. These files are
 the **single source of truth** for how kill-flags are defined, how dimensions are scored, how
 evidence is tiered, and what cognitive priors anchor the judgment.
 

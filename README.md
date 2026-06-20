@@ -97,8 +97,8 @@ pip install -r tools/requirements.txt
 Then configure once:
 
 ```bash
-cp skills/small-cap-deepdive/reference/config.example.json \
-   skills/small-cap-deepdive/reference/config.json
+cp reference/config.example.json \
+   reference/config.json
 ```
 
 Open `config.json` and set `"sec_user_agent"` to your real name and email:
@@ -117,7 +117,7 @@ To use the skill from Claude Code, add a junction (Windows) or symlink:
 cmd /c mklink /J "%USERPROFILE%\.claude\skills\small-cap-deepdive" "skills\small-cap-deepdive"
 
 # macOS / Linux
-ln -s "$(pwd)/skills/small-cap-deepdive" "$HOME/.claude/skills/small-cap-deepdive"
+ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 ```
 
 ---
@@ -208,8 +208,8 @@ bundled data layer (deterministic Python — never makes investment judgments)
   tools/run_theme.py   — end-to-end theme driver (calls the above)
 
 thin judgment layer (LLM — reads JSON, applies rubric, never computes financials)
-  skills/small-cap-deepdive/SKILL.md          — orchestration + world-view + hard rules
-  skills/small-cap-deepdive/reference/*.md    — methodology invariants (single source of truth)
+  SKILL.md          — orchestration + world-view + hard rules
+  reference/*.md    — methodology invariants (single source of truth)
   workflows/theme-fit-gate.js  — optional: parallel Gate 2 fan-out accelerator
   workflows/deepdive-fanout.js — optional: parallel deep-dive accelerator
 ```
@@ -280,7 +280,7 @@ X/Twitter account is never used (route ③ is permanently excluded — account s
 | Eliminated | Kill-flag fired at `cheap_pass` | Stop — do not re-examine |
 
 Composite = weighted average of 7 dimensions. Hard ceiling rules override narrative quality.
-Full rubric: `skills/small-cap-deepdive/reference/judgment-rubric.md`.
+Full rubric: `reference/judgment-rubric.md`.
 
 ---
 
