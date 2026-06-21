@@ -74,6 +74,10 @@ THEME_SIC: dict[str, list[str]] = {
     "deathcare": ["7200"],
     "funeral": ["7200"],
     "cemetery": ["7200"],
+    # Coverage-test recall floors (2026-06-20).
+    "water-utilities": ["4941"],          # water supply
+    "railcar-leasing": ["3743", "4741"],  # railroad equipment + railcar rental
+    "regional-gaming": ["7990", "7011"],  # amusement/recreation + hotels-casinos
 }
 
 # EDGAR browse-by-SIC enumeration endpoint (the recall-floor channel). The structured
@@ -303,6 +307,10 @@ def _selftest():
     assert theme_sics("deathcare") == ["7200"], "deathcare must floor to dedicated SIC 7200"
     assert theme_sics("DEATHCARE_2026") == ["7200"], "theme_sics must be case-insensitive + substring"
     assert theme_sics("funeral services") == ["7200"], "funeral synonym must resolve to 7200"
+    # Coverage-test recall floors (2026-06-20).
+    assert theme_sics("cov-water-utilities") == ["4941"], "water-utilities must floor to SIC 4941"
+    assert theme_sics("railcar-leasing run") == ["3743", "4741"], "railcar must floor to 3743/4741"
+    assert theme_sics("regional-gaming") == ["7990", "7011"], "regional-gaming must floor to 7990/7011"
     assert theme_sics("ai agents") == [], "theme with no dedicated SIC -> [] (opt-in no-op)"
 
     # _parse_browse_edgar: pure parser on a real-shaped browse-edgar fixture.
