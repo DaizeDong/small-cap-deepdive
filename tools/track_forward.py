@@ -107,6 +107,10 @@ THEME_GOLD: dict[str, list[str]] = {
     "deathcare": ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"],
     "funeral": ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"],
     "cemetery": ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"],
+    # Coverage-test gold cohorts (2026-06-20) — hand-curated public small/mid-cap members.
+    "water-utilities": ["YORW", "ARTNA", "MSEX", "GWRS", "CWCO", "PCYO", "SJW", "CWT", "AWR"],
+    "railcar-leasing": ["GATX", "TRN", "GBX", "RAIL"],
+    "regional-gaming": ["BYD", "RRR", "MCRI", "GDEN", "CNTY", "FLL", "ACEL"],
 }
 
 # EDGAR full-text search (EFTS) returns at most this many hits per query (the documented
@@ -1605,6 +1609,10 @@ def _selftest() -> None:
         "P8: compound slug must resolve the gold list (substring match)"
     )
     assert theme_gold("ai agents") == [], "P8: an unmapped theme must have NO gold list"
+    # Coverage-test gold cohorts (2026-06-20).
+    assert theme_gold("cov-water-utilities")[:2] == ["YORW", "ARTNA"], "P8: water-utilities gold cohort"
+    assert {"GATX", "RAIL"} <= set(theme_gold("railcar-leasing")), "P8: railcar gold cohort"
+    assert "BYD" in theme_gold("regional-gaming"), "P8: regional-gaming gold cohort"
     assert recall_at_gold("ai agents", ["NVDA"]) is None, (
         "P8: recall_at_gold must be None (not measurable) for an unmapped theme"
     )
