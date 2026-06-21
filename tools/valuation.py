@@ -694,6 +694,22 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     if _cross_source_mismatch:
         dq.append(f"cross_source_mismatch:{_cross_source_detail}")
 
+    # --- v0.3.1 #1: normalization_masks_current_loss (the degenerate-base / divested-stub catch) ---
+    # The TUSK hole: when contamination_ratio<0 (or the latest base is negative) the A1 (0<cr) guard
+    # silences BOTH cyclical vetoes (peak_contamination + fundamental_decline), yet the trailing-5yr
+    # average still emits a POSITIVE normalized_fcf -> a phantom positive MoS (+55.1% mechanical BUY).
+    # The producer (deepdive_data.py) emits normalization_masks_current_loss = normalized_fcf>0 AND
+    # (latest_ocf<0 OR latest_fcf<0 OR contamination_ratio<0). We AND (not flag) into buy_eligible
+    # here so the BUY is downgraded BUY->WATCH — exactly like fundamental_decline / peak_contamination.
+    # Downgrade-only: it NEVER manufactures a BUY. This is the consumer half of the #1 contract.
+    _normalization_masks_current_loss = bool(der.get("normalization_masks_current_loss", False))
+    if _normalization_masks_current_loss:
+        dq.append(
+            f"normalization_masks_current_loss:normalized_fcf_proxy={der.get('normalized_fcf_proxy')},"
+            f"latest_ocf={der.get('latest_ocf')},latest_fcf={der.get('latest_fcf')},"
+            f"contamination_ratio={_contamination_ratio}"
+        )
+
     # --- P1: compose buy_eligible — the single mechanical boolean the BUY trigger ANDs ---
     # buy_eligible is True ONLY when every blocking guard is clear. The rubric/SKILL BUY
     # trigger additionally requires mos_basis=="fcf_cap" AND MoS>=30 AND zero Tier-3-load-
@@ -732,6 +748,19 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # a DATA-INTEGRITY gate, not a between-filings signal; gating here is intended.
     if _cross_source_mismatch:
         _buy_ineligible_reasons.append("cross_source_mismatch")
+    # v0.3.1 #1: normalization_masks_current_loss gates buy_eligible (downgrade BUY->WATCH). The
+    # trailing-avg normalized FCF is masking current cash burn / a divested-segment stub; the
+    # mechanical guards (cyclical vetoes) are silenced by the degenerate base, so this is the only
+    # path that catches the TUSK-shape phantom BUY.
+    if _normalization_masks_current_loss:
+        _buy_ineligible_reasons.append("normalization_masks_current_loss")
+    # v0.3.1 #9: a null MoS can NEVER be a tradeable BUY. When the active basis carries no numeric
+    # MoS (fcf_cap with no intrinsic band, or nav/abstain with no NAV MoS), buy_eligible MUST be
+    # False with an explicit reason — not left True-by-absence-of-data (the DAVA/TV/QNC footgun
+    # where buy_eligible=True co-existed with MoS=null, caught only by the downstream MoS>=30 clause).
+    _active_mos_for_eligibility = mos if mos_basis == "fcf_cap" else nav_mos
+    if _active_mos_for_eligibility is None:
+        _buy_ineligible_reasons.append("not_assessable_no_intrinsic_band")
     _buy_eligible = len(_buy_ineligible_reasons) == 0
 
     # --- Assemble output ---
@@ -787,6 +816,10 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "contamination_ratio": _contamination_ratio,
         # P-A: V-shape value-trap veto (read from producer derived; independent of slope)
         "peak_contamination_flag": _peak_contamination_flag,
+        # v0.3.1 #1: degenerate-base / divested-stub catch (read from producer derived). When True,
+        # the trailing-avg normalized FCF>0 is masking current cash burn -> buy_eligible=False
+        # (downgrade BUY->WATCH). The TUSK hole the mechanical cyclical vetoes miss.
+        "normalization_masks_current_loss": _normalization_masks_current_loss,
         # P7: second-source sanity band (read from producer derived). cross_source_mismatch is a
         # DATA-INTEGRITY gate on buy_eligible (>2.5x SEC-vs-yfinance disagreement); checked=False
         # means no second source was available (never blocks).
@@ -1840,6 +1873,114 @@ def _selftest():
         "P10: lumpy guard must corroborate with producer contamination_ratio<1.0"
     )
     print("  P10 lumpy-OCF guard: peak-year>2x-median flags + corroborates contamination  OK")
+
+    # --- v0.3.1 #1: normalization_masks_current_loss gates buy_eligible (the TUSK hole, consumer) ---
+    # The producer emits normalization_masks_current_loss=True for the TUSK shape (normalized_fcf>0
+    # while latest_ocf<0 / latest_fcf<0 / contamination_ratio<0). valuation MUST AND (not flag) into
+    # buy_eligible (downgrade BUY->WATCH) and surface it in data_quality. Start from the clean
+    # otherwise-eligible fixture and set ONLY the producer flag.
+    _dd_tusk = dict(_dd_clean_base)
+    _dd_tusk["derived"] = dict(_dd_clean_base["derived"])
+    _dd_tusk["ticker"] = "TEST_TUSK"
+    _dd_tusk["derived"]["normalization_masks_current_loss"] = True
+    _dd_tusk["derived"]["normalized_fcf_proxy"] = 12_000_000   # trailing-avg POSITIVE
+    _dd_tusk["derived"]["latest_ocf"] = -18_600_000            # current cash BURN (TUSK shape)
+    _dd_tusk["derived"]["latest_fcf"] = -89_100_000
+    _block_tusk = compute_valuation(_dd_tusk, 120_000_000, cfg)
+    assert _block_tusk.get("normalization_masks_current_loss") is True, (
+        "#1: producer normalization_masks_current_loss must be read into the valuation block"
+    )
+    assert "normalization_masks_current_loss" in _block_tusk.get("buy_ineligible_reasons", []), (
+        f"#1: normalization_masks_current_loss must gate buy_eligible (downgrade BUY->WATCH), "
+        f"reasons={_block_tusk.get('buy_ineligible_reasons')}"
+    )
+    assert _block_tusk.get("buy_eligible") is False, (
+        "#1 CRITICAL: the TUSK degenerate-base shape must NOT be buy_eligible "
+        "(trailing-avg normalized_fcf>0 masking current cash burn)"
+    )
+    assert any("normalization_masks_current_loss" in str(x) for x in _block_tusk.get("data_quality", [])), (
+        "#1: normalization_masks_current_loss must surface in data_quality"
+    )
+    # NEGATIVE CONTROL: a clean grower (producer flag False) must stay buy_eligible — the gate must
+    # NOT fire on healthy normalization. Reuse the clean fixture (flag absent/False).
+    assert _block_clean.get("normalization_masks_current_loss") is False, (
+        "#1: clean grower must have normalization_masks_current_loss=False (no false fire)"
+    )
+    assert "normalization_masks_current_loss" not in _block_clean.get("buy_ineligible_reasons", []), (
+        "#1: clean grower must NOT be gated by normalization_masks_current_loss"
+    )
+    assert _block_clean.get("buy_eligible") is True, (
+        "#1: clean grower stays buy_eligible (the #1 gate is downgrade-only, never trigger-happy)"
+    )
+    print("  #1 normalization_masks_current_loss: TUSK shape gated BUY->WATCH; clean grower untouched  OK")
+
+    # POSITIVE CONTROL (#1 + #9): a clean grower with a REAL numeric MoS>=30 must stay buy_eligible.
+    # The two new v0.3.1 gates (#1 normalization_masks_current_loss, #9 not_assessable_no_intrinsic_band)
+    # are downgrade-only / null-guards; neither may suppress a genuinely cheap healthy name. Scale the
+    # clean fixture's FCF up so the conservative cap model yields MoS>=30 at the same market cap.
+    _dd_cheap = dict(_dd_clean_base)
+    _dd_cheap["derived"] = dict(_dd_clean_base["derived"])
+    _dd_cheap["ticker"] = "TEST_CHEAP_GROWER"
+    # FCF=18M -> conservative band eq_low = 18M/0.12 + 10M net cash = 160M vs 120M mc -> MoS ~33%
+    # (deliberately inside [30%,100%] so it clears the MoS>=30 bar WITHOUT tripping the >100% G1 guard).
+    _dd_cheap["derived"]["latest_fcf"] = 18_000_000
+    _dd_cheap["financials"] = dict(_dd_clean_base["financials"])
+    _dd_cheap["financials"]["ocf"] = [{"end": "2024-12-31", "val": 23_000_000}]
+    _dd_cheap["financials"]["capex"] = [{"end": "2024-12-31", "val": 5_000_000}]
+    _block_cheap = compute_valuation(_dd_cheap, 120_000_000, cfg)
+    assert _block_cheap.get("mos_basis") == "fcf_cap", (
+        f"#1/#9 positive control: cheap grower must route fcf_cap, got {_block_cheap.get('mos_basis')!r}"
+    )
+    _mos_cheap = _block_cheap.get("margin_of_safety_pct")
+    assert _mos_cheap is not None and _mos_cheap >= 0.30, (
+        f"#1/#9 positive control: cheap grower must have a REAL numeric MoS>=30%, got {_mos_cheap}"
+    )
+    assert _block_cheap.get("normalization_masks_current_loss") is False, (
+        "#1 positive control: cheap grower (positive latest FCF) must NOT set normalization_masks_current_loss"
+    )
+    assert "not_assessable_no_intrinsic_band" not in _block_cheap.get("buy_ineligible_reasons", []), (
+        "#9 positive control: a real numeric MoS must NOT add not_assessable_no_intrinsic_band"
+    )
+    assert _block_cheap.get("buy_eligible") is True, (
+        f"#1/#9 positive control: a clean grower with real MoS>=30 must stay buy_eligible=True, "
+        f"reasons={_block_cheap.get('buy_ineligible_reasons')}"
+    )
+    print("  #1/#9 positive control: clean grower with real MoS>=30 stays buy_eligible=True  OK")
+
+    # --- v0.3.1 #9: a null MoS can NEVER be buy_eligible -> not_assessable_no_intrinsic_band ---
+    # Build a name with no FCF base (empty ocf) on a non-asset-heavy SIC so it routes fcf_cap with a
+    # NULL intrinsic band -> margin_of_safety_pct=None. buy_eligible MUST be False with the explicit
+    # not_assessable_no_intrinsic_band reason (not True-by-absence-of-data, the DAVA/TV/QNC footgun).
+    _dd_no_band = dict(_dd_clean_base)
+    _dd_no_band["derived"] = dict(_dd_clean_base["derived"])
+    _dd_no_band["ticker"] = "TEST_NO_BAND"
+    _dd_no_band["derived"]["latest_fcf"] = None    # non-cyclical norm_fcf = latest_fcf -> null
+    _dd_no_band["derived"]["latest_ocf"] = None
+    _dd_no_band["financials"] = dict(_dd_clean_base["financials"])
+    _dd_no_band["financials"]["ocf"] = []          # no OCF base -> no normalized FCF -> null band
+    _dd_no_band["financials"]["capex"] = []
+    _block_no_band = compute_valuation(_dd_no_band, 120_000_000, cfg)
+    assert _block_no_band.get("mos_basis") == "fcf_cap", (
+        f"#9: no-OCF fixture must route fcf_cap (non-asset-heavy SIC), "
+        f"got {_block_no_band.get('mos_basis')!r}"
+    )
+    assert _block_no_band.get("margin_of_safety_pct") is None, (
+        f"#9: no intrinsic band must yield a NULL MoS, got {_block_no_band.get('margin_of_safety_pct')}"
+    )
+    assert "not_assessable_no_intrinsic_band" in _block_no_band.get("buy_ineligible_reasons", []), (
+        f"#9: a null MoS must add not_assessable_no_intrinsic_band, "
+        f"reasons={_block_no_band.get('buy_ineligible_reasons')}"
+    )
+    assert _block_no_band.get("buy_eligible") is False, (
+        "#9 CRITICAL: buy_eligible must NEVER be True with a null MoS"
+    )
+    # Belt-and-suspenders: across ALL three null-MoS basis routes (fcf_cap null band, nav with no NAV
+    # MoS, abstain) buy_eligible must be False — assert the invariant directly on the no-band block.
+    assert not (_block_no_band.get("buy_eligible") is True
+                and _block_no_band.get("margin_of_safety_pct") is None), (
+        "#9 INVARIANT: buy_eligible=True with margin_of_safety_pct=None is forbidden"
+    )
+    print("  #9 null-MoS: no intrinsic band -> not_assessable_no_intrinsic_band, buy_eligible=False  OK")
 
     print("\nvaluation selftest PASS")
 

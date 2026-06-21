@@ -148,15 +148,31 @@ def enrich_marketcap(df: pd.DataFrame) -> pd.DataFrame:
         rec = {"mktcap": None, "avg_dollar_vol": None, "price": None,
                "exch": None, "mktcap_source": "unresolved"}
         yf_mktcap = None
+        # P12: split .info and .history into INDEPENDENT try blocks. yfinance's
+        # .info call is the fragile leg (SJW/HI/MRC: it raises or returns {} for
+        # real names), and the old single try aborted BOTH legs together — losing
+        # price/volume too, which then (a) starved resolve_mktcap of a price for the
+        # SEC shares x price reconstruction and (b) tripped flag_illiquid. Isolating
+        # them means an .info failure no longer silently drops a real small-cap.
         try:
             info = yf.Ticker(t).info
             yf_mktcap = info.get("marketCap")
             rec["price"] = info.get("currentPrice") or info.get("regularMarketPrice")
             rec["exch"] = info.get("exchange")
+        except Exception:
+            pass
+        try:
             # 近30日日均成交额
             h = yf.Ticker(t).history(period="1mo")
             if not h.empty:
                 rec["avg_dollar_vol"] = float((h["Close"] * h["Volume"]).mean())
+                # P12: derive a price from the history close when .info gave none —
+                # this is the price that lets resolve_mktcap reconstruct mktcap from
+                # SEC shares for a yfinance-NaN name BEFORE any size-exclusion.
+                if rec["price"] is None or not (rec["price"] > 0):
+                    last_close = float(h["Close"].dropna().iloc[-1])
+                    if last_close > 0:
+                        rec["price"] = last_close
         except Exception:
             pass
         # Fallback chain: yfinance -> SEC shares x price. Keeps mktcap when yfinance
@@ -244,6 +260,13 @@ def _selftest() -> None:
         # null mktcap AND no price/volume — still flows as 'unknown' band, but is illiquid
         {"name": "Dark Co", "ticker": "DARK", "cik": "5", "sic": "2810",
          "mktcap": None, "price": None, "avg_dollar_vol": 0.0},
+        # P12: yfinance returned NaN, but enrich_marketcap reconstructed mktcap via SEC
+        # shares x price (mktcap_source='sec_shares_x_price'). The resolved in-band cap must
+        # land 'deep' and stay a candidate — NOT be size-excluded for being yfinance-NaN.
+        # This is the SJW/HI/MRC case: real name, fragile yfinance, recoverable via SEC.
+        {"name": "SJW-like", "ticker": "SJWX", "cik": "6", "sic": "4941",
+         "mktcap": 1.5e9, "price": 50.0, "avg_dollar_vol": 5e6,
+         "mktcap_source": "sec_shares_x_price"},
     ])
     out = apply_filters(df, max_mcap, min_dollar_vol=1e6, watch_band_max=watch_max)
 
@@ -268,6 +291,14 @@ def _selftest() -> None:
     assert "BIG" in bands, "large-band row must remain in the frame, not be dropped"
     # genuinely illiquid unknown row falls out via the illiquidity gate, not a mktcap drop
     assert cand["DARK"] == False, "DARK is illiquid -> not a candidate (via liquidity gate, not mktcap)"
+
+    # P12: a SEC-shares x price reconstructed in-band mktcap must band 'deep' and stay a
+    # candidate — the yfinance-NaN name (SJW/HI/MRC) is recovered, NOT size-excluded.
+    assert bands["SJWX"] == "deep", (
+        f"P12: SEC-reconstructed $1.5B mktcap must band 'deep', got {bands['SJWX']}")
+    assert cand["SJWX"] == True, (
+        "P12: a real name with yfinance NaN but resolvable SEC shares x price must remain "
+        "smallcap_candidate=True (not size-excluded) — the SJW fix")
 
     # -----------------------------------------------------------------------
     # P8 SIC reverse-recall wiring (merge_sic_reverse). Offline: mock fetch + mock
@@ -317,7 +348,8 @@ def _selftest() -> None:
     )
     assert all("recall_channel" not in r for r in fts_hits), "merge must NOT mutate fts_hits input"
 
-    print("discover selftest PASS (P5 null-mktcap flow-through + P8 SIC reverse-recall union)")
+    print("discover selftest PASS (P5 null-mktcap flow-through + P8 SIC reverse-recall union "
+          "+ P12 SEC-reconstructed mktcap not size-excluded)")
 
 
 def main():

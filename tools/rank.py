@@ -33,6 +33,14 @@ from _common import REPORTS, today
 RATING_MAP = {"买入": 3, "buy": 3, "观察": 2, "watch": 2, "hold": 2,
               "避开": 1, "avoid": 1, "sell": 1}
 
+# v0.3.1 #13 — a PER-TICKER deep-dive file is deepdive_<TICKER>_<YYYY-MM-DD>.json. The run dir
+# also holds non-ticker sidecars (deepdive_verdicts.json / deepdive_queue.json /
+# deepdive_targets.json) that a naive glob("deepdive_*.json") counts as deep-dives, inflating the
+# funnel banner by one (semiconductors 20 vs 19, cybersecurity 26 vs 25, biotech 43 vs 42 all =
+# real N + deepdive_verdicts.json). Count only files matching this shape — the SAME per-ticker
+# pattern load_hard_data consumes — so the banner equals the names actually deep-dived.
+_DEEPDIVE_TICKER_RE = re.compile(r"^deepdive_[A-Za-z0-9.\-]+_\d{4}-\d{2}-\d{2}\.json$")
+
 
 def read_text_utf8(path) -> str:
     """Read a report as UTF-8. Windows' default codepage is GBK, so a naive open() of the
@@ -129,14 +137,20 @@ def compute_funnel_stats(reports_dir=None) -> dict:
     Returns a dict:
         candidates   — rows in candidates_*.json (theme universe after gates), or None if absent
         deep_band    — rows with band == "deep" in candidates_*.json, or None if absent
-        deepdived    — number of deepdive_*.json files (names that got a full deep-dive)
+        deepdived    — number of per-ticker deepdive_<TICKER>_<DATE>.json files (names that got a
+                       full deep-dive); non-ticker sidecars (verdicts/queue/targets) are excluded
+                       so the count is not inflated (v0.3.1 #13 off-by-one fix)
         reports      — number of report_*.md files (names with a decision-ready report)
     Counts that can't be derived are None so the template can omit that stage rather than print a
     contradictory number.
     """
     base = reports_dir if reports_dir is not None else REPORTS
     reports = glob.glob(str(base / "report_*.md"))
-    deepdives = glob.glob(str(base / "deepdive_*.json"))
+    # v0.3.1 #13: count ONLY per-ticker deepdive_<TICKER>_<DATE>.json files; the run dir also
+    # contains deepdive_verdicts/queue/targets.json sidecars that a bare glob would over-count by
+    # one (the off-by-one banner bug). Filter to the per-ticker shape.
+    deepdives = [f for f in glob.glob(str(base / "deepdive_*.json"))
+                 if _DEEPDIVE_TICKER_RE.match(Path(f).name)]
 
     candidates = None
     deep_band = None
@@ -263,16 +277,34 @@ def _selftest() -> None:
                   open(rd / "candidates_gate2_survivors.json", "w", encoding="utf-8"))
         (rd / "deepdive_A_2026-06-20.json").write_text("{}", encoding="utf-8")
         (rd / "report_A.md").write_text("x", encoding="utf-8")
+        # v0.3.1 #13: drop the run-state sidecars that previously inflated the deep-dive banner by
+        # one (deepdive_verdicts/queue/targets.json). compute_funnel_stats must count ONLY the
+        # per-ticker deepdive_<TICKER>_<DATE>.json file, so deepdived stays 1, not 4.
+        for sidecar in ("deepdive_verdicts.json", "deepdive_queue.json", "deepdive_targets.json"):
+            (rd / sidecar).write_text("{}", encoding="utf-8")
         st = compute_funnel_stats(rd)
         assert st["candidates"] == 3, f"candidates from theme file (gate2_survivors excluded): {st}"
         assert st["deep_band"] == 2, f"deep-band count: {st}"
-        assert st["deepdived"] == 1 and st["reports"] == 1, f"deepdive/report counts: {st}"
+        assert st["deepdived"] == 1 and st["reports"] == 1, (
+            f"deepdive/report counts: deepdived must EXCLUDE verdicts/queue/targets sidecars "
+            f"(#13 off-by-one), got {st}")
+        # The banner narration then reports the true deep-dived count (1), never N+1 (4).
+        assert "1 家逐一 deep dive" in funnel_line(st, 1), \
+            f"#13: banner must show actual deep-dived count, not inflated by sidecars: {st}"
+        # Direct assertion on the filename matcher: ticker files match, sidecars do not.
+        assert _DEEPDIVE_TICKER_RE.match("deepdive_AOSL_2026-06-21.json"), "#13: ticker file matches"
+        assert _DEEPDIVE_TICKER_RE.match("deepdive_BRK.A_2026-06-21.json"), "#13: dotted ticker matches"
+        assert not _DEEPDIVE_TICKER_RE.match("deepdive_verdicts.json"), "#13: verdicts sidecar excluded"
+        assert not _DEEPDIVE_TICKER_RE.match("deepdive_queue.json"), "#13: queue sidecar excluded"
+        assert not _DEEPDIVE_TICKER_RE.match("deepdive_targets.json"), "#13: targets sidecar excluded"
     # no candidates file -> candidates/deep_band None, line omits those stages (no crash/contradiction)
     fl2 = funnel_line({"candidates": None, "deep_band": None, "deepdived": 5, "reports": 5}, 5)
     assert "候选" not in fl2 and "5 家逐一 deep dive" in fl2, f"funnel omits absent stages: {fl2}"
 
     print("rank selftest PASS (extract_rating parsing + sink/ordering: AVOID & kill-flag>=2 sink "
-          "+ P-H funnel narration narrows monotonically with true labels)")
+          "+ P-H funnel narration narrows monotonically with true labels + #13 deep-dive banner "
+          "counts only per-ticker deepdive files (verdicts/queue/targets sidecars excluded, "
+          "off-by-one fixed))")
 
 
 def main():

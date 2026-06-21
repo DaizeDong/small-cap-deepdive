@@ -1354,17 +1354,144 @@ def _recall_set_from_candidate_files(paths: list[Path]) -> tuple[set[str], int, 
     return recalled, fts_only, stage_sets
 
 
+# ---------------------------------------------------------------------------
+# P8 / v0.3.1 #6 — recall@gold against the UNIVERSE (raw FTS ∪ SIC-reverse), not candidates.
+# ---------------------------------------------------------------------------
+# The candidate JSON is the POST band/burn/liquidity set, so a gold member that WAS recalled
+# (present in the universe) but then size-capped / burn-rejected / mktcap-fetch-failed is absent
+# from it and the breakdown mislabels it `fts_missed` — under-crediting the SIC floor and the FTS
+# recall both. The fix: read the UNIVERSE CSV that discover.py emits (the raw recall set, every
+# FTS ∪ SIC-reverse hit BEFORE any size/liquidity filtering) so a gold member's loss is attributed
+# to its TRUE stage. At universe level deathcare reads 5/6 recalled (only delisted STON genuinely
+# fts_missed), not the 2/6 the post-filter candidates file reports.
+#
+# Universe CSV schema (discover.py): name,ticker,cik,sic,...,matched_phrase,...,flag_too_big,
+# flag_illiquid,flag_no_price,flag_no_mktcap,band,smallcap_candidate[,recall_channel]. The
+# recall_channel column is present only when discover ran with --sic-reverse; when absent every
+# row is an FTS hit, except SIC-only rows discover stamps matched_phrase='[sic_reverse]'.
+SIC_REVERSE_MARKER = "[sic_reverse]"
+
+
+def _truthy_csv(v) -> bool:
+    """A CSV cell read as a truthy boolean. Pandas/csv write bools as 'True'/'False' strings."""
+    return str(v).strip().lower() in ("true", "1", "yes")
+
+
+def _recall_set_from_universe_files(paths: list[Path]) -> tuple[set[str], int, dict[str, set[str]]]:
+    """Read the UNIVERSE recall set from one or more discover.py universe CSV files.
+
+    The universe CSV is the RAW recall set (FTS ∪ SIC-reverse) BEFORE band/burn/liquidity
+    filtering — the correct denominator for recall@gold (v0.3.1 backlog #6). Every ticker that
+    appears here was recalled by some channel; whether it survived downstream is a SEPARATE
+    (loss-stage) question, which is exactly what this function attributes.
+
+    Returns (recalled_ticker_set, fts_hit_count, stage_sets), mirroring
+    _recall_set_from_candidate_files so cmd_recall_gold can use either source interchangeably:
+
+      - recalled_ticker_set — tickers that survived the universe filters into the candidate set
+                              (smallcap_candidate truthy). These are the universe-level
+                              recalled_final hits.
+      - fts_hit_count       — rows recalled by the FTS channel (recall_channel in {fts, both},
+                              or — when the column is absent — any row NOT stamped with the
+                              SIC-reverse marker). Compared against FTS_TOP_HITS_CAP.
+      - stage_sets          — per-stage ticker sets for recall_stage_breakdown:
+            "fts"            FTS-channel tickers (see fts_hit_count rule)
+            "sic"            SIC-reverse-channel tickers (recall_channel in {sic_reverse, both},
+                             or matched_phrase == '[sic_reverse]')
+            "mktcap_dropped" tickers recalled into the universe but DROPPED before the candidate
+                             set by a size/liquidity filter (smallcap_candidate falsey:
+                             flag_too_big / band=='large' / illiquid / no-price / mktcap-fetch
+                             fail). This is the universe-vs-candidate delta that the candidates
+                             file silently lost; here it is attributed, NOT counted as fts_missed.
+            "gated_out"      empty from the universe alone (gating is a deep-dive-stage outcome,
+                             not visible in the universe CSV) — supplied by the candidates file
+                             when both sources are merged.
+
+    A gold member present in the universe lands in recalled_final (survived) or dropped_mktcap
+    (size/liquidity-dropped); only a gold member ABSENT from every universe file falls through to
+    fts_missed — the true recall leak. Tolerates a missing recall_channel column (older discover
+    runs) and the empty-universe placeholder CSV discover writes when FTS returns nothing.
+    """
+    import csv as _csv
+
+    recalled: set[str] = set()
+    fts_hits = 0
+    stage_sets: dict[str, set[str]] = {
+        "fts": set(), "sic": set(), "mktcap_dropped": set(), "gated_out": set(),
+    }
+    for p in paths:
+        try:
+            # utf-8-sig tolerates a BOM; discover writes plain utf-8 via pandas.to_csv.
+            text = Path(p).read_text(encoding="utf-8-sig")
+        except Exception as e:
+            print(f"  [warn] recall-gold: cannot read universe {p}: {e}", file=sys.stderr)
+            continue
+        reader = _csv.DictReader(text.splitlines())
+        for r in reader:
+            tk = str(r.get("ticker") or "").upper().strip()
+            if not tk:
+                continue
+            ch = (r.get("recall_channel") or "").strip().lower()
+            phrase = (r.get("matched_phrase") or "").strip().lower()
+            is_sic = ch in ("sic_reverse", "sic") or phrase == SIC_REVERSE_MARKER
+            is_both = ch == "both"
+            if is_both or (not is_sic):
+                # FTS channel: recall_channel fts/both, OR (column absent) any non-SIC-marked row.
+                fts_hits += 1
+                stage_sets["fts"].add(tk)
+            if is_sic or is_both:
+                stage_sets["sic"].add(tk)
+            # Universe -> candidate survival: smallcap_candidate truthy means it cleared the
+            # size/liquidity filters. Anything else was recalled then size/liquidity-dropped.
+            if _truthy_csv(r.get("smallcap_candidate")):
+                recalled.add(tk)
+            else:
+                stage_sets["mktcap_dropped"].add(tk)
+    return recalled, fts_hits, stage_sets
+
+
 def cmd_recall_gold(args) -> None:
-    """--recall-gold: compute recall@gold for a theme's recall set vs its hand-built gold list."""
+    """--recall-gold: compute recall@gold for a theme's recall set vs its hand-built gold list.
+
+    v0.3.1 backlog #6: recall@gold is measured against the UNIVERSE (raw FTS ∪ SIC-reverse,
+    pre band/burn/liquidity) so the SIC floor is credited and a size-capped / burn-rejected gold
+    member is attributed to its TRUE loss stage rather than mislabeled `fts_missed`. Pass the
+    discover.py universe CSV via --universe (the correct, preferred source).
+
+    --recall-gold (candidate JSON) is still accepted for backward compatibility and, when supplied
+    ALONGSIDE --universe, contributes ONLY its deep-dive `gated_out` set — gating is a deep-dive
+    outcome invisible in the universe CSV. The universe always owns recall / fts / sic /
+    dropped_mktcap; the candidates file never demotes a universe recall into fts_missed.
+    """
     theme = args.theme
     if not theme:
         print("recall-gold requires --theme", file=sys.stderr)
         sys.exit(2)
-    paths = [Path(p) for p in (args.recall_gold or [])]
-    if not paths:
-        print("recall-gold requires one or more candidate JSON paths", file=sys.stderr)
+    universe_paths = [Path(p) for p in (getattr(args, "universe", None) or [])]
+    cand_paths = [Path(p) for p in (args.recall_gold or [])]
+    if not universe_paths and not cand_paths:
+        print("recall-gold requires --universe (preferred) and/or candidate JSON path(s)",
+              file=sys.stderr)
         sys.exit(2)
-    recalled, fts_count, stage_sets = _recall_set_from_candidate_files(paths)
+
+    if universe_paths:
+        # #6: the universe is the recall denominator. It owns recall/fts/sic/dropped_mktcap.
+        recalled, fts_count, stage_sets = _recall_set_from_universe_files(universe_paths)
+        source = "universe"
+        # If candidate files are ALSO supplied, layer ONLY their gated_out (deep-dive stage) on
+        # top — the universe cannot see gating. Never let candidates shrink the universe recall.
+        if cand_paths:
+            _, _, cand_stages = _recall_set_from_candidate_files(cand_paths)
+            stage_sets["gated_out"] |= cand_stages["gated_out"]
+            source = "universe+candidates(gated_out)"
+    else:
+        # Legacy / fallback: post-filter candidate set only. WARN that recall is under-credited.
+        recalled, fts_count, stage_sets = _recall_set_from_candidate_files(cand_paths)
+        source = "candidates (post-filter)"
+        print("  [warn] recall-gold reading the POST-FILTER candidate set — size-capped / "
+              "burn-rejected gold members will mislabel as fts_missed. Pass --universe "
+              "<universe_*.csv> for a true recall floor (v0.3.1 #6).", file=sys.stderr)
+
     res = recall_at_gold(
         theme, recalled, fts_hit_count=fts_count,
         fts_tickers=stage_sets["fts"],
@@ -1375,7 +1502,7 @@ def cmd_recall_gold(args) -> None:
     if res is None:
         print(f"recall@gold: no gold list for theme '{theme}' — not measurable")
         return
-    print(f"recall@gold — theme '{theme}'")
+    print(f"recall@gold — theme '{theme}'  [source: {source}]")
     print(f"  gold ({len(res['gold'])}):     {', '.join(res['gold'])}")
     print(f"  recalled_gold: {', '.join(res['recalled_gold']) or '—'}")
     print(f"  MISSING_gold:  {', '.join(res['missing_gold']) or '—'}")
@@ -1746,6 +1873,153 @@ def _selftest() -> None:
     print("  P8 recall@gold: floor measured + loss-stage breakdown "
           "(full/partial/cap-warn + 5-stage partition + file read)  OK")
 
+    # --- v0.3.1 #6: recall@gold against the UNIVERSE (raw FTS ∪ SIC-reverse), not candidates ---
+    # The bug this fixes: the post-filter candidates file drops a gold member that WAS recalled but
+    # then size-capped / burn-rejected, and the breakdown mislabels it `fts_missed`, under-crediting
+    # both the SIC floor and the FTS recall. Reproduce the exact deathcare regression: a candidates
+    # file holds only the SURVIVORS (CSV, SNFCA) -> 2/6 = 33.3% with SCI/MATW/HI dumped into
+    # fts_missed; the UNIVERSE CSV holds the raw recall set -> 5/6 with each loss attributed to its
+    # TRUE stage and only the delisted STON genuinely fts_missed. Deathcare reads ~100% of the
+    # live names at universe level (5/6; STON delisted ~2022).
+    import tempfile as _tf6
+    import csv as _csv6
+    with _tf6.TemporaryDirectory() as _td6:
+        # (1) Post-filter candidates: only the two names that survived band/burn/liquidity.
+        _cf6 = Path(_td6) / "candidates_deathcare.json"
+        _cf6.write_text(json.dumps([
+            {"ticker": "CSV", "recall_channel": "both"},
+            {"ticker": "SNFCA", "recall_channel": "fts"},
+        ]), encoding="utf-8")
+        _crec, _cfts, _cstg = _recall_set_from_candidate_files([_cf6])
+        _cres = recall_at_gold(
+            "deathcare", _crec, fts_hit_count=_cfts,
+            fts_tickers=_cstg["fts"], sic_tickers=_cstg["sic"],
+            mktcap_dropped=_cstg["mktcap_dropped"], gated_out=_cstg["gated_out"],
+        )
+        # The candidates-only view UNDER-credits recall and mislabels size/burn drops as fts_missed.
+        assert _cres["recall_at_gold"] == round(2 / 6, 4), (
+            f"#6: post-filter candidates must read 2/6=33.3% (the regression), got {_cres['recall_at_gold']}"
+        )
+        assert "SCI" in _cres["stage_breakdown"]["fts_missed"], (
+            "#6: candidates-only mislabels size-capped SCI as fts_missed (the bug being fixed)"
+        )
+
+        # (2) UNIVERSE CSV (discover.py schema): the RAW recall set, pre band/burn/liquidity. Five
+        # of six gold present; STON absent (delisted). Stages exercised, mirroring the live run:
+        #   CSV   smallcap_candidate=True,  recall_channel=both        -> recalled_final (FTS+SIC)
+        #   SNFCA smallcap_candidate=True,  recall_channel=fts         -> recalled_final
+        #   MATW  smallcap_candidate=True,  matched_phrase=[sic_reverse] (no recall_channel col path
+        #                                                                  not used here) -> recalled_final
+        #   SCI   smallcap_candidate=False, flag_too_big=True          -> dropped_mktcap (size-cap)
+        #   HI    smallcap_candidate=False, flag_illiquid=True         -> dropped_mktcap (liquidity)
+        #   STON  ABSENT from universe                                 -> fts_missed (delisted, true leak)
+        _uf6 = Path(_td6) / "universe_deathcare_2026-06-21.csv"
+        _ufields = ["name", "ticker", "cik", "sic", "matched_phrase", "flag_too_big",
+                    "flag_illiquid", "band", "smallcap_candidate", "recall_channel"]
+        with open(_uf6, "w", newline="", encoding="utf-8") as _ufh:
+            _w = _csv6.DictWriter(_ufh, fieldnames=_ufields)
+            _w.writeheader()
+            _w.writerows([
+                {"name": "Carriage Svcs", "ticker": "CSV", "cik": "1016281", "sic": "7200",
+                 "matched_phrase": "funeral", "flag_too_big": False, "flag_illiquid": False,
+                 "band": "deep", "smallcap_candidate": True, "recall_channel": "both"},
+                {"name": "Security Natl Fin", "ticker": "SNFCA", "cik": "318673", "sic": "6199",
+                 "matched_phrase": "funeral", "flag_too_big": False, "flag_illiquid": False,
+                 "band": "deep", "smallcap_candidate": True, "recall_channel": "fts"},
+                {"name": "Matthews Intl", "ticker": "MATW", "cik": "63296", "sic": "3360",
+                 "matched_phrase": "[sic_reverse]", "flag_too_big": False, "flag_illiquid": False,
+                 "band": "deep", "smallcap_candidate": True, "recall_channel": "sic_reverse"},
+                {"name": "Svc Corp Intl", "ticker": "SCI", "cik": "89089", "sic": "7200",
+                 "matched_phrase": "funeral", "flag_too_big": True, "flag_illiquid": False,
+                 "band": "large", "smallcap_candidate": False, "recall_channel": "both"},
+                {"name": "Hillenbrand", "ticker": "HI", "cik": "1417398", "sic": "3990",
+                 "matched_phrase": "cemetery", "flag_too_big": False, "flag_illiquid": True,
+                 "band": "unknown", "smallcap_candidate": False, "recall_channel": "fts"},
+            ])
+        _urec, _ufts, _ustg = _recall_set_from_universe_files([_uf6])
+        # Universe recall set = the names that cleared size/liquidity (smallcap_candidate True).
+        assert _urec == {"CSV", "SNFCA", "MATW"}, f"#6: universe survivor set: {_urec}"
+        # FTS-channel count: fts/both rows (CSV, SNFCA, SCI, HI) — MATW is sic_reverse-only.
+        assert _ufts == 4, f"#6: universe FTS-hit count (fts+both): {_ufts}"
+        assert _ustg["sic"] == {"CSV", "MATW", "SCI"}, f"#6: universe SIC-channel set: {_ustg['sic']}"
+        assert _ustg["mktcap_dropped"] == {"SCI", "HI"}, (
+            f"#6: size/liquidity drops attributed (NOT fts_missed): {_ustg['mktcap_dropped']}"
+        )
+        _ures = recall_at_gold(
+            "deathcare", _urec, fts_hit_count=_ufts,
+            fts_tickers=_ustg["fts"], sic_tickers=_ustg["sic"],
+            mktcap_dropped=_ustg["mktcap_dropped"], gated_out=_ustg["gated_out"],
+        )
+        # recall@gold at the universe = 5/6: the five live names recalled (recalled_final ∪
+        # sic_recovered ∪ dropped_mktcap are all recall hits at the universe level), STON the lone
+        # true leak. deathcare reads ~100% of the live names (5/6), NOT the 2/6 candidate artifact.
+        _u_sb = _ures["stage_breakdown"]
+        _u_recalled_or_dropped = (
+            set(_u_sb["recalled_final"]) | set(_u_sb["sic_recovered"]) | set(_u_sb["dropped_mktcap"])
+        )
+        assert len(_u_recalled_or_dropped) == 5, (
+            f"#6: 5/6 gold present in universe (only STON missing), got {sorted(_u_recalled_or_dropped)}"
+        )
+        # THE CORE ASSERTION (#6): a size-capped (SCI) and a burn/liquidity-rejected (HI) gold
+        # member are attributed to dropped_mktcap, NOT fts_missed.
+        assert "SCI" in _u_sb["dropped_mktcap"], "#6: size-capped SCI must attribute to dropped_mktcap, not fts_missed"
+        assert "HI" in _u_sb["dropped_mktcap"], "#6: liquidity-dropped HI must attribute to dropped_mktcap, not fts_missed"
+        assert "SCI" not in _u_sb["fts_missed"] and "HI" not in _u_sb["fts_missed"], (
+            "#6: recalled-then-dropped gold members must NEVER land in fts_missed"
+        )
+        # MATW: SIC-reverse recall (FTS missed it, the floor caught it) AND it survived size/
+        # liquidity into the candidate set -> recalled_final (a survivor wins over the channel
+        # tag; pipeline-priority order). The SIC-floor credit is that it was recalled at all —
+        # visible in the sic channel set (asserted above) — not lost to fts_missed.
+        assert "MATW" in _u_sb["recalled_final"], (
+            f"#6: SIC-recovered survivor MATW must be recalled_final: {_u_sb['recalled_final']}"
+        )
+        assert "MATW" in _ustg["sic"] and "MATW" not in _ustg["fts"], (
+            "#6: MATW must be credited to the SIC floor (sic channel, FTS missed it)"
+        )
+        assert _u_sb["fts_missed"] == ["STON"], (
+            f"#6: only the delisted STON is the true recall leak: {_u_sb['fts_missed']}"
+        )
+        # Deathcare reads ~100% of the LIVE names at universe level (5 of the 5 non-delisted gold).
+        _live_recall = len(_u_recalled_or_dropped) / 5.0
+        assert _live_recall == 1.0, f"#6: deathcare live-name recall must be ~100% at universe, got {_live_recall}"
+        # The universe view STRICTLY improves on the candidates view (more recall, fewer false leaks).
+        assert _ures["recall_at_gold"] > _cres["recall_at_gold"], (
+            "#6: universe recall@gold must exceed the post-filter candidate artifact"
+        )
+        assert len(_u_sb["fts_missed"]) < len(_cres["stage_breakdown"]["fts_missed"]), (
+            "#6: universe must attribute fewer names to fts_missed than the candidates file"
+        )
+
+        # cmd_recall_gold dispatch contract: --universe is the preferred source; a candidates file
+        # passed alongside contributes ONLY gated_out (deep-dive stage invisible to the universe)
+        # and can NEVER demote a universe recall into fts_missed.
+        class _A6:
+            theme = "deathcare"
+            universe = [str(_uf6)]
+            recall_gold = [str(_cf6)]
+        cmd_recall_gold(_A6())  # smoke: must not raise; merges gated_out from candidates
+        # universe-only also dispatches (recall_gold None).
+        class _A6b:
+            theme = "deathcare"
+            universe = [str(_uf6)]
+            recall_gold = None
+        cmd_recall_gold(_A6b())
+        # Merge keeps universe recall intact: a name dropped on mktcap in the universe stays
+        # dropped_mktcap even if the candidates file never lists it (no demotion to fts_missed).
+        _, _, _merge_cand = _recall_set_from_candidate_files([_cf6])
+        _ustg["gated_out"] |= _merge_cand["gated_out"]
+        _mres = recall_at_gold(
+            "deathcare", _urec, fts_hit_count=_ufts,
+            fts_tickers=_ustg["fts"], sic_tickers=_ustg["sic"],
+            mktcap_dropped=_ustg["mktcap_dropped"], gated_out=_ustg["gated_out"],
+        )
+        assert "SCI" in _mres["stage_breakdown"]["dropped_mktcap"], (
+            "#6: candidates merge must not demote a universe dropped_mktcap name to fts_missed"
+        )
+    print("  v0.3.1 #6 recall@gold: UNIVERSE source — size/burn drops attributed to true stage "
+          "(deathcare 5/6 live=100% at universe vs 2/6 candidate artifact)  OK")
+
     # --- P15/P16/P17 (FIREWALL): signals_snapshot is RECORDED-BUT-INERT ---
     # The diagnostic side-channel may be SNAPSHOT into a verdict row for FUTURE per-signal Brier
     # calibration, but it must NEVER change implied_prob, rating, or any scoring. These tests
@@ -1914,8 +2188,15 @@ def main() -> None:
                          "data_false_positive (P12d). Idempotent. Kept out of the price-Brier.")
     ap.add_argument("--recall-gold", nargs="+", dest="recall_gold", metavar="CANDIDATES_JSON",
                     help="P8: compute recall@gold for --theme against its hand-built gold "
-                         "true-member list, reading the run's recall set from one or more "
-                         "candidate JSON files (FTS ∪ SIC-reverse union).")
+                         "true-member list. Reads the POST-FILTER candidate set — prefer "
+                         "--universe for a true recall floor (v0.3.1 #6). When passed with "
+                         "--universe, contributes only its deep-dive gated_out stage.")
+    ap.add_argument("--universe", nargs="+", dest="universe", metavar="UNIVERSE_CSV",
+                    help="v0.3.1 #6: compute recall@gold against the UNIVERSE CSV(s) discover.py "
+                         "emits (raw FTS ∪ SIC-reverse, pre band/burn/liquidity). The correct "
+                         "recall denominator — credits the SIC floor and attributes size-capped / "
+                         "burn-rejected gold members to their true loss stage. Use with "
+                         "--recall-gold (--theme required).")
     ap.add_argument("--selftest", action="store_true",
                     help="Run synthetic Brier math selftest (no network)")
     args = ap.parse_args()
@@ -1949,7 +2230,7 @@ def main() -> None:
         cmd_backfill_validation_fp(args)
         return
 
-    if args.recall_gold:
+    if args.recall_gold or getattr(args, "universe", None):
         cmd_recall_gold(args)
         return
 
