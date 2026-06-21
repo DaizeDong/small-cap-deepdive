@@ -34,6 +34,45 @@ def init_edgar() -> None:
     from edgar import set_identity
     set_identity(CFG["sec_user_agent"])
 
+
+# ---------------------------------------------------------------------------
+# Concurrency isolation (v0.3.2 backlog #10) — run-state must never be a single
+# shared path.
+#
+# A previous implementation parked run-state in a fixed /tmp/smallcap_run.txt.
+# Two agents running different themes CONCURRENTLY clobbered each other's
+# run-state (observed: cdmo-cro / railcar / space-economy collisions). The fix:
+# the run-state file is namespaced — per SMALLCAP_RUN batch when one is active,
+# else PID-unique — so concurrent agents never write the same path. It lives
+# INSIDE the active run dir (REPORTS) when batched, keeping a run self-contained;
+# only the unbatched/legacy path falls back to the system temp dir, and even then
+# it is PID-stamped, never the old fixed /tmp/smallcap_run.txt.
+# ---------------------------------------------------------------------------
+
+def run_state_path(run: str | None = None, pid: int | None = None) -> Path:
+    """Return a NON-shared run-state file path for the active run / process.
+
+    Resolution (never a single fixed cross-agent path):
+      1. SMALLCAP_RUN active (arg `run` or env) -> <REPORTS>/_run_state.txt, i.e.
+         scoped to THIS run's batch dir so a concurrent run with a different
+         SMALLCAP_RUN writes a different file.
+      2. No active run (flat/legacy) -> <system temp>/smallcap_run_<pid>.txt,
+         PID-unique so concurrent unbatched agents do not clobber each other.
+
+    `run` / `pid` are injectable for the selftest (so it can prove two distinct
+    runs / PIDs resolve to two distinct paths offline). Never returns the legacy
+    shared "/tmp/smallcap_run.txt".
+    """
+    import tempfile
+    run = (run if run is not None else os.environ.get("SMALLCAP_RUN", "")).strip().strip("/\\")
+    if run:
+        base = Path(CFG["output_dir"]) / run
+        base.mkdir(parents=True, exist_ok=True)
+        return base / "_run_state.txt"
+    if pid is None:
+        pid = os.getpid()
+    return Path(tempfile.gettempdir()) / f"smallcap_run_{pid}.txt"
+
 def slug(name: str) -> str:
     return re.sub(r"\W+", "_", str(name).lower())[:40].strip("_")
 
@@ -195,8 +234,35 @@ def _selftest() -> None:
     assert band_for(_mcb, 2e9, 5e9) == "large", (
         "P12: an oversize reconstructed mktcap bands 'large' only AFTER resolution (correct order)")
 
+    # -----------------------------------------------------------------------
+    # v0.3.2 #10 — run-state must be PID-unique / per-SMALLCAP_RUN, never a single
+    # shared /tmp path. Two distinct runs (and two distinct PIDs) must NOT collide.
+    # Override output_dir to a temp dir so the selftest never pollutes real reports/.
+    # -----------------------------------------------------------------------
+    import tempfile as _tf
+    _orig_outdir = CFG["output_dir"]
+    with _tf.TemporaryDirectory() as _rs_tmp:
+        CFG["output_dir"] = _rs_tmp
+        try:
+            p_a = run_state_path(run="2026-06-20_themeA")
+            p_b = run_state_path(run="2026-06-20_themeB")
+            assert p_a != p_b, f"#10: distinct SMALLCAP_RUN must give distinct run-state paths: {p_a} == {p_b}"
+            assert p_a.name == "_run_state.txt" and p_b.name == "_run_state.txt", "#10: batched run-state filename"
+            assert "2026-06-20_themeA" in str(p_a) and "2026-06-20_themeB" in str(p_b), (
+                "#10: batched run-state must be scoped under its own run dir")
+        finally:
+            CFG["output_dir"] = _orig_outdir
+    # PID-unique fallback for the unbatched/legacy (no SMALLCAP_RUN) path.
+    p_pid1 = run_state_path(run="", pid=11111)
+    p_pid2 = run_state_path(run="", pid=22222)
+    assert p_pid1 != p_pid2, f"#10: distinct PIDs must give distinct run-state paths: {p_pid1} == {p_pid2}"
+    assert p_pid1.name == "smallcap_run_11111.txt", f"#10: PID-unique run-state name: {p_pid1.name}"
+    # The legacy shared path is GONE: no resolution may produce /tmp/smallcap_run.txt.
+    assert p_pid1.name != "smallcap_run.txt" and p_a.name != "smallcap_run.txt", (
+        "#10: must never resolve to the legacy shared /tmp/smallcap_run.txt")
+
     print("_common selftest PASS (P5 resolve_mktcap fallback chain + band_for unknown flow-through "
-          "+ P12 resolve-then-band ordering)")
+          "+ P12 resolve-then-band ordering + #10 run-state isolation)")
 
 
 if __name__ == "__main__":

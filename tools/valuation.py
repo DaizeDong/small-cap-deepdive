@@ -245,6 +245,15 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # surfaced in data_quality so a PM sees the unquantified concentration; does NOT gate.
     if der.get("concentration_unquantified"):
         dq.append("concentration_unquantified:text_flag_true_but_xbrl_magnitude_null")
+    # v0.3.2 #11: foreign_filer_unvaluable — a 20-F/40-F filer whose revenue/net-income/OCF were
+    # STILL empty after the producer's us-gaap+ifrs-full concept cascade. Surface it as an EXPLICIT
+    # data-quality label so the abstain reads "foreign filer — un-valuable from EDGAR" instead of a
+    # bare intrinsic_band_unavailable null. Label-only here; the null MoS already gates buy_eligible
+    # via not_assessable_no_intrinsic_band (no separate BUY gate needed — never a false BUY).
+    _foreign_filer_unvaluable = bool(der.get("foreign_filer_unvaluable", False))
+    if _foreign_filer_unvaluable:
+        _ffu_detail = der.get("foreign_filer_unvaluable_detail", "")
+        dq.append(f"foreign_filer_unvaluable:{_ffu_detail}")
 
     # --- C2: financial-SIC guard — exclude financial sector from FCF-cap model ---
     # SIC prefixes: 60=banks, 61=non-depository credit, 63=insurance carriers,
@@ -416,6 +425,21 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         if debt_to_assets > 0.62:
             fcf_cap_model_unsuitable = True
             dq.append(f"fcf_cap_model_unsuitable:debt_to_assets={debt_to_assets:.4f}>0.62")
+
+    # --- v0.3.2 #8: lessor / leasing-business NAV routing (debt/assets<0.62 hole) ---
+    # Asset-heavy lessors (railcar/equipment/auto) are textbook lease-fleet NAV candidates, but
+    # their balance sheets sit BELOW the 0.62 debt/assets threshold (GBX 0.41, RAIL 0.35), so the
+    # FCF-cap firewall above did not route them to NAV — they were mis-valued on trough-cycle FCF.
+    # The producer (deepdive_data.py) emits derived.lessor_asset_heavy=True on a leasing/rental
+    # business signal (leasing SIC, lease-income concept, or very-high PP&E/lease-fleet ratio with
+    # rental revenue). Consume it here: a lessor forces fcf_cap_model_unsuitable=True (-> lease-fleet
+    # NAV basis) EVEN WHEN debt/assets<0.62. This NEVER manufactures a BUY — it only routes a name
+    # AWAY from the FCF-cap path toward NAV/abstain. This is the consumer half of the #8 contract.
+    _lessor_asset_heavy = bool(der.get("lessor_asset_heavy", False))
+    if _lessor_asset_heavy and not fcf_cap_model_unsuitable:
+        fcf_cap_model_unsuitable = True  # route to lease-fleet NAV instead of trough-cycle FCF
+        _lessor_detail = der.get("lessor_asset_heavy_detail", "")
+        dq.append(f"lessor_asset_heavy_fcf_unsuitable_route_nav:{_lessor_detail}")
 
     # --- C1 data-quality blocks on valuation routing ---
     # If debt_truncation or wrong_entity detected, treat EV/MoS as unreliable.
@@ -791,6 +815,11 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "reverse_dcf_null_reason": rdcf_null_reason,
         # Asset-heavy / model suitability
         "fcf_cap_model_unsuitable": fcf_cap_model_unsuitable,
+        # v0.3.2 #8: lessor_asset_heavy (read from producer derived). When True, this name was
+        # routed to NAV/abstain (fcf_cap_model_unsuitable forced True) EVEN at debt/assets<0.62 —
+        # the GBX/RAIL lease-fleet NAV fix. Surfaced so the report can say "lessor -> NAV basis".
+        "lessor_asset_heavy": _lessor_asset_heavy,
+        "lessor_asset_heavy_detail": der.get("lessor_asset_heavy_detail") if _lessor_asset_heavy else None,
         "latest_assets": round(latest_assets) if latest_assets is not None else None,
         "latest_total_debt_for_nav": round(latest_debt) if latest_debt is not None else None,
         # FCF intrinsic value band (meaningful only when mos_basis == "fcf_cap")
@@ -836,6 +865,11 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "concentration_unquantified": bool(der.get("concentration_unquantified", False)),
         # P-G: filing-form provenance (10-K/20-F/40-F) for the trust banner
         "form_used": der.get("form_used"),
+        # v0.3.2 #11: foreign_filer_unvaluable (read from producer derived) — a 20-F/40-F filer whose
+        # financials stayed empty even after the us-gaap+ifrs-full cascade. Explicit abstain label
+        # for the report/banner so it is NOT a silent intrinsic_band_unavailable null.
+        "foreign_filer_unvaluable": _foreign_filer_unvaluable,
+        "foreign_filer_unvaluable_detail": der.get("foreign_filer_unvaluable_detail") if _foreign_filer_unvaluable else None,
         # P3: concentration kill/watch (read from producer derived)
         "concentration_flag": _concentration_flag,
         "top_customer_pct": der.get("top_customer_pct"),
@@ -1981,6 +2015,150 @@ def _selftest():
         "#9 INVARIANT: buy_eligible=True with margin_of_safety_pct=None is forbidden"
     )
     print("  #9 null-MoS: no intrinsic band -> not_assessable_no_intrinsic_band, buy_eligible=False  OK")
+
+    # --- v0.3.2 #8: lessor_asset_heavy forces NAV routing at debt/assets<0.62 (GBX/RAIL hole) ---
+    # GBX-shape lessor: leasing signal present, but debt/assets=0.41 (below the 0.62 firewall) and
+    # non-financial SIC. Without #8 it would route fcf_cap (mis-valued on trough FCF). The producer
+    # derived.lessor_asset_heavy=True MUST force fcf_cap_model_unsuitable=True -> nav/abstain.
+    _dd_lessor = dict(_dd_clean_base)
+    _dd_lessor["derived"] = dict(_dd_clean_base["derived"])
+    _dd_lessor["ticker"] = "TEST_LESSOR_GBX"
+    _dd_lessor["derived"]["sic"] = "3743"               # railroad equipment — non-financial prefix
+    _dd_lessor["derived"]["lessor_asset_heavy"] = True
+    _dd_lessor["derived"]["lessor_asset_heavy_detail"] = "lessor_sic:3743;ppe_fleet_ratio=0.70>0.55+rental_rev"
+    # debt/assets = 410M/1000M = 0.41 < 0.62 (the firewall would NOT route this without #8).
+    _dd_lessor["derived"]["latest_total_debt"] = 410_000_000
+    _dd_lessor["financials"] = dict(_dd_clean_base["financials"])
+    _dd_lessor["financials"]["assets"] = [{"end": "2024-12-31", "val": 1_000_000_000}]
+    _dd_lessor["financials"]["equity"] = [{"end": "2024-12-31", "val": 400_000_000}]
+    _block_lessor = compute_valuation(_dd_lessor, 300_000_000, cfg)
+    # Sanity: debt/assets really is below the 0.62 firewall, so the routing is ATTRIBUTABLE to #8.
+    assert (410_000_000 / 1_000_000_000) < 0.62, "#8 fixture: debt/assets must be <0.62 to prove the hole"
+    assert _block_lessor.get("lessor_asset_heavy") is True, (
+        f"#8: lessor_asset_heavy must propagate to the block, got {_block_lessor.get('lessor_asset_heavy')}"
+    )
+    assert _block_lessor.get("fcf_cap_model_unsuitable") is True, (
+        f"#8 CRITICAL: a lessor (debt/assets=0.41<0.62) must force fcf_cap_model_unsuitable=True "
+        f"(route to lease-fleet NAV), got {_block_lessor.get('fcf_cap_model_unsuitable')}"
+    )
+    assert _block_lessor.get("mos_basis") in ("nav", "abstain"), (
+        f"#8: a lessor must route nav/abstain (NOT trough-cycle fcf_cap), "
+        f"got {_block_lessor.get('mos_basis')!r}"
+    )
+    assert any("lessor_asset_heavy_fcf_unsuitable_route_nav" in str(x)
+               for x in _block_lessor.get("data_quality", [])), (
+        f"#8: routing reason must be in data_quality, got {_block_lessor.get('data_quality')}"
+    )
+    # Negative control: the SAME fixture WITHOUT the lessor flag (and below 0.62) routes fcf_cap —
+    # proving the routing is driven by lessor_asset_heavy, not by the debt/assets ratio.
+    _dd_not_lessor = dict(_dd_lessor)
+    _dd_not_lessor["derived"] = dict(_dd_lessor["derived"])
+    _dd_not_lessor["ticker"] = "TEST_NOT_LESSOR"
+    _dd_not_lessor["derived"]["lessor_asset_heavy"] = False
+    _dd_not_lessor["derived"]["lessor_asset_heavy_detail"] = None
+    _block_not_lessor = compute_valuation(_dd_not_lessor, 300_000_000, cfg)
+    assert _block_not_lessor.get("fcf_cap_model_unsuitable") is False, (
+        f"#8 control: a NON-lessor at debt/assets=0.41 must STAY fcf_cap (firewall not tripped), "
+        f"got {_block_not_lessor.get('fcf_cap_model_unsuitable')}"
+    )
+    assert _block_not_lessor.get("mos_basis") == "fcf_cap", (
+        f"#8 control: non-lessor at 0.41 debt/assets must route fcf_cap, "
+        f"got {_block_not_lessor.get('mos_basis')!r}"
+    )
+    assert _block_not_lessor.get("lessor_asset_heavy") is False, (
+        "#8 control: lessor_asset_heavy must be False on the non-lessor block"
+    )
+    print("  #8 lessor_asset_heavy: GBX-shape (debt/assets=0.41) forces NAV routing; "
+          "non-lessor at 0.41 stays fcf_cap  OK")
+
+    # #8 second contract data point (RAIL, debt/assets=0.35): the spec names BOTH GBX (0.41) and
+    # RAIL (0.35) as asset-heavy lessors sitting below the 0.62 firewall. Assert the lower 0.35
+    # value explicitly so the consumer is proven across the whole sub-firewall band, not just 0.41.
+    _dd_rail = dict(_dd_clean_base)
+    _dd_rail["derived"] = dict(_dd_clean_base["derived"])
+    _dd_rail["ticker"] = "TEST_LESSOR_RAIL"
+    _dd_rail["derived"]["sic"] = "7359"                  # equipment rental/leasing — non-financial prefix
+    _dd_rail["derived"]["lessor_asset_heavy"] = True
+    _dd_rail["derived"]["lessor_asset_heavy_detail"] = "lessor_sic:7359;operating_lease_income_concept+rental_rev"
+    # debt/assets = 350M/1000M = 0.35 < 0.62 (firewall would NOT route this without #8).
+    _dd_rail["derived"]["latest_total_debt"] = 350_000_000
+    _dd_rail["financials"] = dict(_dd_clean_base["financials"])
+    _dd_rail["financials"]["assets"] = [{"end": "2024-12-31", "val": 1_000_000_000}]
+    _dd_rail["financials"]["equity"] = [{"end": "2024-12-31", "val": 450_000_000}]
+    _block_rail = compute_valuation(_dd_rail, 300_000_000, cfg)
+    assert (350_000_000 / 1_000_000_000) == 0.35, "#8 RAIL fixture: debt/assets must be exactly 0.35"
+    assert _block_rail.get("lessor_asset_heavy") is True, (
+        f"#8 RAIL: lessor_asset_heavy must propagate, got {_block_rail.get('lessor_asset_heavy')}"
+    )
+    assert _block_rail.get("fcf_cap_model_unsuitable") is True, (
+        f"#8 RAIL CRITICAL: a lessor at debt/assets=0.35<0.62 must force fcf_cap_model_unsuitable=True, "
+        f"got {_block_rail.get('fcf_cap_model_unsuitable')}"
+    )
+    assert _block_rail.get("mos_basis") == "nav", (
+        f"#8 RAIL: a lessor with equity present must route mos_basis='nav' (not fcf_cap/abstain), "
+        f"got {_block_rail.get('mos_basis')!r}"
+    )
+    assert _block_rail.get("margin_of_safety_pct") is None, (
+        f"#8 RAIL: FCF margin_of_safety_pct must be null when routed to NAV, "
+        f"got {_block_rail.get('margin_of_safety_pct')}"
+    )
+    assert any("lessor_asset_heavy_fcf_unsuitable_route_nav" in str(x)
+               for x in _block_rail.get("data_quality", [])), (
+        f"#8 RAIL: routing reason must surface in data_quality, got {_block_rail.get('data_quality')}"
+    )
+    # Normal-name control restated at 0.35: the clean (non-lessor) fixture is unchanged — proving
+    # the NAV routing is attributable to lessor_asset_heavy, never to the sub-firewall ratio itself.
+    assert _block_clean.get("lessor_asset_heavy") is False, (
+        f"#8: a normal name must have lessor_asset_heavy=False, got {_block_clean.get('lessor_asset_heavy')}"
+    )
+    assert _block_clean.get("mos_basis") == "fcf_cap", (
+        f"#8: a normal name must stay mos_basis='fcf_cap' (unchanged), got {_block_clean.get('mos_basis')!r}"
+    )
+    assert not any("lessor_asset_heavy" in str(x) for x in _block_clean.get("data_quality", [])), (
+        "#8: a normal name must NOT emit any lessor_asset_heavy data_quality line"
+    )
+    print("  #8 RAIL-shape (debt/assets=0.35) forces mos_basis=nav; normal name stays fcf_cap unchanged  OK")
+
+    # --- v0.3.2 #11: foreign_filer_unvaluable is surfaced as an explicit abstain label ---
+    # A 20-F filer whose financials stayed empty after the producer's IFRS cascade emits
+    # derived.foreign_filer_unvaluable=True. valuation MUST surface it in the block + data_quality
+    # so the abstain is CLEARLY labeled (not a silent intrinsic_band_unavailable null). It is a
+    # LABEL only — the null MoS still gates buy_eligible via not_assessable (no false BUY).
+    _dd_ffu = dict(_dd_no_band)                          # no-band fixture => null MoS already
+    _dd_ffu["derived"] = dict(_dd_no_band["derived"])
+    _dd_ffu["ticker"] = "TEST_FOREIGN_UNVALUABLE"
+    _dd_ffu["derived"]["form_used"] = "20-F"
+    _dd_ffu["derived"]["foreign_filer_unvaluable"] = True
+    _dd_ffu["derived"]["foreign_filer_unvaluable_detail"] = (
+        "foreign filer (form=20-F) returned EMPTY revenue/net-income/OCF even after the "
+        "us-gaap+ifrs-full concept cascade — un-valuable from EDGAR (graceful abstain)"
+    )
+    _block_ffu = compute_valuation(_dd_ffu, 120_000_000, cfg)
+    assert _block_ffu.get("foreign_filer_unvaluable") is True, (
+        f"#11: foreign_filer_unvaluable must propagate to the block, "
+        f"got {_block_ffu.get('foreign_filer_unvaluable')}"
+    )
+    assert _block_ffu.get("foreign_filer_unvaluable_detail"), (
+        "#11: the explicit detail string must be surfaced (not a silent null)"
+    )
+    assert any("foreign_filer_unvaluable" in str(x) for x in _block_ffu.get("data_quality", [])), (
+        f"#11: foreign_filer_unvaluable must be an explicit data_quality label, "
+        f"got {_block_ffu.get('data_quality')}"
+    )
+    # Graceful abstain, never a false BUY: the null MoS still gates buy_eligible.
+    assert _block_ffu.get("buy_eligible") is False, (
+        "#11 CRITICAL: a foreign un-valuable filer (null MoS) must NEVER be buy_eligible"
+    )
+    # Negative control: a domestic 10-K name must NOT carry the foreign label.
+    assert _block_clean.get("foreign_filer_unvaluable") is False, (
+        f"#11 control: a domestic 10-K name must have foreign_filer_unvaluable=False, "
+        f"got {_block_clean.get('foreign_filer_unvaluable')}"
+    )
+    assert not any("foreign_filer_unvaluable" in str(x) for x in _block_clean.get("data_quality", [])), (
+        "#11 control: a domestic filer must NOT emit the foreign_filer_unvaluable label"
+    )
+    print("  #11 foreign_filer_unvaluable: 20-F empty-after-IFRS labeled explicitly + buy_eligible=False; "
+          "domestic 10-K clean  OK")
 
     print("\nvaluation selftest PASS")
 

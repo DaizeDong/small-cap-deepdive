@@ -23,7 +23,8 @@ Given a `deepdive_<ticker>_<date>.json` (produced by `deepdive_data.py`) and a c
 | `normalized_fcf` | Trailing N-year average FCF | Same normalization logic |
 | `rdcf_basis` | `"equity_fcf_vs_market_cap"` | Denominator basis for the reverse-DCF computation |
 | `reverse_dcf_implied_growth` | g = discount_rate − norm_fcf / market_cap | Levered (equity) FCF vs market cap; null with reason if FCF ≤ 0, market_cap ≤ 0, or g ≥ discount_rate |
-| `fcf_cap_model_unsuitable` | total_debt / total_assets > 0.62 | True for aircraft lessors, finance cos; triggers NAV path |
+| `fcf_cap_model_unsuitable` | total_debt / total_assets > 0.62 **OR** `lessor_asset_heavy == true` | True for aircraft lessors, finance cos; triggers NAV path. **v0.3.2 #8:** `lessor_asset_heavy` (read from deepdive `derived`) forces this true EVEN BELOW the 0.62 threshold — asset-heavy lessors are valued on lease-fleet NAV, not trough-cycle FCF (see "Lessor NAV routing" below) |
+| `lessor_asset_heavy` | bool (deepdive `derived`) | A leasing/rental-business signal emitted by `deepdive_data.py`: leasing/rental SIC OR a lease-income revenue concept OR a very high PP&E / lease-fleet ratio with rental/lease revenue. Read by `valuation.py` (v0.3.2 #8); when true forces `fcf_cap_model_unsuitable = true` (NAV route) regardless of debt/assets |
 | `intrinsic_value_band` | norm_fcf / cap_rate − net_debt | Low end: cap_rate_high (12%); high end: cap_rate_low (9%); present for all companies (even unsuitable ones) when FCF > 0 |
 | `nav_intrinsic_band` | tangible_equity × [0.80, 1.05] | Only computed when fcf_cap_model_unsuitable = true |
 | `mos_basis` | `"fcf_cap"` / `"nav"` / `"abstain"` | Routing signal — see Phase 3 contract below |
@@ -78,6 +79,39 @@ This is a hard contract — no exceptions based on narrative or management expla
 - **Report only:** `ev_ebitda` and `ev_sales` for relative comparison against peers.
 - **Do NOT** report either `margin_of_safety_pct` or `nav_margin_of_safety_pct` as meaningful
   signals.
+
+---
+
+## Lessor NAV Routing — `lessor_asset_heavy` (v0.3.2 #8)
+
+**The hole it closes.** The NAV path was gated on a single threshold: `total_debt / total_assets >
+0.62`. That works for aircraft lessors and finance cos that fund their fleets with heavy debt, but
+it mis-routes asset-heavy *lessors that fund their fleet with equity / moderate leverage*. The
+canonical misses are the railcar lessors: **GBX (Greenbrier, debt/assets = 0.41)** and **RAIL
+(FreightCar America, 0.35)** both fall *below* 0.62, so v0.3.1 valued them on trough-cycle
+normalized FCF instead of their lease-fleet NAV — GBX's 17,000-car fleet is a textbook NAV
+candidate that was left mis-valued (backlog #8). The 0.62 debt ratio is the wrong discriminator for
+a lessor: the right one is *whether the business is a leasing/rental fleet at all*.
+
+**The signal.** `deepdive_data.py` emits `lessor_asset_heavy` (bool) into `derived` — a
+leasing/rental-business signal that fires on ANY of:
+- a leasing/rental **SIC** in `{6726, 7377, 4741, 6159, 7359}` (investment/lease holdcos, computer
+  rental/leasing, railroad-car rental, agency lease credit, equipment rental & leasing nec); OR
+- an **operating-/finance-lease-income revenue concept** present in the filing's XBRL; OR
+- a very high **PP&E (or lease-fleet) / total-assets ratio** combined with rental/lease revenue.
+
+The reason string is recorded in `lessor_asset_heavy_detail`.
+
+**The routing.** `valuation.py` reads `derived.lessor_asset_heavy`; when it is true it forces
+`fcf_cap_model_unsuitable = true` — routing the name to the **NAV path (`mos_basis = "nav"`, or
+`"abstain"` when tangible equity is unavailable)** EVEN IF `total_debt / total_assets < 0.62`. It
+appends `lessor_asset_heavy_fcf_unsuitable_route_nav:<detail>` to `data_quality` so the NAV routing
+is auditable and attributable to the lessor signal (not to the debt ratio). GBX and RAIL therefore
+value on **lease-fleet NAV**, not phantom trough-cycle FCF. This is a routing change only — it
+moves a name from FCF-cap to NAV; it never manufactures a BUY (the NAV path still requires
+`nav_margin_of_safety_pct ≥ 30%`, zero kill-flags, `buy_eligible == true`, and the 0.6 confidence
+down-weight). A normal industrial with no leasing signals keeps `lessor_asset_heavy = false` and is
+unaffected.
 
 ---
 
@@ -216,6 +250,18 @@ All inputs come from SEC/XBRL (T1) except market cap (yfinance or override):
 
 The `debt_source` and `da_source` fields in `derived` document which fallback level was used.
 
+**Foreign-filer IFRS recovery (v0.3.2 #11).** Whole 20-F / 40-F cohorts previously returned empty
+financials because their XBRL is tagged under the `ifrs-full` taxonomy, not `us-gaap` — yielding
+`intrinsic_band_unavailable` for the entire cohort. `deepdive_data.py` now extends the XBRL concept
+cascade for the most common IFRS tags (`ifrs-full` `Revenue`, `ProfitLoss`,
+`CashFlowsFromUsedInOperatingActivities`, and equivalents) so SOME foreign filers recover (the
+`us-gaap` path is tried first; IFRS only fills genuine gaps). When financials are STILL empty for a
+foreign filer after the cascade, the producer emits `foreign_filer_unvaluable` (bool) so the abstain
+is CLEARLY labeled rather than a silent null — see the data-quality flag below and the
+`foreign_filer_unvaluable` paragraph in `judgment-rubric.md`. This is a tractable XBRL-tag
+extension only; it does NOT attempt full financial-statement document parsing. The abstain stays
+graceful — never a crash, never a false BUY.
+
 **Empirical notes from probing WLFC and LNN:**
 - WLFC (CIK 1018164): `LongTermDebt` available (no split concepts); `DepreciationDepletionAndAmortization` and `DepreciationAndAmortization` both present (merged). Debt/assets ~67% → `fcf_cap_model_unsuitable = true`.
 - LNN (CIK 836157): both `LongTermDebtNoncurrent` + `LongTermDebtCurrent` available; only `DepreciationAndAmortization` present. Normal industrial → `fcf_cap_model_unsuitable = false`, `mos_basis = "fcf_cap"`.
@@ -272,6 +318,8 @@ This table is the canonical list of ALL flags emitted by `compute_valuation()`:
 | `rdcf_implied_growth_very_negative:...` | Reverse-DCF g < −20%; market pricing in steep decline |
 | `rdcf_implied_growth_very_high:...` | Reverse-DCF g > 20%; market pricing in very high growth |
 | `fcf_cap_model_unsuitable:debt_to_assets=<x>>0.62` | Debt/assets > 62%; FCF-cap model not appropriate; NAV path used |
+| `lessor_asset_heavy_fcf_unsuitable_route_nav:<detail>` | v0.3.2 #8 — `derived.lessor_asset_heavy == true` forced `fcf_cap_model_unsuitable = true` (NAV route) EVEN BELOW the 0.62 debt/assets threshold; an asset-heavy lessor (GBX 0.41 / RAIL 0.35) valued on lease-fleet NAV, not trough-cycle FCF. `<detail>` names the firing signal (leasing/rental SIC, lease-income concept, or PP&E/fleet ratio + rental revenue) |
+| `foreign_filer_unvaluable:<detail>` | v0.3.2 #11 — a 20-F / 40-F foreign filer whose revenue / net-income / OCF were STILL empty after the us-gaap + ifrs-full concept cascade; the abstain is explicitly labeled "foreign filer — un-valuable from EDGAR" instead of a bare `intrinsic_band_null`. Label-only; the null MoS already forces `buy_eligible = false` via `not_assessable_no_intrinsic_band` (no separate BUY gate; never a false BUY) |
 | `net_debt_excludes_cash` | Net debt = total_debt only (cash unavailable) |
 | `net_debt_excludes_debt_liabilities` | Net debt computed as −cash (debt unavailable) |
 | `nav_goodwill_or_intangibles_unavailable:...` | Goodwill or intangibles absent; tangible equity uses book equity as proxy |
