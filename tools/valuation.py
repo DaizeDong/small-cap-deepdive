@@ -36,140 +36,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import CFG, REPORTS, init_edgar, today
 
-
-# ---------------------------------------------------------------------------
-# Config defaults (overridable via config.json)
-# ---------------------------------------------------------------------------
-_VALUATION_DEFAULTS = {
-    "wacc": 0.10,
-    "cap_rate_low": 0.09,    # low cap rate → HIGH equity value (optimistic end)
-    "cap_rate_high": 0.12,   # high cap rate → LOW equity value (conservative end)
-    "normalize_years": 5,
-    "cyclical_cv_threshold": 0.25,
-}
-
-
-def _val_cfg() -> dict:
-    """Merge valuation config keys from CFG with defaults."""
-    defaults = dict(_VALUATION_DEFAULTS)
-    for k in defaults:
-        if k in CFG:
-            defaults[k] = float(CFG[k])
-    return defaults
-
-
-# ---------------------------------------------------------------------------
-# Market cap resolution
-# ---------------------------------------------------------------------------
-def _get_market_cap(ticker: str, mktcap_override: int | None = None) -> tuple[int | None, str]:
-    """Return (market_cap_in_dollars, source_label).
-
-    Priority: explicit --mktcap override > yfinance live quote.
-    Returns (None, reason) if unavailable.
-    """
-    if mktcap_override is not None:
-        return mktcap_override, "override"
-    try:
-        import yfinance as yf
-        info = yf.Ticker(ticker).info
-        mc = info.get("marketCap")
-        if mc and mc > 0:
-            return int(mc), "yfinance"
-        return None, "yfinance_returned_null"
-    except Exception as e:
-        return None, f"yfinance_error:{e}"
-
-
-# ---------------------------------------------------------------------------
-# Cyclicality test
-# ---------------------------------------------------------------------------
-def _coefficient_of_variation(series: list) -> float | None:
-    """Compute CV = std/mean for a numeric list. Returns None if insufficient data."""
-    vals = [v for v in series if v is not None]
-    if len(vals) < 3:
-        return None
-    mean = statistics.mean(vals)
-    if mean == 0:
-        return None
-    stdev = statistics.stdev(vals)
-    return stdev / abs(mean)
-
-
-def _is_cyclical(ebitda_series: list[dict], revenue_series: list[dict], threshold: float) -> tuple[bool, float | None]:
-    """Return (cyclical_flag, cv_used).
-
-    Uses EBITDA series if >=3 data points; falls back to revenue if EBITDA insufficient.
-    Returns (False, None) if neither series has >=3 points.
-    """
-    ebitda_vals = [v["val"] for v in ebitda_series if v.get("val") is not None]
-    if len(ebitda_vals) >= 3:
-        cv = _coefficient_of_variation(ebitda_vals)
-        return (cv is not None and cv > threshold), cv
-    # Fallback: revenue CV
-    rev_vals = [v["val"] for v in revenue_series if v.get("val") is not None]
-    if len(rev_vals) >= 3:
-        cv = _coefficient_of_variation(rev_vals)
-        return (cv is not None and cv > threshold), cv
-    return False, None
-
-
-# ---------------------------------------------------------------------------
-# Normalized metric computation
-# ---------------------------------------------------------------------------
-def _normalize(series: list[dict], n_years: int) -> float | None:
-    """Return trailing n_years average of series val. Handles partial availability."""
-    vals = [v["val"] for v in series if v.get("val") is not None]
-    if not vals:
-        return None
-    window = vals[-n_years:]
-    return statistics.mean(window)
-
-
-def _build_ebitda_series(ebit_series: list[dict], da_series: list[dict]) -> tuple[list[dict], int]:
-    """Construct year-by-year EBITDA series from EBIT and D&A series (matched by end date).
-
-    Only includes year-ends where BOTH EBIT and D&A are present — partial sums distort
-    cyclicality CV and normalization.  Year-ends with only one component are skipped;
-    the count of skipped entries is returned so the caller can flag it.
-
-    Returns (ebitda_series, n_partial_skipped).
-    The result list is sorted by end date.
-    """
-    ebit_map = {v["end"]: v["val"] for v in ebit_series}
-    da_map = {v["end"]: v["val"] for v in da_series}
-    all_ends = sorted(set(ebit_map) | set(da_map))
-    result = []
-    n_partial = 0
-    for end in all_ends:
-        e = ebit_map.get(end)
-        d = da_map.get(end)
-        if e is not None and d is not None:
-            result.append({"end": end, "val": e + d})
-        else:
-            n_partial += 1  # skip partial — do not let half-sums distort CV
-    return result, n_partial
-
-
-def _build_fcf_series(ocf_series: list[dict], capex_series: list[dict], fcf_is_proxy: bool) -> tuple[list[dict], bool]:
-    """Construct year-by-year FCF = OCF - CapEx series.
-
-    If capex_series is empty (proxy mode), returns OCF series as FCF with is_proxy=True.
-    Otherwise matches by end date; years without a capex match use OCF alone.
-    """
-    if fcf_is_proxy or not capex_series:
-        return [{"end": v["end"], "val": v["val"]} for v in ocf_series], True
-    ocf_map = {v["end"]: v["val"] for v in ocf_series}
-    capex_map = {v["end"]: v["val"] for v in capex_series}
-    # CapEx in XBRL PaymentsToAcquire... is stored as positive dollar outflow
-    result = []
-    for end in sorted(ocf_map):
-        ocf_val = ocf_map[end]
-        cx = capex_map.get(end)
-        if cx is not None:
-            result.append({"end": end, "val": ocf_val - cx})
-        else:
-            result.append({"end": end, "val": ocf_val})  # no capex matched
-    return result, False
+# Valuation model primitives extracted to a sibling module (pure mechanical move).
+# Re-exported here so any consumer importing them from `valuation` keeps working.
+from _valuation_model import (
+    _VALUATION_DEFAULTS,
+    _val_cfg,
+    _get_market_cap,
+    _coefficient_of_variation,
+    _is_cyclical,
+    _normalize,
+    _build_ebitda_series,
+    _build_fcf_series,
+)
+# buy_eligible composite (the BUY-trigger guard half) extracted to a sibling module.
+from _valuation_eligibility import compose_buy_eligibility
 
 
 # ---------------------------------------------------------------------------
@@ -738,54 +618,23 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # buy_eligible is True ONLY when every blocking guard is clear. The rubric/SKILL BUY
     # trigger additionally requires mos_basis=="fcf_cap" AND MoS>=30 AND zero Tier-3-load-
     # bearing; buy_eligible is the deterministic guard-composite half of that contract.
-    _buy_ineligible_reasons: list[str] = []
-    if _extreme_mos_review_required:
-        _buy_ineligible_reasons.append("extreme_mos_review_required")
-    if _large_cap_out_of_scope:
-        _buy_ineligible_reasons.append("large_cap_out_of_scope")
-    if _fcf_sustainability_uncertain:
-        _buy_ineligible_reasons.append("fcf_sustainability_uncertain")
-    if _financial_sic_forced_unsuitable:
-        _buy_ineligible_reasons.append("financial_sic_forced_unsuitable")
-    # A3: insurance_concepts_present gates buy_eligible (distinct from financial_sic_forced_
-    # unsuitable so the reason-string is accurate even on a non-financial SIC, e.g. BOC SIC-65).
-    if _insurance_concepts_present:
-        _buy_ineligible_reasons.append("insurance_concepts_present")
-    # A4: low_revenue_loss_ratio_extreme (|NI|/rev>20x — STSS/MVIS/TIPT tail) gates buy_eligible
-    # with the accurate label, replacing the old wrong_entity_suspected co-fire on that tail. The
-    # non-extreme low_revenue_loss_ratio (>2x) stays a data_quality label ONLY (does NOT gate).
-    if der.get("low_revenue_loss_ratio_extreme"):
-        _buy_ineligible_reasons.append("low_revenue_loss_ratio_extreme")
-    if der.get("debt_truncation_suspected"):
-        _buy_ineligible_reasons.append("debt_truncation_suspected")
-    if der.get("wrong_entity_suspected"):
-        _buy_ineligible_reasons.append("wrong_entity_suspected")
-    if _concentration_flag == "kill":
-        _buy_ineligible_reasons.append("concentration_kill")
-    if _fundamental_decline_flag:
-        _buy_ineligible_reasons.append("fundamental_decline_flag")
-    # P-A: peak_contamination_flag downgrades BUY->WATCH like fundamental_decline_flag.
-    if _peak_contamination_flag:
-        _buy_ineligible_reasons.append("peak_contamination_flag")
-    # P7: cross_source_mismatch (a >2.5x SEC-vs-yfinance disagreement on debt/revenue/shares)
-    # gates buy_eligible — a corrupted single-source number cannot back a tradeable MoS. This is
-    # a DATA-INTEGRITY gate, not a between-filings signal; gating here is intended.
-    if _cross_source_mismatch:
-        _buy_ineligible_reasons.append("cross_source_mismatch")
-    # v0.3.1 #1: normalization_masks_current_loss gates buy_eligible (downgrade BUY->WATCH). The
-    # trailing-avg normalized FCF is masking current cash burn / a divested-segment stub; the
-    # mechanical guards (cyclical vetoes) are silenced by the degenerate base, so this is the only
-    # path that catches the TUSK-shape phantom BUY.
-    if _normalization_masks_current_loss:
-        _buy_ineligible_reasons.append("normalization_masks_current_loss")
-    # v0.3.1 #9: a null MoS can NEVER be a tradeable BUY. When the active basis carries no numeric
-    # MoS (fcf_cap with no intrinsic band, or nav/abstain with no NAV MoS), buy_eligible MUST be
-    # False with an explicit reason — not left True-by-absence-of-data (the DAVA/TV/QNC footgun
-    # where buy_eligible=True co-existed with MoS=null, caught only by the downstream MoS>=30 clause).
-    _active_mos_for_eligibility = mos if mos_basis == "fcf_cap" else nav_mos
-    if _active_mos_for_eligibility is None:
-        _buy_ineligible_reasons.append("not_assessable_no_intrinsic_band")
-    _buy_eligible = len(_buy_ineligible_reasons) == 0
+    # The composite (all guard reads/reasons) lives in _valuation_eligibility (pure move).
+    _buy_eligible, _buy_ineligible_reasons = compose_buy_eligibility(
+        der,
+        extreme_mos_review_required=_extreme_mos_review_required,
+        large_cap_out_of_scope=_large_cap_out_of_scope,
+        fcf_sustainability_uncertain=_fcf_sustainability_uncertain,
+        financial_sic_forced_unsuitable=_financial_sic_forced_unsuitable,
+        insurance_concepts_present=_insurance_concepts_present,
+        concentration_flag=_concentration_flag,
+        fundamental_decline_flag=_fundamental_decline_flag,
+        peak_contamination_flag=_peak_contamination_flag,
+        cross_source_mismatch=_cross_source_mismatch,
+        normalization_masks_current_loss=_normalization_masks_current_loss,
+        mos=mos,
+        nav_mos=nav_mos,
+        mos_basis=mos_basis,
+    )
 
     # --- Assemble output ---
     block = {
