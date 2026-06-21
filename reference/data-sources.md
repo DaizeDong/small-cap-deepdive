@@ -84,7 +84,7 @@ These are explicitly out of scope for the free-source tier. If a judgment requir
 | Data type | Why unavailable free | Impact |
 |---|---|---|
 | New address additions / store openings | Requires geo-data or satellite imagery services | Cannot mechanically track physical expansion |
-| Smart money / 13F institutional flows | 13F filings are public but parsing 3-month lag; sector aggregation services are paid | Cannot get real-time institutional positioning |
+| Smart money / 13F institutional flows | 13F filings are public but parsing 3-month lag; sector aggregation services are paid | Cannot get real-time institutional positioning. *Partially addressed diagnostically:* the firewalled side-channel (P17, `signals.py`) enumerates 13D/13G (lower lag) + best-effort FINRA short interest as labeled, staleness-tagged positioning context — never a trigger |
 | On-chain / crypto asset valuations | Not applicable to traditional small-caps; specialized chain data is paid | N/A for standard theme deepdives |
 | Credit default swap / bond spreads | Paid data vendor | Cannot assess credit market signal for distressed names |
 | Premium alternative data (card-spend panels, full clickstream/web-traffic panels, job-posting feeds) | Paid vendors (Bloomberg 2nd Party, Similarweb, LinkUp) for the high-resolution panels | Cannot get panel-grade revenue reconstruction. **But free coarse proxies DO exist** — see note below; this row covers only the paid high-resolution tier |
@@ -101,14 +101,95 @@ paid-vendors-only. Free, session-level sources of coarse demand/attention proxie
 - **google-news-trends-mcp** and free app/play-store scrapers — coarse rank/review/volume signal.
 
 These are coarse and noisy relative to paid panels, but they exist for free. **Stating that they
-exist is philosophy-neutral and is corrected here. *Acting* on them is NOT yet wired into the
-mechanical pipeline.** The firewalled diagnostic side-channel that would consume these (corroboration-
-only, never originates or up-weights a BUY, track-forward-gated until it has its own Brier) is
-**APPROVED for iteration 2 but NOT YET BUILT**. Iteration 1 ships only the deterministic, T1-only
-trajectory/contamination veto (`fundamental_decline_flag`; see `valuation.md` P6). Until the iter-2
-side-channel is built, the mechanical data layer remains T1-only (EDGAR/XBRL + price); these free
-alt-data sources may be used as on-demand human/agent color but must not feed any gate. See
+exist is philosophy-neutral and is corrected here.** The firewalled diagnostic side-channel that
+consumes between-filings signal (corroboration-only, never originates or up-weights a BUY,
+track-forward-gated until it has its own Brier) was **APPROVED in iteration 1 (§5-Q2) and is now
+BUILT in iteration 4** — see "The Firewalled Diagnostic Side-Channel" below. It does NOT change
+the firewall: the mechanical decision layer (valuation.py + `buy_eligible` + the BUY trigger)
+remains strictly T1-only (EDGAR/XBRL + the mktcap denominator). The side-channel lives in a
+SEPARATE top-level `signals` namespace and is read only as labeled T2 context. See
 `PHILOSOPHY.md` ("Operationalizing the diffusion thesis") for the conservative/expansive split.
+
+---
+
+## The Firewalled Diagnostic Side-Channel (iteration 4 — §5-Q2 approved)
+
+> The between-filings signal layer. **DIAGNOSTIC-ONLY.** This is the single most important
+> invariant of the layer: every signal here lives in a SEPARATE top-level `signals` namespace in
+> the deepdive output (a sibling of `derived`, NEVER inside it). `valuation.py`, the `buy_eligible`
+> composite, and the BUY trigger **MUST NOT read any `signals.*` field.** A BUY stays anchored to
+> T1 filing-derived valuation + zero kill-flags + `buy_eligible`. Signals may be READ by an
+> analyst/agent as labeled T2 context and snapshotted by `track_forward` for FUTURE per-signal
+> Brier calibration — they can NEVER originate or up-weight a BUY. This is how the diffusion thesis
+> gets operationalized WITHOUT rebuilding the confident-but-wrong narrative engine.
+
+The layer has three signals. Two are **programmatic** (computed in `tools/signals.py`, written under
+the deepdive's top-level `signals` key by `tools/deepdive_data.py`). One is **agent-gathered** (the
+MCP sources are not callable from Python; the agent reads them at analysis time).
+
+### P16 — Fundamental-vs-Price divergence (programmatic — `tools/signals.py`)
+
+The most direct operationalization of the thesis: it compares the T1 fundamental trajectory against
+the trailing price move and labels the divergence.
+
+- **Source:** `yfinance` trailing 6m / 12m total return (dividend-adjusted close where available).
+  This is the ONE place price-return is treated as in-scope — and it is quarantined to this
+  diagnostic namespace, never the mktcap denominator or any gate.
+- **Trajectory leg is READ, not recomputed.** `signals.py` reads `rev_slope_sign`,
+  `contamination_ratio`, and `fundamental_decline_flag` from the deepdive `derived` block (the
+  same deterministic T1 fields `valuation.py` uses). It only adds the price leg and the label.
+- **`divergence_label` ∈ {`unpriced_improvement`, `melting_ice_cube_priced`, `aligned`, `unclear`}:**
+  fundamentals improving (`rev_slope > 0`, no decline flag) AND price flat/down ⇒
+  `unpriced_improvement` (THE diffusion thesis — a real change the market may not have priced);
+  fundamentals declining AND price up/elevated ⇒ `melting_ice_cube_priced` (SIGA-shaped: the
+  decline is already in the tape, no edge); trajectory and tape agreeing ⇒ `aligned`; missing
+  price or a flat/mixed configuration ⇒ `unclear`.
+- **Output:** `signals.price_divergence = {price_return_6m, price_return_12m, price_source,
+  fundamental_trajectory{…, read_from}, divergence_label, note}`. The label is a hypothesis to
+  weigh, not a trigger.
+
+### P17 — Ownership / short-interest positioning (programmatic — `tools/signals.py`)
+
+Free positioning context that hardens both sides of the thesis: activist/institutional accumulation
+precedes re-rating; rising short interest + an active shelf telegraphs dilution before the next 10-Q.
+
+- **13D/13G — EDGAR EFTS.** `signals.py` enumerates recent SC 13D / SC 13G (and `/A`) filings for
+  the subject CIK via the same `efts.sec.gov` endpoint `discover_events.py` uses for 10-12B
+  (overlaps P11's 13D catalyst category by design — shared enumeration, subject to the EDGAR rate
+  discipline below). 13D specifically is the canonical small-cap catalyst (Brav/Jiang ~+7%
+  abnormal return). Output is newest-first `{form, file_date, filer}` rows.
+- **Short interest — FINRA, best-effort.** Bi-monthly, free, no key. If reachable it is recorded;
+  if not (no contractually-stable free endpoint), `short_interest_pct` / `short_trend` are `null`
+  with an explicit `staleness_note`. Even when present, FINRA short interest is ALWAYS stale
+  relative to today (bi-monthly cadence) — the staleness is labeled explicitly per the
+  positioning-never-a-trigger rule (cf. the 13F 3-month-lag blind spot in the table above).
+- **Output:** `signals.ownership = {recent_13d_13g[], recent_13d_13g_count, short_interest_pct,
+  short_trend, staleness_note}`. Positioning context only — never a trigger.
+
+### P15 — Alt-data corroboration (AGENT-gathered T2 context, NOT in `signals.py`)
+
+The free coarse alt-data sources catalogued just above (TrendsMCP / GDELT / news-volume /
+news-sentiment) are **session-level MCP tools, not callable from Python** — so they are NOT computed
+in `signals.py`. They are gathered **by the analyst/agent at analysis time** as labeled T2 evidence
+that may CORROBORATE a between-filings fundamental-change hypothesis (e.g. an `unpriced_improvement`
+divergence backed by rising search/news-volume on the company's product). Same firewall: gate hard
+to business-model fit, read as T2 context only, **never originate or up-weight a BUY**, and
+track-forward-gated until the alt-data has earned its own Brier. The agent records what it pulled in
+the report's T2 diagnostic section so the snapshot can be calibrated later.
+
+### Robustness + the namespace contract
+
+- `signals.compute_signals(ticker, cik, deepdive_derived)` NEVER raises: on any failure it returns a
+  partial dict plus `signals_error`. `deepdive_data.py` guards the call again and sets `signals_error`
+  rather than crashing the deepdive — the diagnostic layer can never take down the T1 pipeline.
+- `signals.signals_meta` carries the firewall flags (`diagnostic_only: true`,
+  `never_affects_buy: true`, `sources`, `notes`) so the invariant is machine-readable.
+- The deepdive writes this under a TOP-LEVEL `signals` key (sibling of `derived`). Nothing in the
+  decision path (`valuation.py`, `buy_eligible`, the BUY trigger) references the `signals` namespace.
+
+> All three signals are strictly diagnostic. They exist to let an analyst weigh between-filings
+> evidence and to let `track_forward` accumulate per-signal predictive value for FUTURE calibration.
+> Until each signal has its own Brier score, none of them gates anything.
 
 ---
 
