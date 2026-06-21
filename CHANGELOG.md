@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.3.2 — 2026-06-20
+
+Coverage-test backlog cleanup (the MEDIUM items deferred from v0.3.1):
+- **#8 lessor NAV routing** — `lessor_asset_heavy` (leasing SIC / lease-income concept / high
+  PP&E) routes asset-heavy lessors to the NAV basis **even below the 0.62 debt/assets threshold**.
+  GBX/RAIL are now valued on lease-fleet NAV, not trough-cycle FCF.
+- **#10 concurrency isolation** — the SIC-floor sidecar is run/slug-namespaced
+  (`_sic_floor_<slug>.json`, kept out of the `candidates_*.json` glob) and run-state is
+  per-`SMALLCAP_RUN` / PID-unique (the shared `/tmp/smallcap_run.txt` is gone). No more
+  cross-theme contamination when many agents run concurrently.
+- **#11 foreign-filer** — IFRS concept cascade (us-gaap + ifrs-full) recovers some 20-F/40-F
+  filers; when still empty, `foreign_filer_unvaluable` labels the graceful abstain (no silent null).
+
+All 9 tool selftests + both workflows pass; regression (TUSK/SIGA/INVA) unchanged.
+
 ## v0.3.1 — 2026-06-20
 
 Remediation round driven by the v0.3.0 full-coverage test (53 themes across all GICS sectors +
