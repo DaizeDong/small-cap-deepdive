@@ -33,6 +33,10 @@ from _common import init_edgar, UA, REPORTS, today, CFG, http_get
 
 FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json"
 DEI_FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/dei/{concept}.json"
+# v0.3.2 #11 — ifrs-full taxonomy endpoint. Foreign 20-F/40-F filers tag financials under
+# ifrs-full instead of us-gaap; companyconcept exposes them on this taxonomy path. Extending the
+# concept cascade to probe these recovers SOME foreign filers (graceful — absent -> empty, no crash).
+IFRS_FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/ifrs-full/{concept}.json"
 SEC_COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 
 # Non-open-market transaction codes to exclude (RSU grants, option exercises, gifts, etc.)
@@ -47,6 +51,56 @@ REVENUE_CONCEPTS = [
     "RevenueFromContractWithCustomerIncludingAssessedTax",
     "RevenueFromContractWithCustomerExcludingAssessedTax",
 ]
+
+# v0.3.2 #11 — IFRS (ifrs-full taxonomy) concept cascade for foreign 20-F/40-F filers. Whole
+# 20-F/40-F cohorts (Canadian PM juniors, China VIEs, foreign industrials) returned EMPTY
+# financials because their XBRL is tagged under ifrs-full, not us-gaap. Probing the most common
+# IFRS tags recovers SOME of these filers (graceful: absent concepts -> empty, never a crash).
+# Each list is probed AFTER the us-gaap cascade and merged by end-date (us-gaap wins on a tie,
+# IFRS only fills genuine gaps) — see concept_series_with_ifrs.
+IFRS_REVENUE_CONCEPTS = [
+    "Revenue",
+    "RevenueFromContractsWithCustomers",
+]
+IFRS_NET_INCOME_CONCEPTS = [
+    "ProfitLoss",
+    "ProfitLossAttributableToOwnersOfParent",
+]
+IFRS_OCF_CONCEPTS = [
+    "CashFlowsFromUsedInOperatingActivities",
+    "CashFlowsFromUsedInOperatingActivitiesContinuingOperations",
+]
+
+# v0.3.2 #8 — lessor / leasing-business detection. Asset-heavy lessors (railcar/equipment/auto
+# leasing) carry a huge lease fleet on the balance sheet but modest, deeply cyclical FCF, so they
+# belong on a lease-fleet NAV basis. They fell BELOW valuation's debt/assets>0.62
+# fcf_cap_model_unsuitable threshold (GBX 0.41, RAIL 0.35) and were mis-valued on trough FCF.
+# deepdive emits lessor_asset_heavy; valuation forces fcf_cap_model_unsuitable=True (-> NAV) on it
+# even when debt/assets<0.62.
+# (a) SIC of leasing/rental businesses: 6726 (investment offices, incl. lease holdcos),
+#     7377 (computer rental/leasing), 4741 (rental of railroad cars), 6159 (federal/agency lease
+#     credit), 7359 (equipment rental & leasing nec).
+LESSOR_SIC_CODES = {"6726", "7377", "4741", "6159", "7359"}
+# (b) operating/finance lease-INCOME revenue concepts: the presence of lease income as a revenue
+#     line is itself a leasing-business signal (the company earns rent on a fleet it owns).
+LEASE_INCOME_CONCEPTS = [
+    "OperatingLeasesIncomeStatementLeaseRevenue",
+    "OperatingLeaseLeaseIncome",
+    "SalesTypeLeaseRevenue",
+    "DirectFinancingLeaseRevenue",
+    "FinanceLeaseInterestIncome",
+    "LeaseIncome",
+]
+# (c) PP&E / lease-fleet asset concepts: a very high (PP&E or lease-fleet)/total_assets ratio
+#     COMBINED with rental/lease revenue is the third route (covers lessors whose SIC is a generic
+#     industrial code and who tag rent under a non-lease-income revenue concept).
+PPE_FLEET_CONCEPTS = [
+    "PropertyPlantAndEquipmentNet",
+    "PropertySubjectToOrAvailableForOperatingLeaseNet",
+    "EquipmentLeasedToOtherPartyNet",
+]
+# Ratio above which (PP&E or lease-fleet)/total_assets is "very high" for route (c).
+_LESSOR_PPE_RATIO = 0.55
 
 # Debt concepts: prefer split long-term current/noncurrent; fallback to LongTermDebt aggregate;
 # final fallback to total Liabilities (flags this in derived.debt_fallback).
@@ -220,6 +274,8 @@ def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap") -> list:
     """
     if taxonomy == "us-gaap":
         url = FACTS.format(cik=str(cik).zfill(10), concept=concept)
+    elif taxonomy == "ifrs-full":  # v0.3.2 #11 — foreign-filer IFRS concept recovery
+        url = IFRS_FACTS.format(cik=str(cik).zfill(10), concept=concept)
     else:
         url = DEI_FACTS.format(cik=str(cik).zfill(10), concept=concept)
     try:
@@ -270,6 +326,36 @@ def concept_series(cik: str, concepts, n: int = 8) -> list:
         for a in _one_concept(cik, concept):
             # Later concept overrides earlier for the same end date.
             seen[a["end"]] = a
+        time.sleep(0.15)
+    return sorted(seen.values(), key=lambda x: x["end"])[-n:]
+
+
+def concept_series_with_ifrs(cik: str, gaap_concepts, ifrs_concepts, n: int = 8) -> list:
+    """v0.3.2 #11 — pull a concept across BOTH us-gaap and ifrs-full, merging by end-date.
+
+    The us-gaap cascade is probed first (domestic filers, the common case). The ifrs-full
+    cascade is then probed and used ONLY to FILL end-dates the us-gaap pass left empty — a
+    us-gaap value is never overwritten by an IFRS one. This recovers SOME foreign 20-F/40-F
+    filers (whose financials are tagged under ifrs-full) without disturbing domestic results.
+
+    Graceful: a foreign filer with no IFRS tags either still returns the us-gaap series or an
+    empty list (which downstream labels foreign_filer_unvaluable). Never raises.
+    """
+    if isinstance(gaap_concepts, str):
+        gaap_concepts = [gaap_concepts]
+    if isinstance(ifrs_concepts, str):
+        ifrs_concepts = [ifrs_concepts]
+    seen: dict = {}
+    # us-gaap first (preferred — domestic taxonomy).
+    for concept in gaap_concepts:
+        for a in _one_concept(cik, concept, taxonomy="us-gaap"):
+            seen[a["end"]] = a
+        time.sleep(0.15)
+    # ifrs-full second — fill gaps only; do NOT overwrite a us-gaap value at the same end-date.
+    for concept in ifrs_concepts:
+        for a in _one_concept(cik, concept, taxonomy="ifrs-full"):
+            if a["end"] not in seen:
+                seen[a["end"]] = a
         time.sleep(0.15)
     return sorted(seen.values(), key=lambda x: x["end"])[-n:]
 
@@ -472,6 +558,116 @@ def _insurance_concepts_present(
     # Reached end of probe list. Fire only if SIC is insurance (any one concept) or >=2 concepts.
     if present and (sic_is_insurance or len(present) >= 2):
         return True, present[0]
+    return False, None
+
+
+def _lessor_asset_heavy(
+    cik: str,
+    sic_code: str | None,
+    assets_series: list,
+    lease_income_present: bool | None = None,
+    ppe_fleet_val: float | None = None,
+    rental_lease_revenue: bool | None = None,
+) -> tuple[bool, str | None]:
+    """v0.3.2 #8 — detect an asset-heavy leasing/rental business (railcar/equipment/auto lessor).
+
+    Returns (lessor_asset_heavy, detail). valuation forces fcf_cap_model_unsuitable=True (route to
+    lease-fleet NAV) when this is True EVEN IF debt/assets < 0.62 — closing the GBX/RAIL hole where
+    a textbook NAV candidate was mis-valued on trough-cycle FCF.
+
+    Fires when ANY of three independent leasing signals is present:
+      (a) SIC in LESSOR_SIC_CODES (leasing/rental businesses), OR
+      (b) an operating/finance lease-INCOME revenue concept is present (lease_income_present), OR
+      (c) (PP&E or lease-fleet)/total_assets is very high (>_LESSOR_PPE_RATIO) AND the filer reports
+          rental/lease revenue (rental_lease_revenue) — covers lessors on a generic industrial SIC.
+
+    The lease_income_present / ppe_fleet_val / rental_lease_revenue inputs are normally probed by
+    the caller (pull) so the network probes are shared; when not supplied they are probed here from
+    companyconcept (so the helper is self-contained for direct callers/tests). Network-safe: any
+    probe failure degrades to "signal absent", never a crash and never a false fire.
+    """
+    sic = str(sic_code or "")
+    reasons: list[str] = []
+
+    # (a) leasing/rental SIC.
+    if sic in LESSOR_SIC_CODES:
+        reasons.append(f"lessor_sic:{sic}")
+
+    # (b) lease-income revenue concept present.
+    if lease_income_present is None:
+        lease_income_present = False
+        for concept in LEASE_INCOME_CONCEPTS:
+            try:
+                if _one_concept(cik, concept):
+                    lease_income_present = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.1)
+    if lease_income_present:
+        reasons.append("lease_income_concept_present")
+
+    # (c) very-high PP&E/lease-fleet ratio AND rental/lease revenue.
+    latest_assets = None
+    if assets_series:
+        latest_assets = assets_series[-1].get("val")
+    if ppe_fleet_val is None:
+        ppe_fleet_val = None
+        best_end = None
+        for concept in PPE_FLEET_CONCEPTS:
+            try:
+                entries = _one_concept(cik, concept)
+            except Exception:
+                entries = []
+            time.sleep(0.1)
+            for v in entries:
+                if v.get("val") is not None and (best_end is None or v["end"] >= best_end):
+                    best_end = v["end"]
+                    ppe_fleet_val = v["val"]
+    if rental_lease_revenue is None:
+        # When not supplied, treat a present lease-income concept as the rental-revenue signal.
+        rental_lease_revenue = bool(lease_income_present)
+    if (ppe_fleet_val is not None and latest_assets not in (None, 0)
+            and (ppe_fleet_val / latest_assets) > _LESSOR_PPE_RATIO
+            and rental_lease_revenue):
+        reasons.append(
+            f"ppe_fleet_ratio={ppe_fleet_val / latest_assets:.2f}>{_LESSOR_PPE_RATIO}+rental_rev"
+        )
+
+    if reasons:
+        return True, ";".join(reasons)
+    return False, None
+
+
+def _foreign_filer_unvaluable(
+    form_used: str | None,
+    rev_series: list,
+    ni_series: list,
+    ocf_series: list,
+) -> tuple[bool, str | None]:
+    """v0.3.2 #11 — label a foreign 20-F/40-F filer whose financials are STILL empty after the IFRS
+    concept cascade, so the abstain is CLEARLY flagged (not a silent null).
+
+    Returns (foreign_filer_unvaluable, detail). True when the filer used a foreign form (20-F/40-F)
+    AND all three primary financial series (revenue, net income/profit, OCF) are empty even after
+    the us-gaap+ifrs-full merge. valuation/report can then say "foreign filer — un-valuable from
+    EDGAR" instead of presenting a bare intrinsic_band_unavailable null.
+
+    Graceful abstain only — never crashes, never a false BUY. A foreign filer that DID recover
+    financials via the IFRS cascade returns (False, None) (it is valuable).
+    """
+    form = str(form_used or "")
+    is_foreign = form.startswith("20-F") or form.startswith("40-F")
+    if not is_foreign:
+        return False, None
+    has_rev = bool(rev_series)
+    has_ni = bool(ni_series)
+    has_ocf = bool(ocf_series)
+    if not (has_rev or has_ni or has_ocf):
+        return True, (
+            f"foreign filer (form={form}) returned EMPTY revenue/net-income/OCF even after the "
+            f"us-gaap+ifrs-full concept cascade — un-valuable from EDGAR (graceful abstain)"
+        )
     return False, None
 
 
@@ -1457,10 +1653,15 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
     d = {"ticker": ticker, "cik": cik,
          "pulled_at": today()}
     print(f"  拉财务序列...", file=sys.stderr)
-    rev = concept_series(cik, REVENUE_CONCEPTS)
+    # v0.3.2 #11: revenue/net-income/OCF probe BOTH us-gaap and ifrs-full so foreign 20-F/40-F
+    # filers (whose financials are tagged under ifrs-full) recover SOME data instead of returning
+    # blanket-empty financials. us-gaap wins on any shared end-date; IFRS only fills gaps.
+    rev = concept_series_with_ifrs(cik, REVENUE_CONCEPTS, IFRS_REVENUE_CONCEPTS)
     time.sleep(0.2)
-    ni = concept_series(cik, "NetIncomeLoss"); time.sleep(0.2)
-    ocf = concept_series(cik, "NetCashProvidedByUsedInOperatingActivities"); time.sleep(0.2)
+    ni = concept_series_with_ifrs(cik, "NetIncomeLoss", IFRS_NET_INCOME_CONCEPTS); time.sleep(0.2)
+    ocf = concept_series_with_ifrs(
+        cik, "NetCashProvidedByUsedInOperatingActivities", IFRS_OCF_CONCEPTS
+    ); time.sleep(0.2)
     cash = concept_series(cik, "CashAndCashEquivalentsAtCarryingValue"); time.sleep(0.2)
     shares = _shares_series(cik); time.sleep(0.2)
     assets = concept_series(cik, "Assets"); time.sleep(0.2)
@@ -1593,6 +1794,39 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
     _insurance_present, _insurance_concept = _insurance_concepts_present(cik, sic_code=sic_code)
     time.sleep(0.2)
 
+    # v0.3.2 #8: lessor / leasing-business detection (asset-heavy railcar/equipment/auto lessors).
+    # Probe the lease-income + PP&E/lease-fleet concepts ONCE here and pass them to
+    # _lessor_asset_heavy so valuation can route GBX/RAIL-class lessors to lease-fleet NAV even when
+    # debt/assets<0.62. rental_lease_revenue = a lease-income concept present (the rent signal).
+    print(f"  探测 lessor / 租赁车队 XBRL 概念(#8)...", file=sys.stderr)
+    _lease_income_present = False
+    for _lic in LEASE_INCOME_CONCEPTS:
+        try:
+            if _one_concept(cik, _lic):
+                _lease_income_present = True
+                break
+        except Exception:
+            pass
+        time.sleep(0.1)
+    _ppe_fleet_val: float | None = None
+    _ppe_best_end: str | None = None
+    for _pfc in PPE_FLEET_CONCEPTS:
+        try:
+            _pf_entries = _one_concept(cik, _pfc)
+        except Exception:
+            _pf_entries = []
+        time.sleep(0.1)
+        for _v in _pf_entries:
+            if _v.get("val") is not None and (_ppe_best_end is None or _v["end"] >= _ppe_best_end):
+                _ppe_best_end = _v["end"]
+                _ppe_fleet_val = _v["val"]
+    _lessor_asset_heavy_flag, _lessor_detail = _lessor_asset_heavy(
+        cik, sic_code, assets,
+        lease_income_present=_lease_income_present,
+        ppe_fleet_val=_ppe_fleet_val,
+        rental_lease_revenue=_lease_income_present,
+    )
+
     # P9: ebit_source tagged by the cascade (None when no EBIT base recovered).
     _ebit_source = ebit_source if ebit else None
 
@@ -1600,6 +1834,13 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
     print(f"  拉 10-K 章节...", file=sys.stderr)
     # A1: tenk_sections uses CIK fallback when ticker absent
     d["tenk"] = tenk_sections(ticker, cik=cik)
+
+    # v0.3.2 #11: foreign-filer un-valuable label. After the us-gaap+ifrs-full cascade, if a
+    # 20-F/40-F filer STILL has empty revenue/net-income/OCF, flag foreign_filer_unvaluable so the
+    # abstain is explicit (not a silent intrinsic_band_unavailable null). Needs form_used from tenk.
+    _foreign_filer_unvaluable_flag, _foreign_filer_detail = _foreign_filer_unvaluable(
+        d["tenk"].get("filing_form"), rev, ni, ocf
+    )
 
     # P3: magnitude-based concentration. tenk_sections extracts the magnitudes from the full
     # filing body (the only mechanical source — companyconcept XBRL has no dimensional members);
@@ -1705,6 +1946,15 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
         # routes these like financial_sic (nav/abstain) and gates buy_eligible off it.
         "insurance_concepts_present": _insurance_present,
         "insurance_concept_matched": _insurance_concept,
+        # v0.3.2 #8: lessor_asset_heavy — asset-heavy leasing/rental business (railcar/equipment/
+        # auto lessor). valuation forces fcf_cap_model_unsuitable=True (route to lease-fleet NAV)
+        # EVEN when debt/assets<0.62, closing the GBX (0.41)/RAIL (0.35) mis-valuation hole.
+        "lessor_asset_heavy": _lessor_asset_heavy_flag,
+        "lessor_asset_heavy_detail": _lessor_detail,
+        # v0.3.2 #11: foreign_filer_unvaluable — a 20-F/40-F filer whose financials are STILL empty
+        # after the us-gaap+ifrs-full cascade. Labels the abstain explicitly (not a silent null).
+        "foreign_filer_unvaluable": _foreign_filer_unvaluable_flag,
+        "foreign_filer_unvaluable_detail": _foreign_filer_detail,
         # P-G: form_used (10-K/20-F/40-F) for the trust-banner provenance line
         "form_used": d["tenk"].get("filing_form"),
         # C2: SIC code for financial-sector routing in valuation
@@ -2774,6 +3024,129 @@ def _selftest():
         "#13(NI): exactly 50x must NOT flag (threshold is strict >50x)"
     )
     print("  #13(NI) data_quality_warn: JILL 27,900M / REAL 41,799M flagged; plausible & 50x boundary spared  OK")
+
+    # --- v0.3.2 #8: lessor_asset_heavy — railcar/equipment lessor routing (debt/assets<0.62) ---
+    # Three independent routes must each fire True; a normal industrial must stay False.
+    _assets_big = [{"end": "2024-12-31", "val": 5_000_000_000.0}]  # $5B total assets
+    # Route (a): leasing/rental SIC (GBX/RAIL are railcar lessors; 4741 = rental of railroad cars).
+    _la_a, _la_a_d = _lessor_asset_heavy(
+        "0000000001", "4741", _assets_big,
+        lease_income_present=False, ppe_fleet_val=None, rental_lease_revenue=False,
+    )
+    assert _la_a is True and "lessor_sic" in (_la_a_d or ""), (
+        f"#8 route(a): a leasing-SIC (4741) must set lessor_asset_heavy True, got {_la_a} ({_la_a_d})"
+    )
+    # Route (b): lease-income revenue concept present on a NON-leasing SIC (generic industrial 3743
+    # = railroad equipment; GBX's actual SIC) -> still a leasing business via lease income.
+    _la_b, _la_b_d = _lessor_asset_heavy(
+        "0000000001", "3743", _assets_big,
+        lease_income_present=True, ppe_fleet_val=None, rental_lease_revenue=True,
+    )
+    assert _la_b is True and "lease_income_concept_present" in (_la_b_d or ""), (
+        f"#8 route(b): a lease-income concept must set lessor_asset_heavy True on a non-leasing SIC, "
+        f"got {_la_b} ({_la_b_d})"
+    )
+    # Route (c): very-high PP&E/lease-fleet ratio (>0.55) + rental revenue, generic industrial SIC,
+    # NO explicit lease-income concept (the lessor whose rent is tagged under a generic revenue tag).
+    _la_c, _la_c_d = _lessor_asset_heavy(
+        "0000000001", "3743", _assets_big,
+        lease_income_present=False, ppe_fleet_val=3_500_000_000.0, rental_lease_revenue=True,
+    )
+    assert _la_c is True and "ppe_fleet_ratio" in (_la_c_d or ""), (
+        f"#8 route(c): high PP&E/assets (0.70) + rental revenue must set lessor_asset_heavy True, "
+        f"got {_la_c} ({_la_c_d})"
+    )
+    # Crystal: GBX-shape — leasing-via-lease-income on a generic SIC, debt/assets<0.62 (0.41). The
+    # debt/assets ratio is the valuation-side test; here we assert deepdive emits the flag that lets
+    # valuation route to NAV DESPITE the sub-0.62 ratio. (debt 2.05B / assets 5.0B = 0.41.)
+    _gbx_debt, _gbx_assets = 2_050_000_000.0, 5_000_000_000.0
+    assert (_gbx_debt / _gbx_assets) < 0.62, "#8 crystal: GBX-shape debt/assets must be <0.62"
+    _la_gbx, _ = _lessor_asset_heavy(
+        "0000000001", "3743", [{"end": "2024-12-31", "val": _gbx_assets}],
+        lease_income_present=True, ppe_fleet_val=None, rental_lease_revenue=True,
+    )
+    assert _la_gbx is True, (
+        "#8 crystal: a GBX-shape railcar lessor (lease income, debt/assets=0.41<0.62) must set "
+        "lessor_asset_heavy True so valuation routes it to lease-fleet NAV"
+    )
+    # Crystal: a NORMAL industrial — generic SIC, no lease income, modest PP&E (0.20), no rental
+    # revenue -> must stay False (no false routing of ordinary manufacturers to NAV).
+    _la_norm, _la_norm_d = _lessor_asset_heavy(
+        "0000000001", "3559", _assets_big,
+        lease_income_present=False, ppe_fleet_val=1_000_000_000.0, rental_lease_revenue=False,
+    )
+    assert _la_norm is False and _la_norm_d is None, (
+        f"#8 crystal: a normal industrial (no leasing signals) must stay lessor_asset_heavy False, "
+        f"got {_la_norm} ({_la_norm_d})"
+    )
+    # Guard: high PP&E ratio WITHOUT rental revenue (a capital-intensive manufacturer/utility) must
+    # NOT fire route (c) — the ratio alone is not a leasing signal.
+    _la_capint, _ = _lessor_asset_heavy(
+        "0000000001", "3559", _assets_big,
+        lease_income_present=False, ppe_fleet_val=4_000_000_000.0, rental_lease_revenue=False,
+    )
+    assert _la_capint is False, (
+        "#8 guard: high PP&E ratio without rental revenue (cap-intensive manufacturer) must NOT fire"
+    )
+    print("  #8 lessor_asset_heavy: leasing-SIC / lease-income / high-PP&E+rent all True (incl. "
+          "GBX-shape debt/assets=0.41); normal industrial + cap-intensive non-lessor False  OK")
+
+    # --- v0.3.2 #11: IFRS concept recovery + foreign_filer_unvaluable ---
+    # (1) concept_series_with_ifrs: a foreign filer with NO us-gaap revenue but ifrs-full Revenue
+    # must RECOVER (financials populate). Offline-stub _one_concept by taxonomy.
+    _orig_one_concept_11 = globals()["_one_concept"]
+
+    def _make_tax_stub(gaap_present, ifrs_present):
+        """Stub _one_concept: returns a value only for the named concept under its taxonomy."""
+        def _stub(cik, concept, taxonomy="us-gaap"):
+            if taxonomy == "us-gaap" and concept in gaap_present:
+                return [{"end": "2024-12-31", "val": gaap_present[concept]}]
+            if taxonomy == "ifrs-full" and concept in ifrs_present:
+                return [{"end": "2024-12-31", "val": ifrs_present[concept]}]
+            return []
+        return _stub
+
+    try:
+        # Recoverable IFRS-tag fixture: no us-gaap revenue, ifrs-full Revenue present -> populates.
+        globals()["_one_concept"] = _make_tax_stub({}, {"Revenue": 1_234_000_000.0})
+        _rev_ifrs = concept_series_with_ifrs("0000000002", REVENUE_CONCEPTS, IFRS_REVENUE_CONCEPTS)
+        assert _rev_ifrs and _rev_ifrs[-1]["val"] == 1_234_000_000.0, (
+            f"#11: a foreign filer's ifrs-full Revenue must recover via concept_series_with_ifrs, "
+            f"got {_rev_ifrs}"
+        )
+        # us-gaap WINS on a shared end-date — IFRS only fills gaps, never overwrites.
+        globals()["_one_concept"] = _make_tax_stub(
+            {"Revenues": 999.0}, {"Revenue": 1_234_000_000.0}
+        )
+        _rev_both = concept_series_with_ifrs("0000000002", REVENUE_CONCEPTS, IFRS_REVENUE_CONCEPTS)
+        assert _rev_both and _rev_both[-1]["val"] == 999.0, (
+            f"#11: us-gaap value must WIN over ifrs-full at a shared end-date, got {_rev_both}"
+        )
+    finally:
+        globals()["_one_concept"] = _orig_one_concept_11
+
+    # (2) foreign_filer_unvaluable: a 20-F/40-F filer with ALL financial series empty -> True.
+    _ffu_a, _ffu_a_d = _foreign_filer_unvaluable("20-F", [], [], [])
+    assert _ffu_a is True and _ffu_a_d, (
+        f"#11: a 20-F filer with empty revenue/NI/OCF must set foreign_filer_unvaluable True, "
+        f"got {_ffu_a}"
+    )
+    _ffu_40, _ = _foreign_filer_unvaluable("40-F", [], [], [])
+    assert _ffu_40 is True, "#11: a 40-F filer with empty financials must also be unvaluable"
+    # A foreign filer that DID recover financials (via IFRS) is valuable -> False.
+    _ffu_b, _ = _foreign_filer_unvaluable(
+        "20-F", [{"end": "2024-12-31", "val": 1.0}], [], []
+    )
+    assert _ffu_b is False, (
+        "#11: a 20-F filer that recovered revenue (IFRS) must NOT be flagged unvaluable"
+    )
+    # A DOMESTIC 10-K filer with empty financials is NOT a foreign-filer-unvaluable case (False).
+    _ffu_dom, _ = _foreign_filer_unvaluable("10-K", [], [], [])
+    assert _ffu_dom is False, (
+        "#11: a domestic 10-K filer must NEVER be labeled foreign_filer_unvaluable"
+    )
+    print("  #11 IFRS recovery + foreign_filer_unvaluable: ifrs-full Revenue recovers (us-gaap "
+          "wins ties); empty 20-F/40-F -> unvaluable True; recovered/domestic -> False  OK")
 
     print("deepdive_data selftest PASS")
 

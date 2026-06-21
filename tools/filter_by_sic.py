@@ -44,13 +44,14 @@ Reference: reference/discovery-engine.md §Gate 1.
 """
 from __future__ import annotations
 import argparse
+import json
 import re
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import CFG, http_get
+from _common import CFG, REPORTS, http_get, slug
 
 # 硬排除的 SIC 前缀:医药/医疗器械/医疗服务/软件/金融/保险/房产/零售/餐饮/玩具
 HARD_EXCLUDE = CFG["sic_hard_exclude"]
@@ -270,6 +271,47 @@ def sic_reverse_recall(theme: str, forms: str = "10-K", mapping=None,
     return out
 
 
+# ---------------------------------------------------------------------------
+# v0.3.2 backlog #10 — SIC-floor sidecar namespacing.
+#
+# The dedicated-SIC enumeration is a per-theme RECALL artifact. A previous run
+# wrote that sidecar to a FIXED, cross-theme path (e.g. candidates_railcar_leasing.json),
+# so a machinery run dir ended up with a stale 63-name railcar-leasing sidecar that
+# finalize_run would have falsely demanded reports for. The fix: the sidecar MUST be
+# (a) written into the ACTIVE run/batch dir (REPORTS, the SMALLCAP_RUN subdir when set),
+# and (b) namespaced by the ACTIVE theme slug — never a fixed cross-theme filename. Two
+# concurrent themes therefore write distinct files in distinct run dirs and never collide.
+# ---------------------------------------------------------------------------
+
+def sic_floor_sidecar_path(theme_slug: str, run_dir: Path | None = None) -> Path:
+    """Path for a theme's SIC-floor sidecar — under the active run dir, slug-namespaced.
+
+    `run_dir` defaults to _common.REPORTS (the active SMALLCAP_RUN batch dir, or the
+    flat output dir when no run is active). The filename is ALWAYS derived from the
+    ACTIVE theme's slug — `_sic_floor_<slug>.json` — so a machinery run can never be
+    handed a fixed `candidates_railcar_leasing.json`. The `_sic_floor_` prefix also
+    keeps it out of finalize_run's `candidates_*.json` completeness glob (it is a recall
+    diagnostic, not a deep-dive demand list).
+    """
+    if run_dir is None:
+        run_dir = REPORTS
+    return Path(run_dir) / f"_sic_floor_{slug(theme_slug)}.json"
+
+
+def write_sic_floor_sidecar(theme_slug: str, sic_rows: list[dict],
+                            run_dir: Path | None = None) -> Path:
+    """Write the SIC-floor recall rows to the active-run, slug-namespaced sidecar.
+
+    Returns the path written. The destination is computed by sic_floor_sidecar_path,
+    so it is guaranteed to live under the active run dir and to carry the ACTIVE theme's
+    slug — never a fixed cross-theme path. Creates the run dir if missing.
+    """
+    path = sic_floor_sidecar_path(theme_slug, run_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(list(sic_rows), indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
 def union_recall(fts_rows: list[dict], sic_rows: list[dict]) -> list[dict]:
     """UNION the FTS recall with the SIC-reverse recall on CIK, no dupes. P8 floor merge.
 
@@ -448,7 +490,37 @@ def _selftest():
     # idempotence / no-mutation: inputs untouched
     assert "recall_channel" not in fts[0], "union_recall must NOT mutate its inputs"
 
-    print("filter_by_sic selftest PASS")
+    # -----------------------------------------------------------------------
+    # v0.3.2 #10 — SIC-floor sidecar must be namespaced under the ACTIVE run dir
+    # and the ACTIVE theme slug, never a fixed cross-theme path. Two distinct
+    # slugs/runs must NOT clobber each other.
+    # -----------------------------------------------------------------------
+    import tempfile
+    with tempfile.TemporaryDirectory() as _td:
+        run_machinery = Path(_td) / "2026-06-20_cov-machinery"
+        run_railcar = Path(_td) / "2026-06-20_cov-railcar-leasing"
+        # The sidecar filename derives from the ACTIVE theme slug — never a fixed cross-theme name.
+        p_mach = sic_floor_sidecar_path("cov-machinery", run_dir=run_machinery)
+        p_rail = sic_floor_sidecar_path("railcar-leasing", run_dir=run_railcar)
+        assert p_mach.name == "_sic_floor_cov_machinery.json", f"#10: slug-namespaced sidecar name: {p_mach.name}"
+        assert p_mach != p_rail, "#10: distinct slugs/runs must give distinct sidecar paths (no clobber)"
+        # The machinery run must NEVER be handed a fixed candidates_railcar_leasing.json.
+        assert "railcar" not in p_mach.name, "#10: machinery sidecar must not carry a cross-theme (railcar) name"
+        assert "candidates_" not in p_mach.name, "#10: sidecar must stay out of the candidates_*.json glob"
+        assert p_mach.parent == run_machinery, "#10: sidecar must land under the ACTIVE run dir"
+        # Actually write two distinct sidecars and confirm they coexist without clobbering.
+        sic_rows_a = [{"cik": "111", "name": "MACHINE CO", "recall_channel": "sic_reverse"}]
+        sic_rows_b = [{"cik": "222", "name": "RAILCAR CO", "recall_channel": "sic_reverse"}]
+        w_a = write_sic_floor_sidecar("cov-machinery", sic_rows_a, run_dir=run_machinery)
+        w_b = write_sic_floor_sidecar("railcar-leasing", sic_rows_b, run_dir=run_railcar)
+        assert w_a == p_mach and w_b == p_rail, "#10: writer must use the namespaced path"
+        assert w_a.exists() and w_b.exists(), "#10: both sidecars must exist (no clobber)"
+        loaded_a = json.loads(w_a.read_text(encoding="utf-8"))
+        loaded_b = json.loads(w_b.read_text(encoding="utf-8"))
+        assert loaded_a[0]["cik"] == "111" and loaded_b[0]["cik"] == "222", (
+            "#10: each run's sidecar must hold ITS OWN rows, not a cross-theme stale file")
+
+    print("filter_by_sic selftest PASS (+ #10 sidecar namespacing isolation)")
 
 
 def main():
