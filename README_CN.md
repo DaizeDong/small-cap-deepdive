@@ -5,7 +5,7 @@
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![依赖](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
-[![版本](https://img.shields.io/badge/version-0.2.1-purple?style=flat)](CHANGELOG.md)
+[![版本](https://img.shields.io/badge/version-0.3.0-purple?style=flat)](CHANGELOG.md)
 
 [English](README.md) | [中文版](README_CN.md)
 
@@ -31,19 +31,25 @@
 
 ## 它做什么
 
-1. **枚举 SEC 全库**：用 EDGAR 全文检索（FTS）按主题拉取候选。过召回是设计意图——后续精度门负责清场。
+0. **开运行批次**（`new_run.py`）：每次运行写入 `reports/smallcap/<日期>_<label>/`，附 `_run.json` manifest（skill git commit + 估值 config 快照），便于按版本对比。`export SMALLCAP_RUN=$(python tools/new_run.py --label <主题>)`。
 
-2. **两阶段精度门（强制）**：门 1（`filter_by_sic.py`）：基于 SIC 行业码粗排除明显无关行业。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / partial / misrecall`。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司。缺少这两道门会把错误的候选送进后续尽调。
+1. **枚举 SEC 全库**：用 EDGAR 全文检索（FTS），并 UNION 一个 **SIC 反向召回底**（`discover.py` + `filter_by_sic.py`）——对有专属 SIC 码的主题,枚举该 SIC 下全部注册人,避免漏掉低关键词密度的真实成员。市值用 fallback 链解析（yfinance 为空时用 SEC 股数×价格）；仍无法定价的归 `band="unknown"` 流过,而非静默丢弃。
 
-3. **机械避雷**（`cheap_pass.py`）：直接读 SEC 申报的硬红线——持续经营审计段、死亡螺旋可转债、内控重大缺陷。触发的公司不进入判断，无论叙事质量如何。
+2. **两阶段精度门（强制）**：门 1（`filter_by_sic.py`）：基于 SIC 行业码粗排除明显无关行业。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / partial / misrecall`。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司。召回用 `recall@gold`（对照手工真实成员清单）**度量**,而非假设。
 
-4. **取数**（`deepdive_data.py`）：XBRL 财务序列、Form 4 内部人交易、货架/ATM 状态、稀释历史、重大事件时间线。
+3. **机械避雷**（`cheap_pass.py`）：直接读 SEC 申报的硬红线——持续经营审计段、死亡螺旋可转债、内控重大缺陷、magnitude 级客户/政府单一项目集中度。触发的公司不进入判断,无论叙事质量如何。
 
-5. **估值**（`valuation.py`）：反向 DCF（标准化 FCF）、EV/EBITDA 倍数、周期底部 EBITDA 标准化，以及重资产 NAV 路径。对称买入触发器：安全边际 ≥ 30% + 零 kill-flag + 无 T3 核心论据 → 买入（置信度由估值稳健性加权）。催化剂修正：封闭枚举的强制交易事件列表。
+4. **取数**（`deepdive_data.py`）：XBRL 财务序列（含 EBIT 概念级联、债务与股数 fallback）、Form 4 内部人交易、货架/ATM 状态、稀释历史、重大事件时间线。数据完整性守卫：债务截断、错误实体、低营收巨亏比、以及**二次源交叉校验**（SEC vs yfinance，>2.5× 分歧即标记并阻断 BUY）。
+
+5. **估值 + 机械 `buy_eligible` 门**（`valuation.py`）：反向 DCF（标准化 FCF）、EV/EBITDA 倍数、周期底部 EBITDA 标准化、重资产 NAV 路径。买入要求 `mos_basis∈{fcf_cap,nav}` 且 安全边际 ≥ 30% 且 **`buy_eligible == true`** 且 零 kill-flag 且 无 T3 核心论据。`buy_eligible` 与入全部守卫——极端 MoS、大盘上限、FCF 可持续性、金融-SIC/保险排除、债务截断、二次源分歧、集中度 kill,以及 **V 形价值陷阱否决**（`fundamental_decline_flag` 单调下滑 + `peak_contamination_flag` 谷→峰→回落）。催化剂修正当前冻结为 WATCH（待机制校准）。
 
 6. **强制反方判断**：评分前先锚定基准概率，对每个候选强制反方 WebSearch，7 维评分卡配硬上限规则。证据按 Tier 标注（T1 第一方 SEC 申报 / T2 独立第三方 / T3 公司自述）；T3 证据不得作为买入支撑。
 
-7. **排序**（`rank.py`）：按综合分排列幸存候选，附漏斗计数、淘汰原因、显式数据盲区。
+7. **收尾 + 排序**（`finalize_run.py`、`make_report.py`、`rank.py`）：确定性逐票报告,每个评级下附数据质量**信任 banner**,自动生成 verdict 喂入 track-forward,并产出 `RANKING.md`（漏斗计数、淘汰原因、数据盲区）。
+
+8. **前向校准**（`track_forward.py`）：verdict 记入 `metrics/verdicts.jsonl`,到期对 IWM 做 Brier 评分,含 de-risk 指标（避免暴雷/下行捕获）。
+
+9. **诊断信号——防火墙隔离**（`signals.py`）：严格诊断的侧信道,度量"延迟信息扩散"立论——**价格背离**（基本面轨迹 vs 滚动价格回报 → `unpriced_improvement` / `melting_ice_cube_priced` / `aligned`）与**持仓**（13D/13G + 做空)。它**永不**触碰 `buy_eligible` 或买入决策,仅记录供未来 per-signal 校准。
 
 ---
 
@@ -93,6 +99,8 @@ ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 ---
 
 ## 四种入口模式
+
+> **每种模式先开运行批次**：`export SMALLCAP_RUN=$(python tools/new_run.py --label <名称>)` 把所有产物路由到 `reports/smallcap/<日期>_<名称>/`,附 `_run.json`(skill commit + config),保证可复现、可跨版本对比。未设则平铺(向后兼容)。
 
 ### 1. 主题跑——全库筛选
 
@@ -170,13 +178,22 @@ ticker）通过 CIK 处理，归入 `band="unknown"` 队列。
 
 ```
 取数层（确定性 Python，只摆数据，永不做投资判断）
-  tools/_common.py       — 配置、EDGAR session、per-tool sleep + http_get 重试退避
-  tools/discover.py      — EDGAR FTS 全库枚举
-  tools/filter_by_sic.py — 门 1：SIC 粗排除
-  tools/cheap_pass.py    — 机械避雷硬红线
-  tools/deepdive_data.py — XBRL + Form 4 + 货架状态取数
+  tools/_common.py       — 配置、EDGAR session、per-tool sleep + http_get 重试退避、批次路由
+  tools/new_run.py       — 开时间戳运行批次 + _run.json manifest
+  tools/discover.py      — EDGAR FTS 枚举 + SIC 反向召回 + 市值 fallback
+  tools/filter_by_sic.py — 门 1：SIC 粗排除 + SIC 反向召回底
+  tools/cheap_pass.py    — 机械避雷硬红线（含集中度）
+  tools/deepdive_data.py — XBRL + Form 4 + 货架状态 + 数据完整性守卫 + 二次源校验
+  tools/valuation.py     — 反向 DCF / NAV / EV-EBITDA + buy_eligible 机械门
+  tools/discover_events.py — 事件驱动发现（分拆 / 内部人集群）
+  tools/finalize_run.py  — 确定性收尾（报告 + verdict + RANKING）
+  tools/make_report.py   — 确定性报告脚手架 + 数据质量信任 banner
   tools/rank.py          — 确定性评分与排序
+  tools/track_forward.py — verdict 日志、对 IWM Brier、de-risk 指标、recall@gold
   tools/run_theme.py     — 主题端到端驱动
+
+诊断侧信道（防火墙隔离——只记录，永不驱动 BUY）
+  tools/signals.py       — 价格背离（P16）+ 持仓（P17）；度量扩散立论
 
 判断层（LLM，只读 JSON 做判断，永不计算财务数据）
   SKILL.md         — 编排 + 世界观 + 硬规则
@@ -185,7 +202,7 @@ ticker）通过 CIK 处理，归入 `band="unknown"` 队列。
   workflows/deepdive-fanout.js — 可选：尽调并行加速
 ```
 
-**边界是硬性的：** `tools/*.py` 只出数，不做投资判断；判断层只读 JSON，不算财务。这个分工在 10 个真实生产 bug 中得到验证——所有 bug 都在取数层，架构边界阻止了它们污染判断输出。
+**两条硬边界。**（1）`tools/*.py` 只出数、不做投资判断；判断层只读 JSON、不算财务。（2）诊断 `signals` 层被防火墙隔离——`valuation.py` / `buy_eligible` / 买入触发器对任何 signal **零引用**（加/不加 signals,buy_eligible 字节相同）。取数/判断分工经两轮生产 bug 验证(bug 全在取数层,被边界拦住);signals 防火墙每轮 grep 校验。
 
 ---
 
@@ -231,4 +248,4 @@ ticker）通过 CIK 处理，归入 `band="unknown"` 队列。
 | 1–2 | 硬上限规则生效 | 存在已命名的结构性问题；在解决前不应投资 |
 | 已淘汰 | cheap_pass 触发 kill-flag | 停止——不必重新审查 |
 
-综合分 = 7 维加权平均。硬上限规则凌驾于叙事质量之上。完整评分卡：`reference/judgment-rubric.md`。
+评级是机械的：`rating = f(MoS / NAV-MoS, kill-flags, 硬上限, buy_eligible)`。7 维评分卡是诊断性 `/35` 汇总（无隐藏权重）,不是评级驱动;硬上限规则凌驾于叙事质量之上。完整评分卡：`reference/judgment-rubric.md`。

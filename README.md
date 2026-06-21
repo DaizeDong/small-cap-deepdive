@@ -7,7 +7,7 @@ runs falsifiable deep-dive due diligence with forced disconfirmation, and ranks 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Depends on](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
-[![Version](https://img.shields.io/badge/version-0.2.1-purple?style=flat)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-purple?style=flat)](CHANGELOG.md)
 
 [English](README.md) | [中文版](README_CN.md)
 
@@ -43,34 +43,58 @@ narrative generator.
 
 ## What it does
 
-1. **Enumerates the SEC universe** for a theme using EDGAR full-text search (FTS). Over-recall
-   is intentional — the precision gate that follows clears the field.
+0. **Open a run batch** (`new_run.py`): every run writes into `reports/smallcap/<date>_<label>/`
+   with a `_run.json` manifest (skill git commit + valuation config snapshot) so runs stay
+   comparable across versions. `export SMALLCAP_RUN=$(python tools/new_run.py --label <theme>)`.
+
+1. **Enumerates the SEC universe** for a theme using EDGAR full-text search (FTS), UNIONed with a
+   **SIC reverse-recall floor** (`discover.py` + `filter_by_sic.py`) — for themes with a dedicated SIC
+   code, every registrant in that SIC is enumerated so low-keyword-density true members aren't missed.
+   Market cap is resolved with a fallback chain (SEC shares×price when yfinance is null); names that
+   still can't be priced flow through as `band="unknown"` instead of being silently dropped.
 
 2. **Two-stage precision gate (mandatory).** Gate 1 (`filter_by_sic.py`): coarse SIC-code
    exclusion of definitively off-theme sectors. Gate 2 (LLM): reads each company's 10-K
    business description and classifies it as `pure_play / partial / misrecall`. The
    canonical failure mode without this gate: keyword `refractory` for a railcar insulation
-   theme swept the entire oncology biotech sector. Zero railcar companies.
+   theme swept the entire oncology biotech sector. Zero railcar companies. Recall is *measured*
+   via `recall@gold` against hand-built true-member lists, not assumed.
 
 3. **Mechanical de-risk** (`cheap_pass.py`): hard kill-flags from SEC filings — going-concern
-   auditor paragraphs, death-spiral convertibles, ICFR material weaknesses. Eliminated companies
-   do not proceed to judgment, regardless of narrative quality.
+   auditor paragraphs, death-spiral convertibles, ICFR material weaknesses, magnitude-based
+   customer/government-program concentration. Eliminated companies do not proceed to judgment.
 
-4. **Deep-dive data pull** (`deepdive_data.py`): XBRL financials, Form 4 insider trades,
-   shelf/ATM status, dilution history, material event timeline.
+4. **Deep-dive data pull** (`deepdive_data.py`): XBRL financials (with EBIT concept cascade, debt
+   and shares fallbacks), Form 4 insider trades, shelf/ATM status, dilution history, material event
+   timeline. Data-integrity guards: debt-truncation, wrong-entity, low-revenue-loss, and a
+   **second-source cross-check** (SEC vs yfinance — a >2.5× disagreement is flagged and blocks BUY).
 
-5. **Valuation** (`valuation.py`): reverse-DCF (normalized FCF), EV/EBITDA multiples,
-   cyclical-trough EBITDA, and asset-heavy NAV path. Symmetric BUY trigger: margin of
-   safety ≥ 30% + 0 kill-flags + no T3 thesis → BUY (confidence weighted by valuation
-   robustness). Closed-list catalyst modifier for forced-trading events.
+5. **Valuation + mechanical `buy_eligible` gate** (`valuation.py`): reverse-DCF (normalized FCF),
+   EV/EBITDA multiples, cyclical-trough EBITDA, and asset-heavy NAV path. A BUY requires
+   `mos_basis∈{fcf_cap,nav}` AND margin of safety ≥ 30% AND **`buy_eligible == true`** AND 0
+   kill-flags AND no T3 thesis. `buy_eligible` ANDs in every guard — extreme-MoS, large-cap-ceiling,
+   FCF-sustainability, financial-SIC / insurance exclusion, debt-truncation, cross-source-mismatch,
+   concentration-kill, and the **V-shape value-trap vetoes** (`fundamental_decline_flag` for monotone
+   decline + `peak_contamination_flag` for trough→peak→rollover). Closed-list catalyst modifier
+   (currently frozen to WATCH pending mechanism calibration).
 
 6. **Forced-disconfirmation judgment**: base-rate priors anchored before scoring, mandatory
    disconfirmation WebSearch for each candidate, 7-dimension scorecard with hard ceiling rules.
    Evidence is tier-tagged (T1 first-party SEC filings / T2 independent third-party / T3 company-sourced); T3 evidence cannot support
    a buy recommendation.
 
-7. **Rank** (`rank.py`): scored candidates sorted by composite, with funnel counts,
-   kill-flag eliminations, and explicit coverage gaps.
+7. **Finalize + rank** (`finalize_run.py`, `make_report.py`, `rank.py`): deterministic per-ticker
+   reports with a data-quality **trust banner** under each rating, an auto-emitted verdict fed into the
+   track-forward loop, and `RANKING.md` with funnel counts, kill-flag eliminations, and coverage gaps.
+
+8. **Track-forward calibration** (`track_forward.py`): verdicts logged to `metrics/verdicts.jsonl`,
+   Brier-scored vs IWM at maturity, with de-risk-native metrics (blowup-avoidance / downside-capture).
+
+9. **Diagnostic signals — firewalled** (`signals.py`): a strictly diagnostic side-channel that
+   measures the *delayed-information-diffusion* thesis — **price-divergence** (fundamental trajectory
+   vs trailing price return → `unpriced_improvement` / `melting_ice_cube_priced` / `aligned`) and
+   **ownership** (13D/13G + short interest). It **never** touches `buy_eligible` or the BUY decision;
+   it is recorded for future per-signal calibration only.
 
 ---
 
@@ -123,6 +147,10 @@ ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 ---
 
 ## Four Entry Modes
+
+> **Open a run batch first** (any mode): `export SMALLCAP_RUN=$(python tools/new_run.py --label <name>)`
+> routes all outputs into `reports/smallcap/<date>_<name>/` with a `_run.json` manifest (skill commit +
+> config) so runs are reproducible and comparable across versions. Unset = flat (legacy).
 
 ### 1. Theme run — full universe screen
 
@@ -199,13 +227,22 @@ Expected token budget: ~300k tokens for a full event-mode run with deep-dives.
 
 ```
 bundled data layer (deterministic Python — never makes investment judgments)
-  tools/_common.py     — config, EDGAR session, per-tool sleep + http_get retry/backoff
-  tools/discover.py    — EDGAR FTS universe enumeration
-  tools/filter_by_sic.py — Gate 1 coarse SIC exclusion
-  tools/cheap_pass.py  — mechanical kill-flags from SEC filings
-  tools/deepdive_data.py — XBRL + Form 4 + shelf status data pull
-  tools/rank.py        — deterministic scoring and ranking
-  tools/run_theme.py   — end-to-end theme driver (calls the above)
+  tools/_common.py       — config, EDGAR session, per-tool sleep + http_get retry/backoff, batch routing
+  tools/new_run.py       — open a timestamped run batch + _run.json manifest
+  tools/discover.py      — EDGAR FTS enumeration + SIC reverse-recall + mktcap fallback
+  tools/filter_by_sic.py — Gate 1 coarse SIC exclusion + SIC reverse-recall floor
+  tools/cheap_pass.py    — mechanical kill-flags from SEC filings (incl. concentration)
+  tools/deepdive_data.py — XBRL + Form 4 + shelf status + data-integrity guards + second-source check
+  tools/valuation.py     — reverse-DCF / NAV / EV-EBITDA + the buy_eligible mechanical gate
+  tools/discover_events.py — event-driven discovery (spinoffs / insider clusters)
+  tools/finalize_run.py  — deterministic run-finalizer (reports + verdicts + RANKING)
+  tools/make_report.py   — deterministic report scaffolder + data-quality trust banner
+  tools/rank.py          — deterministic scoring and ranking
+  tools/track_forward.py — verdict log, Brier vs IWM, de-risk metrics, recall@gold
+  tools/run_theme.py     — end-to-end theme driver (calls the above)
+
+diagnostic side-channel (firewalled — recorded, never drives BUY)
+  tools/signals.py       — price-divergence (P16) + ownership (P17); measures the diffusion thesis
 
 thin judgment layer (LLM — reads JSON, applies rubric, never computes financials)
   SKILL.md          — orchestration + world-view + hard rules
@@ -214,10 +251,12 @@ thin judgment layer (LLM — reads JSON, applies rubric, never computes financia
   workflows/deepdive-fanout.js — optional: parallel deep-dive accelerator
 ```
 
-**The boundary is firm:** `tools/*.py` never produces investment judgments (only data). The
-judgment layer never computes financials (only reads JSON). This split was validated on 10
-real production bugs, all of which were in the data layer — the architectural boundary
-prevented them from contaminating judgment outputs.
+**Two firm boundaries.** (1) `tools/*.py` never produces investment judgments (only data); the
+judgment layer never computes financials (only reads JSON). (2) The diagnostic `signals` layer is
+firewalled — `valuation.py` / `buy_eligible` / the BUY trigger contain **zero** references to any
+signal (`buy_eligible` is byte-identical with vs without signals). The data/judgment split was
+validated across two production-bug rounds (all bugs were in the data layer, contained by the
+boundary); the signals firewall was grep-verified each iteration.
 
 ---
 
@@ -279,8 +318,9 @@ X/Twitter account is never used (route ③ is permanently excluded — account s
 | 1–2 | Hard-rule ceiling applied | Named structural problem; do not invest without resolving it |
 | Eliminated | Kill-flag fired at `cheap_pass` | Stop — do not re-examine |
 
-Composite = weighted average of 7 dimensions. Hard ceiling rules override narrative quality.
-Full rubric: `reference/judgment-rubric.md`.
+The rating is mechanical: `rating = f(MoS / NAV-MoS, kill-flags, hard-ceilings, buy_eligible)`. The
+7-dimension scorecard is a diagnostic `/35` summary (no hidden weights), not the rating driver; hard
+ceiling rules override narrative quality. Full rubric: `reference/judgment-rubric.md`.
 
 ---
 
