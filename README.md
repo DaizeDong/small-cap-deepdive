@@ -7,7 +7,7 @@ runs falsifiable deep-dive due diligence with forced disconfirmation, and ranks 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Depends on](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
-[![Version](https://img.shields.io/badge/version-0.3.0-purple?style=flat)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.1-purple?style=flat)](CHANGELOG.md)
 
 [English](README.md) | [中文版](README_CN.md)
 

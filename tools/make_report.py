@@ -160,10 +160,16 @@ def build_rating_block(deep: dict, val: dict) -> str:
 
 
 def _mos_field(v) -> str:
+    """v0.3.1 #13 — render the rating-block mos_pct as a PERCENT (x100), not the raw fraction.
+    valuation emits margin_of_safety_pct / nav_margin_of_safety_pct as decimal fractions
+    (round((band_low-mktcap)/mktcap, 4), e.g. 0.30), but the rating contract — and every consumer
+    of it (finalize_run / rank / the BUY trigger's MoS>=30 clause, the data_false_positive cohort) —
+    speaks in percent. Emitting the raw fraction made BZH's 0.30 read as '0.3' and would have failed
+    the >=30 gate by 100x. Multiply by 100 so the field is percent-consistent end to end."""
     if v is None:
         return "null"
     try:
-        return f"{float(v):.1f}"
+        return f"{float(v) * 100:.1f}"
     except (TypeError, ValueError):
         return "null"
 
@@ -412,8 +418,11 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
         f"Actual trailing growth: {_fmt(der.get('revenue_growth_pct'), '%')}",
         "Assessment: <credible / stretched / heroic>",
         f"MoS basis: {val.get('mos_basis') or 'abstain'}   "
-        f"MoS: {_fmt(val.get('margin_of_safety_pct'), '%')}   "
-        f"[NAV MoS: {_fmt(val.get('nav_margin_of_safety_pct'))}]   "
+        # v0.3.1 #13: margin_of_safety_pct / nav_margin_of_safety_pct are DECIMAL FRACTIONS from
+        # valuation (0.30 = 30%), so render via _fmt_pct_ratio (x100 + '%') — NOT _fmt(...,'%'),
+        # which appended '%' to the raw fraction and printed BZH's 0.30 as '0.3%'.
+        f"MoS: {_fmt_pct_ratio(val.get('margin_of_safety_pct'))}   "
+        f"[NAV MoS: {_fmt_pct_ratio(val.get('nav_margin_of_safety_pct'))}]   "
         f"data_quality flags: {', '.join(val.get('data_quality') or []) or 'none'}",
         "Catalyst: <one sentence with dated trigger, or \"none\">",
         "BUY trigger fires: <YES — state basis | NO — state which condition fails>",
@@ -543,7 +552,10 @@ def _selftest() -> None:
         },
     }
     val = {
-        "ticker": "TST", "mos_basis": "fcf_cap", "margin_of_safety_pct": 76.0,
+        # v0.3.1 #13: margin_of_safety_pct is a DECIMAL FRACTION as valuation emits it (0.76 = 76%),
+        # NOT a percent-form number. The fixture must mirror the real contract so the renderer's x100
+        # conversion is actually exercised (the old 76.0 fixture masked the BZH 0.3->0.3% bug).
+        "ticker": "TST", "mos_basis": "fcf_cap", "margin_of_safety_pct": 0.76,
         "nav_margin_of_safety_pct": None, "ev_sales": 1.1, "ev_ebitda": 4.2,
         "ebit_source": "OperatingIncomeLoss",
         "reverse_dcf_implied_growth": -12.0,
@@ -577,13 +589,43 @@ def _selftest() -> None:
     # 3. Clean company -> banner says clean, no spurious flags, killflag_count 0.
     deep_clean = {"ticker": "CLN", "derived": {"concentration_flag": None,
                   "fundamental_decline_flag": False}, "tenk": {}}
-    val_clean = {"ticker": "CLN", "mos_basis": "fcf_cap", "margin_of_safety_pct": 35.0,
+    # v0.3.1 #13: BZH-shape — a 0.30 decimal fraction MUST render as 30%, never 0.3%.
+    val_clean = {"ticker": "CLN", "mos_basis": "fcf_cap", "margin_of_safety_pct": 0.30,
                  "buy_eligible": True, "data_quality": [], "buy_ineligible_reasons": []}
     md_clean = render_report(deep_clean, val_clean, date="2026-06-20")
     assert "MoS inputs are clean" in md_clean, "clean banner must say clean"
     parsed_clean = parse_rating_block(md_clean)
     assert parsed_clean["buy_eligible"] is True, "clean buy_eligible true"
     assert parsed_clean["killflag_count"] == 0, "clean killflag_count 0"
+
+    # --- v0.3.1 #13: mos_pct rendered as percent (x100), not the raw fraction ---
+    # (a) rating-block mos_pct field: the parser must read percent-consistent values that the
+    # downstream MoS>=30 BUY clause / finalize_run / rank can compare directly.
+    assert parsed_clean["mos_pct"] == 30.0, (
+        f"#13: a 0.30 fraction must render mos_pct=30.0 in the rating block (x100), "
+        f"got {parsed_clean['mos_pct']}"
+    )
+    assert parsed["mos_pct"] == 76.0, (
+        f"#13: a 0.76 fraction must render mos_pct=76.0 in the rating block, got {parsed['mos_pct']}"
+    )
+    # (b) prose MoS line: percent with a '%' sign, NOT the raw fraction (the BZH 0.3% bug).
+    assert "MoS: 30.0%" in md_clean, (
+        "#13: prose MoS line must read '30.0%' for a 0.30 fraction (NOT '0.3%')"
+    )
+    assert "0.3%" not in md_clean, "#13: the raw-fraction '0.3%' bug must NOT appear"
+    assert "MoS: 76.0%" in md, "#13: prose MoS for a 0.76 fraction must read '76.0%'"
+    # (c) _mos_field unit conversion + null passthrough (direct unit assertion).
+    assert _mos_field(0.30) == "30.0" and _mos_field(0.555) == "55.5", "#13: _mos_field x100"
+    assert _mos_field(None) == "null", "#13: _mos_field null passthrough preserved"
+    # (d) NAV MoS (also a decimal fraction) renders as percent too.
+    _val_nav = {"ticker": "NAVX", "mos_basis": "nav", "margin_of_safety_pct": None,
+                "nav_margin_of_safety_pct": 0.42, "buy_eligible": False,
+                "data_quality": [], "buy_ineligible_reasons": []}
+    _md_nav = render_report({"ticker": "NAVX", "derived": {}, "tenk": {}}, _val_nav, date="2026-06-20")
+    assert "NAV MoS: 42.0%" in _md_nav, "#13: NAV MoS fraction 0.42 must render '42.0%'"
+    assert parse_rating_block(_md_nav)["mos_pct"] == 42.0, (
+        "#13: nav-basis rating-block mos_pct must be the nav MoS x100 (42.0)"
+    )
 
     # P-E: rendered report must contain NO literal `<...>` prose placeholder tokens — a PM never
     # sees template skeletons. The machine-decision block (rating contract + trust banner) must
@@ -652,7 +694,8 @@ def _selftest() -> None:
 
     print("make_report selftest PASS (trust banner surfaces flags + fenced rating contract parses "
           "+ clean-banner + killflag count incl. concentration + utf-8 read + P-E no literal "
-          "<...> placeholders survive while machine-decision block preserved + T2 DIAGNOSTIC "
+          "<...> placeholders survive while machine-decision block preserved + #13 mos_pct rendered "
+          "as percent x100 (rating block + prose + NAV MoS) + T2 DIAGNOSTIC "
           "SIGNALS section renders below the rating block, marked non-rating, with the rating "
           "contract firewalled from every signal field)")
 

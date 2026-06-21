@@ -586,18 +586,63 @@ def _selftest():
         "P5: a 0.5B reconstructed mktcap must band 'deep' (in-scope, flows to deepdive)")
     print("  P5 SEC-shares x price reconstruction leg (yfinance-null -> in-scope 'deep'): OK")
 
-    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb + KOP MW=0 + STNG 20-F form-aware blurb + I4 reject_burn OCF fix + P3 concentration kill-reject + P5 ceiling resolution/unknown flow-through)")
+    # Test 13: P12 — a row with yfinance mktcap=None but a RESOLVABLE SEC shares x price
+    # must be reconstructed INSIDE resolve_ceiling, land in a real band, and NOT be
+    # size-excluded. This is the SJW/HI/MRC bug: yfinance returns NaN for a real small-cap,
+    # the row used to be discarded before reaching cheap_pass. resolve_ceiling must run the
+    # SEC reconstruction BEFORE the size-exclusion. shares_fn is injected (network-free):
+    #   SJWX: 30M shares x $50 = $1.5B  -> 'deep'  (in-scope; the SJW fix)
+    #   BIGX: 200M shares x $50 = $10B  -> 'large' (correctly excluded AFTER reconstruction)
+    _p12_df = pd.DataFrame([
+        {"ticker": "SJWX", "name": "SJW-like", "cik": "766829", "mktcap": None,
+         "price": 50.0, "smallcap_candidate": True},
+        {"ticker": "BIGX", "name": "Big-after-recon", "cik": "111", "mktcap": None,
+         "price": 50.0, "smallcap_candidate": True},
+    ])
+    _shares = {"766829": 30_000_000, "111": 200_000_000}
+    _p12_kept = resolve_ceiling(
+        _p12_df, max_mcap=2e9, watch_max=5e9,
+        shares_fn=lambda c: _shares.get(str(c).strip().lstrip("0")),
+    ).set_index("ticker")
+    assert "SJWX" in _p12_kept.index, (
+        "P12: a yfinance-NaN row with resolvable SEC shares x price must NOT be size-excluded "
+        "(the SJW bug — real name dropped before reaching cheap_pass)")
+    assert _p12_kept.loc["SJWX", "mktcap"] == 1.5e9, (
+        f"P12: SJWX mktcap must reconstruct to 30M x $50 = $1.5B, "
+        f"got {_p12_kept.loc['SJWX','mktcap']}")
+    assert _p12_kept.loc["SJWX", "mktcap_source"] == "sec_shares_x_price", (
+        f"P12: SJWX must be sourced via SEC shares x price, "
+        f"got {_p12_kept.loc['SJWX','mktcap_source']!r}")
+    assert _p12_kept.loc["SJWX", "band"] == "deep", (
+        f"P12: reconstructed $1.5B must band 'deep' (in-scope, NOT 'unknown'), "
+        f"got {_p12_kept.loc['SJWX','band']!r}")
+    # BIGX: the SEC reconstruction fires FIRST, THEN the >watch_max exclusion bites —
+    # confirming resolution strictly precedes size-exclusion (not the reverse).
+    assert "BIGX" not in _p12_kept.index, (
+        "P12: a reconstructed mktcap that is genuinely 'large' is excluded AFTER resolution "
+        "(resolve-then-size-exclude ordering)")
+    print("  P12 SEC shares x price fires BEFORE size-exclusion "
+          "(yfinance-NaN SJW kept as 'deep'; oversize excluded after reconstruction): OK")
+
+    print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb + KOP MW=0 + STNG 20-F form-aware blurb + I4 reject_burn OCF fix + P3 concentration kill-reject + P5 ceiling resolution/unknown flow-through + P12 SEC shares x price before size-exclusion)")
 
 
 def resolve_ceiling(cand: pd.DataFrame, max_mcap: float,
-                    watch_max: float | None = None) -> pd.DataFrame:
-    """P5 — resolve the market-cap ceiling INSIDE cheap_pass, before the expensive deepdive.
+                    watch_max: float | None = None,
+                    shares_fn=None) -> pd.DataFrame:
+    """P5/P12 — resolve the market-cap ceiling INSIDE cheap_pass, before the expensive deepdive.
 
     For each candidate row: resolve mktcap via the _common fallback chain when it is
     null/non-positive (yfinance -> SEC companyfacts shares x price), then tag a band via
     band_for. Only the "large" band (> watch_band_max) is excluded as out-of-scope. The
     "deep", "watch", AND "unknown" bands FLOW THROUGH into the body health check — a null
     mktcap is NEVER a silent drop (the v0.2.0 bug that discarded 91-100% of some themes).
+
+    P12 — the SEC shares x price reconstruction is run HERE, BEFORE the size-exclusion,
+    so a real name whose yfinance mktcap came back NaN (SJW, HI, MRC) but whose SEC
+    shares x price IS resolvable gets a real band and is NOT excluded. The resolve step
+    strictly precedes the `band != "large"` filter — never the reverse. shares_fn is
+    injectable so the selftest can prove this leg without a network call.
 
     Sets/overwrites these columns on the returned frame:
       - mktcap         (resolved, may stay None for unknown)
@@ -617,7 +662,12 @@ def resolve_ceiling(cand: pd.DataFrame, max_mcap: float,
         needs = mc is None or (isinstance(mc, float) and mc != mc) or (
             isinstance(mc, (int, float)) and mc <= 0)
         if needs:
-            mc, src = resolve_mktcap(None, row.get("price"), row.get("cik"))
+            # P12: resolve (incl. SEC shares x price) BEFORE banding/size-exclusion.
+            if shares_fn is not None:
+                mc, src = resolve_mktcap(None, row.get("price"), row.get("cik"),
+                                         shares_fn=shares_fn)
+            else:
+                mc, src = resolve_mktcap(None, row.get("price"), row.get("cik"))
         else:
             mc = float(mc)
             src = row.get("mktcap_source") or "yfinance"

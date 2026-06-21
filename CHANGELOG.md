@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.3.1 — 2026-06-20
+
+Remediation round driven by the v0.3.0 full-coverage test (53 themes across all GICS sectors +
+niche; report in `docs/coverage-test-2026-06-20/`). The test confirmed **0 false BUYs leaked**
+but found one CRITICAL mechanical hole plus precision/recall bugs — all fixed here and re-verified
+on real data.
+
+- **#1 (CRITICAL) degenerate-base hole** — new `normalization_masks_current_loss`: when
+  `normalized_fcf>0` while current `latest_ocf<0`/`latest_fcf<0` or `contamination_ratio<0` (the
+  trailing-average masking current cash burn / a divested-segment stub), `buy_eligible` is now
+  blocked (downgrade BUY→WATCH). Closes the **TUSK +55.1% phantom BUY** that previously only the
+  human adversarial layer caught (the mechanical vetoes were silenced by the A1 0<cr guard).
+- **#2 (CRITICAL) SEC debt truncation** — `total_debt` is now SUMMED across the standard debt
+  concepts; when still `< 0.5 × implied (liabilities − equity)`, the implied figure is used for EV.
+  HRI now reflects ~$9.768B (was a single-tag $11M). Cuts false `cross_source_mismatch` blocks.
+- **#3** ASC842 operating-lease adjustment on the SEC side of the cross-source comparison.
+- **#4** insurance-precision: `insurance_concepts_present` requires financial SIC (63/64) OR ≥2
+  distinct insurance concepts — kills SPB/ASTE/SKIL/ALLR/TOPP false positives.
+- **#7** concentration segment-vs-customer guard (robust to collapsed whitespace / curly
+  apostrophe) — saves DSGR, a real $1.32B distributor previously killed pre-deep-dive.
+- **#9** `buy_eligible=False` (`not_assessable_no_intrinsic_band`) when there is no intrinsic band
+  / null MoS — `buy_eligible` can no longer be True with a null MoS.
+- **#5** SIC reverse-recall floors added for ~30 more themes. **#6** `recall@gold` now measures
+  against the universe set, not the post-filter file (deathcare 5/6, not the 33% artifact).
+- **#12** SEC shares×price mktcap fallback fires before the small-cap size-exclusion (saves
+  SJW/HI-class names). **#13** deep-dive banner off-by-one + `mos_pct` percent display.
+
+All 9 tool selftests + both workflows pass; regression (SIGA double-blocked, NRP peak veto, INVA
+clean) unchanged. Still a de-risk scanner — 0-BUY remains the common, correct output.
+
 ## v0.3.0 — 2026-06-20
 
 A 5-iteration, subagent-driven, test-driven optimization campaign (10-lens reflection →
