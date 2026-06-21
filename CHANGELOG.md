@@ -6,7 +6,7 @@ A 5-iteration, subagent-driven, test-driven optimization campaign (10-lens refle
 design → implement → test on real data → iterate). It transformed the engine **from a
 value-trap generator into a calibrated landmine scanner with an operationalized (diagnostic)
 alpha thesis**, and closed all four top structural diagnoses. Full write-up:
-`docs/superpowers/specs/2026-06-20-campaign-final-report.md`. Still a de-risk scanner — 0-BUY
+`docs/optimization-campaign-2026-06/2026-06-20-campaign-final-report.md`. Still a de-risk scanner — 0-BUY
 is the common, correct output; calibration matures ~2027.
 
 The root finding the campaign fixed: `MoS` and `reverse_dcf_implied_growth` were algebraically
