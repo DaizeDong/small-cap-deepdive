@@ -1,5 +1,80 @@
 # Changelog
 
+## v0.3.0 — 2026-06-20
+
+A 5-iteration, subagent-driven, test-driven optimization campaign (10-lens reflection →
+design → implement → test on real data → iterate). It transformed the engine **from a
+value-trap generator into a calibrated landmine scanner with an operationalized (diagnostic)
+alpha thesis**, and closed all four top structural diagnoses. Full write-up:
+`docs/superpowers/specs/2026-06-20-campaign-final-report.md`. Still a de-risk scanner — 0-BUY
+is the common, correct output; calibration matures ~2027.
+
+The root finding the campaign fixed: `MoS` and `reverse_dcf_implied_growth` were algebraically
+identical, so every mechanical BUY priced *decline* by construction, and the stated edge
+(delayed information diffusion) was measured nowhere.
+
+**Decision layer — guards now BLOCK, not advise (`tools/valuation.py`, `reference/judgment-rubric.md`)**
+- **`buy_eligible` mechanical gate (P1):** the previously-advisory guards are now a single boolean the
+  BUY trigger ANDs in. A BUY requires `mos_basis∈{fcf_cap,nav}` AND MoS ≥ 30% AND `buy_eligible` AND
+  zero kill-flags. VSNT/ARDT (large-cap) and the rest no longer slip through.
+- **Concentration magnitude kill-flag (P3):** top-customer / single-government-program % from XBRL
+  segment members (>40% customer / >60% program → kill), replacing the old English substring. Catches
+  SIGA's 75% BARDA dependence.
+- **Trajectory + peak-contamination V-shape vetoes (P6 / P-A):** `fundamental_decline_flag` (monotone
+  decline) and `peak_contamination_flag` (trough→peak→rollover, independent of slope: contamination
+  < 0.8 AND latest-below-avg AND latest NI < 0) downgrade a static-MoS BUY → WATCH at the fundamentals.
+  Kills the SIGA and NRP melting-ice-cubes; 0 false fires across 22 fast-growth test names.
+- **Financial-sector + insurance-holdco exclusion (C2 / A3):** financial SICs (60/61/63/64/67) and any
+  issuer with insurance XBRL concepts (e.g. SIC-65 holdcos) route to NAV/abstain, never fcf_cap.
+- **Second-source sanity gate (P7):** SEC-XBRL debt/revenue/shares cross-checked against yfinance;
+  a > 2.5× disagreement (`cross_source_mismatch`) blocks BUY. HRI now double-caught.
+- **Defense-in-depth:** extreme-MoS (>100%), large-cap-ceiling, FCF-sustainability gates all bite.
+
+**Data / robustness (`tools/deepdive_data.py`)**
+- XBRL guards: debt-truncation, wrong-entity (now strictly unit-mistag / wrong-CIK), low-revenue-loss
+  ratio (tiered; `_extreme` gates), degenerate-base guard (a negative contamination ratio can't trip
+  a veto). `concentration_unquantified` advisory for text-only / pre-XBRL filers.
+- **EBIT concept cascade (P9):** recovers EV/EBITDA on the ~47% of names where the single concept was null.
+- **Market-cap fallback + `band=unknown` flow-through (P5):** SEC shares×price fallback when yfinance is
+  null; unresolved names flow through as `band=unknown` instead of being silently dropped. Recall
+  recovered from ~0→271 (regbank) and ~12→219 (shipping) candidates.
+- `form_used` provenance (10-K/20-F/40-F incl. foreign filers); deepdive crash-surfacing
+  (`deepdive_<ticker>_ERROR.json`, no more silent skips).
+
+**Recall (`tools/discover.py`, `tools/filter_by_sic.py`, `tools/track_forward.py`)**
+- **SIC reverse-recall floor (P8):** for a theme with dedicated SIC code(s), enumerate all registrants
+  in that SIC and UNION with FTS (`recall_channel` tagged) — turns SIC from a precision-only exclude
+  into a recall floor. **`recall@gold` metric** measures recall against hand-built gold lists
+  (deathcare = 100%, with SCI+CSV recovered via the SIC floor). Recall is now measured, not assumed.
+
+**Calibration (`tools/track_forward.py`, `metrics/`)**
+- **P12:** confidence-as-probability by rating direction, dividend-adjusted total return, de-risk-native
+  metrics (blowup-avoidance / downside-capture), and the 19 v0.2.0 false-positive BUYs backfilled as a
+  distinct `adjudication=data_false_positive` class so the BUY arm of the calibration table isn't empty.
+
+**Ergonomics (new tools)**
+- **`tools/new_run.py`** — open a timestamped run batch; all outputs land in
+  `reports/smallcap/<date>_<label>/` with a `_run.json` manifest (skill git commit + config snapshot)
+  for cross-version comparison. Set `SMALLCAP_RUN` to route; unset = flat (legacy).
+- **`tools/finalize_run.py`** — deterministic run-finalizer: asserts every deep candidate has a report +
+  verdict, rebuilds `RANKING.md`, auto-emits verdicts into the track-forward loop, and is Gate-2-aware
+  (misrecalls counted resolved, not missing).
+- **`tools/make_report.py`** — deterministic report scaffolder with a **data-quality TRUST BANNER**
+  under each rating (the flags must be visible at the decision point).
+- `rank.py` gained a fenced front-matter rating contract + `--selftest`.
+
+**Diagnostic alpha — firewalled side-channel (`tools/signals.py`)**
+- **`signals.py`** emits a top-level `signals` namespace (sibling of `derived`): **price-divergence
+  (P16)** — fundamental trajectory vs trailing 6m/12m price return → `{unpriced_improvement |
+  melting_ice_cube_priced | aligned | unclear}` (directly measures "a real change the market hasn't
+  priced"; MGPI → `unpriced_improvement`) — and **ownership (P17)** — EDGAR 13D/13G + short interest.
+- **THE FIREWALL:** signals are strictly **diagnostic** — `valuation.py` / `buy_eligible` / the BUY
+  trigger contain **zero** references to any signal; `buy_eligible` is byte-identical with vs without
+  signals. `track_forward` records a `signals_snapshot` (recorded-but-inert) for future per-signal
+  Brier calibration. P15 alt-data (TrendsMCP / news) stays agent-gathered T2 context (MCP isn't
+  callable from Python). This operationalizes the thesis as a measurement without letting it originate
+  or up-weight a BUY.
+
 ## v0.2.1 — 2026-06-19
 
 Remediation round driven by the full real-data validation campaign (21 subagents:
