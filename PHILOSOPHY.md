@@ -154,17 +154,31 @@ into two halves on the philosophy line:
   T1 arithmetic on the trailing series, it can only *remove* a false-positive BUY (never manufacture
   one), and it is the philosophy-faithful way to defend against the value trap. It fully respects
   P3 (discipline-as-moat) and the generative test.
-- **Expansive half — APPROVED, NOT YET BUILT (iteration 2).** A firewalled diagnostic side-channel
-  that may CORROBORATE a between-filings fundamental change using free coarse alt-data (TrendsMCP /
-  GDELT / news-volume; see `reference/data-sources.md`), under a strict architectural firewall:
-  corroboration-only, T2-labeled, **never originates or up-weights a BUY**, and track-forward-gated
-  until it has earned its own Brier score. This is the part that imports signals T1-purism exists to
-  suppress, so it is gated behind explicit approval and a firewall — get the firewall wrong and you
-  rebuild the confident-but-wrong narrative engine this skill exists to prevent.
+- **Expansive half — APPROVED (iteration 1, §5-Q2) and now BUILT (iteration 4).** A firewalled
+  diagnostic side-channel that **operationalizes the thesis diagnostically** behind a strict
+  architectural firewall. It now directly *measures* "unpriced change": P16 (fundamental-vs-price
+  divergence, `tools/signals.py`) reads the deterministic T1 trajectory from `derived` and compares
+  it to the trailing 6m/12m price move, labeling `unpriced_improvement` (fundamentals up + price
+  flat — the diffusion thesis, previously undetectable) vs `melting_ice_cube_priced` (fundamentals
+  down + price elevated — SIGA-shaped). P17 adds free ownership/short-interest positioning
+  (13D/13G + best-effort FINRA, staleness-labeled). P15 alt-data (TrendsMCP / GDELT / news-volume;
+  see `reference/data-sources.md`) is agent-gathered T2 corroboration at analysis time. **The
+  firewall is the whole point and is non-negotiable:** every signal lives in a SEPARATE top-level
+  `signals` namespace (sibling of `derived`, never inside it); `valuation.py`, the `buy_eligible`
+  composite, and the BUY trigger MUST NOT read any `signals.*` field; a BUY stays anchored to T1
+  filing-derived valuation + zero kill-flags + `buy_eligible`. Signals are read as labeled T2
+  context and snapshotted by `track_forward` for FUTURE per-signal Brier — they can NEVER originate
+  or up-weight a BUY. This is exactly the input T1-purism exists to suppress, so it is *quarantined*
+  rather than mechanized: making it diagnostic-only is how we operationalize the thesis WITHOUT
+  rebuilding the confident-but-wrong narrative engine this skill exists to prevent.
 
-This note closes the prior doc/code gap: the docs no longer claim an inflection capability the code
-lacks. Iteration 1 makes the conservative half real; the expansive half is named, scoped, approved,
-and explicitly deferred to iteration 2.
+This note closes the prior doc/code gap completely: the conservative half (iteration 1) makes the
+T1 trajectory veto real; the expansive half is now BUILT (iteration 4) but quarantined — the thesis
+is operationalized *diagnostically*, never as a load-bearing input on BUY. The generative test below
+is satisfied because the side-channel moves output closer to truth (a real divergence becomes
+labeled, calibratable evidence) without making the narrative load-bearing: get the firewall wrong
+and it would only "make the narrative more convincing" — which is precisely why the firewall, not
+the signal, is the deliverable.
 
 > - **保守半边（迭代 1 已交付）：** 确定性、只降级的轨迹/污染否决（`fundamental_decline_flag`，纯 T1
 >   算术，只能移除假阳性 BUY，绝不制造 BUY）——这是抵御价值陷阱的、忠于哲学的方式。
