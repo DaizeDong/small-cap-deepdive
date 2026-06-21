@@ -87,6 +87,194 @@ BLOWUP_DRAWDOWN_THRESHOLD = -0.40  # a horizon total return <= -40% counts as a 
 # Calibration bucket edges for implied_prob
 CALIB_BUCKETS = [(0.0, 0.40), (0.40, 0.55), (0.55, 0.70), (0.70, 1.01)]
 
+# ---------------------------------------------------------------------------
+# P8 — recall@gold: measure the recall FLOOR against hand-built true-member lists.
+# ---------------------------------------------------------------------------
+# filter_by_sic owns the SIC reverse-recall (the dedicated-SIC floor) and discover
+# owns the FTS keyword recall; neither one MEASURES recall. P8's missing half is the
+# audit: for the handful of themes where a true-member list can be hand-built, compute
+# recall@gold = |recalled ∩ gold| / |gold| so the recall floor is a NUMBER, not a manual
+# blurb re-scan. THEME_GOLD maps a theme slug to its hand-curated true-member tickers.
+# Matching is case-insensitive substring against the theme slug (same convention as
+# filter_by_sic.theme_sics), so "deathcare", "funeral_deathcare_2026" all resolve.
+#
+# Deathcare gold cohort (assessment §P8): the canonical public deathcare names. SCI/CSV
+# are the pure operators (SIC 7200 — caught by the SIC floor); MATW (3360 castings),
+# HI (Hillenbrand, 3559), STON (StoneMor, 6553 cemeteries), SNFCA (6199 finance) are
+# cross-SIC by design — they are the residual FTS-only gap the SIC floor cannot reach,
+# which is exactly what recall@gold quantifies.
+THEME_GOLD: dict[str, list[str]] = {
+    "deathcare": ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"],
+    "funeral": ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"],
+    "cemetery": ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"],
+}
+
+# EDGAR full-text search (EFTS) returns at most this many hits per query (the documented
+# top-1000 page cap). A theme whose true universe exceeds 1000 FTS hits can silently drop
+# real members past the cap; recall@gold warns when the recall set is at/over the cap so a
+# low recall is attributed to the cap (a known FTS limit) rather than mistaken for a clean
+# floor. The SIC reverse-recall (filter_by_sic) is the mitigation; this is the alarm.
+FTS_TOP_HITS_CAP = 1000
+
+# P8 loss-stage taxonomy: where a gold true-member fell out of the funnel. recall@gold is the
+# headline NUMBER; the stage breakdown is the DIAGNOSIS — it attributes each gold member to the
+# exact pipeline stage that lost it (or kept it), so a low recall floor is actionable rather than
+# a single opaque ratio. Stages, in pipeline order:
+#   recalled_final  — survived the whole funnel into the final candidate set (a TRUE recall hit)
+#   sic_recovered   — FTS missed it but the SIC reverse-recall floor caught it (the P8 win)
+#   dropped_mktcap  — recalled, then dropped by the market-cap band filter (out of size scope)
+#   gated_out       — survived to deep-dive, then gated out (buy_ineligible / kill-flag)
+#   fts_missed      — never recalled by ANY channel and not recovered by SIC (the true leak)
+# A gold member lands in exactly one stage. recalled_final ∪ sic_recovered are the recall hits;
+# the rest are the recall floor's residual leak, each with a cause attached.
+RECALL_STAGES = (
+    "recalled_final",
+    "sic_recovered",
+    "dropped_mktcap",
+    "gated_out",
+    "fts_missed",
+)
+
+
+def theme_gold(theme: str, mapping: dict[str, list[str]] | None = None) -> list[str]:
+    """Return the hand-built gold true-member tickers for a theme, or [] if none exist.
+
+    P8: only themes present in THEME_GOLD have a gold list to measure recall against.
+    Matching is case-insensitive substring against the theme slug (so compound slugs
+    resolve). [] means recall@gold is a no-op for that theme (no gold => not measurable).
+    """
+    if mapping is None:
+        mapping = THEME_GOLD
+    t = str(theme).lower()
+    out: list[str] = []
+    for key, tickers in mapping.items():
+        if key in t:
+            for tk in tickers:
+                if tk.upper() not in out:
+                    out.append(tk.upper())
+    return out
+
+
+def recall_stage_breakdown(
+    gold,
+    recalled_tickers,
+    fts_tickers=None,
+    sic_tickers=None,
+    mktcap_dropped=None,
+    gated_out=None,
+) -> dict[str, list[str]]:
+    """P8 — attribute each gold true-member to the pipeline stage that lost (or kept) it.
+
+    The recall ratio is a single number; this is the per-stage DIAGNOSIS behind it. Each gold
+    ticker is classified into exactly one RECALL_STAGES bucket, evaluated in pipeline order so the
+    earliest-applicable cause wins:
+
+      1. recalled_final — in the final recall set (`recalled_tickers`). A clean recall hit.
+      2. sic_recovered  — NOT recalled, but present in the SIC reverse-recall set (`sic_tickers`)
+                          and absent from the FTS set (`fts_tickers`): the SIC floor caught what
+                          FTS missed. This is the quantity P8 exists to make visible.
+      3. dropped_mktcap — NOT recalled, but listed in `mktcap_dropped`: it WAS recalled upstream
+                          then removed by the market-cap band filter (size out of scope).
+      4. gated_out      — NOT recalled, but listed in `gated_out`: it survived to deep-dive then
+                          was gated out (buy_ineligible / kill-flag).
+      5. fts_missed     — none of the above: never recalled by any channel and not recovered by
+                          SIC. The true recall-floor leak.
+
+    All inputs are case-insensitive ticker iterables (or None). Returns a dict keyed by every
+    RECALL_STAGES name to a sorted ticker list (empty lists for unused stages). The five lists
+    partition `gold` exactly (each member appears once), so the breakdown always reconciles to the
+    headline recall ratio: |recalled_final| + |sic_recovered| == recall hits.
+    """
+    def _norm(xs):
+        return {str(t).upper().strip() for t in (xs or []) if str(t).strip()}
+
+    gold_set = _norm(gold)
+    recalled = _norm(recalled_tickers)
+    fts = _norm(fts_tickers)
+    sic = _norm(sic_tickers)
+    dropped = _norm(mktcap_dropped)
+    gated = _norm(gated_out)
+
+    out: dict[str, list[str]] = {stage: [] for stage in RECALL_STAGES}
+    for tk in gold_set:
+        if tk in recalled:
+            stage = "recalled_final"
+        elif tk in sic and tk not in fts:
+            stage = "sic_recovered"
+        elif tk in dropped:
+            stage = "dropped_mktcap"
+        elif tk in gated:
+            stage = "gated_out"
+        else:
+            stage = "fts_missed"
+        out[stage].append(tk)
+    for stage in out:
+        out[stage].sort()
+    return out
+
+
+def recall_at_gold(
+    theme: str,
+    recalled_tickers,
+    fts_hit_count: int | None = None,
+    mapping: dict[str, list[str]] | None = None,
+    fts_tickers=None,
+    sic_tickers=None,
+    mktcap_dropped=None,
+    gated_out=None,
+) -> dict | None:
+    """P8 — recall@gold for a theme's recall set against its hand-built gold list.
+
+    `recalled_tickers` is the set/list of tickers the run actually recalled (FTS ∪ SIC
+    reverse-recall — the union that filter_by_sic produces). `fts_hit_count`, when known,
+    is the raw FTS hit count; if it is at/over FTS_TOP_HITS_CAP a `fts_cap_warning` is set
+    so a sub-1.0 recall is correctly attributed to the documented top-1000 page cap.
+
+    The optional per-stage inputs (`fts_tickers`, `sic_tickers`, `mktcap_dropped`, `gated_out`)
+    drive the loss-STAGE breakdown (see recall_stage_breakdown): when any are supplied the result
+    carries a `stage_breakdown` dict attributing every gold member to the pipeline stage that lost
+    or kept it. When none are supplied the breakdown is still emitted (every recalled gold member
+    lands in recalled_final, every missing one in fts_missed) so the field is always present.
+
+    Returns None when the theme has no gold list (not measurable). Otherwise returns:
+      - gold:            sorted gold ticker list
+      - recalled_gold:   gold members present in the recall set (the hits)
+      - missing_gold:    gold members the recall set MISSED (the recall floor leak)
+      - recall_at_gold:  |recalled∩gold| / |gold|  (float in [0,1])
+      - fts_cap_warning: str|None — set iff fts_hit_count >= FTS_TOP_HITS_CAP
+      - stage_breakdown: dict[stage -> sorted tickers] partitioning `gold` (see RECALL_STAGES)
+    """
+    gold = theme_gold(theme, mapping=mapping)
+    if not gold:
+        return None
+    recalled = {str(t).upper() for t in (recalled_tickers or [])}
+    gold_set = set(gold)
+    hit = sorted(gold_set & recalled)
+    miss = sorted(gold_set - recalled)
+    cap_warn = None
+    if fts_hit_count is not None and fts_hit_count >= FTS_TOP_HITS_CAP:
+        cap_warn = (
+            f"FTS hit count {fts_hit_count} >= top-{FTS_TOP_HITS_CAP} cap — recall may be "
+            f"truncated by the EFTS page limit; rely on the SIC reverse-recall floor"
+        )
+    stage_breakdown = recall_stage_breakdown(
+        gold,
+        recalled,
+        fts_tickers=fts_tickers,
+        sic_tickers=sic_tickers,
+        mktcap_dropped=mktcap_dropped,
+        gated_out=gated_out,
+    )
+    return {
+        "theme": theme,
+        "gold": gold,
+        "recalled_gold": hit,
+        "missing_gold": miss,
+        "recall_at_gold": round(len(hit) / len(gold), 4),
+        "fts_cap_warning": cap_warn,
+        "stage_breakdown": stage_breakdown,
+    }
+
 
 def _implied_prob_from_confidence(rating: str, confidence: float | None) -> float:
     """Map a model confidence (0..1) to an implied probability of FAVORABLE outcome, by
@@ -1013,6 +1201,99 @@ def cmd_status(args) -> None:
 
 
 # ---------------------------------------------------------------------------
+# --recall-gold (P8 recall floor measurement)
+# ---------------------------------------------------------------------------
+
+def _recall_set_from_candidate_files(paths: list[Path]) -> tuple[set[str], int, dict[str, set[str]]]:
+    """Read recalled tickers from one or more candidate JSON files (the run's recall set).
+
+    Each file is a list of candidate rows (or a dict wrapping them under candidates/rows),
+    each carrying a `ticker`. Returns (recalled_ticker_set, fts_only_count, stage_sets) where:
+      - recalled_ticker_set — every ticker still present in the final candidate set
+      - fts_only_count      — rows recalled by FTS (recall_channel in {fts, both} or untagged),
+                              the figure compared against FTS_TOP_HITS_CAP for the cap warning
+      - stage_sets          — dict with the per-stage ticker sets used by recall_stage_breakdown:
+            "fts"            tickers with recall_channel in {fts, both}
+            "sic"            tickers with recall_channel in {sic_reverse, both}
+            "mktcap_dropped" tickers a row tags dropped on market cap (dropped_stage=="mktcap",
+                             or a truthy "mktcap_dropped" flag)
+            "gated_out"      tickers a row tags gated out (dropped_stage=="gated", or a truthy
+                             "gated_out"/"buy_ineligible" flag)
+
+    A row can be present in the candidate file but tagged as dropped/gated downstream; those
+    rows feed the stage sets but are NOT added to recalled_ticker_set so the breakdown can
+    attribute them past the final recall set.
+    """
+    recalled: set[str] = set()
+    fts_only = 0
+    stage_sets: dict[str, set[str]] = {
+        "fts": set(), "sic": set(), "mktcap_dropped": set(), "gated_out": set(),
+    }
+    for p in paths:
+        try:
+            d = json.loads(Path(p).read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"  [warn] recall-gold: cannot read {p}: {e}", file=sys.stderr)
+            continue
+        rows = d if isinstance(d, list) else (d.get("candidates") or d.get("rows") or [])
+        for r in rows:
+            tk = str(r.get("ticker") or "").upper().strip()
+            if not tk:
+                continue
+            ch = r.get("recall_channel")
+            if ch in (None, "fts", "both"):
+                fts_only += 1
+                stage_sets["fts"].add(tk)
+            if ch in ("sic_reverse", "sic", "both"):
+                stage_sets["sic"].add(tk)
+            dropped_stage = str(r.get("dropped_stage") or "").lower()
+            if dropped_stage == "mktcap" or r.get("mktcap_dropped"):
+                stage_sets["mktcap_dropped"].add(tk)
+            elif dropped_stage in ("gated", "gated_out") or r.get("gated_out") or r.get("buy_ineligible"):
+                stage_sets["gated_out"].add(tk)
+            else:
+                # Not tagged as dropped downstream -> it is in the final recall set.
+                recalled.add(tk)
+    return recalled, fts_only, stage_sets
+
+
+def cmd_recall_gold(args) -> None:
+    """--recall-gold: compute recall@gold for a theme's recall set vs its hand-built gold list."""
+    theme = args.theme
+    if not theme:
+        print("recall-gold requires --theme", file=sys.stderr)
+        sys.exit(2)
+    paths = [Path(p) for p in (args.recall_gold or [])]
+    if not paths:
+        print("recall-gold requires one or more candidate JSON paths", file=sys.stderr)
+        sys.exit(2)
+    recalled, fts_count, stage_sets = _recall_set_from_candidate_files(paths)
+    res = recall_at_gold(
+        theme, recalled, fts_hit_count=fts_count,
+        fts_tickers=stage_sets["fts"],
+        sic_tickers=stage_sets["sic"],
+        mktcap_dropped=stage_sets["mktcap_dropped"],
+        gated_out=stage_sets["gated_out"],
+    )
+    if res is None:
+        print(f"recall@gold: no gold list for theme '{theme}' — not measurable")
+        return
+    print(f"recall@gold — theme '{theme}'")
+    print(f"  gold ({len(res['gold'])}):     {', '.join(res['gold'])}")
+    print(f"  recalled_gold: {', '.join(res['recalled_gold']) or '—'}")
+    print(f"  MISSING_gold:  {', '.join(res['missing_gold']) or '—'}")
+    print(f"  recall@gold:   {res['recall_at_gold']*100:.1f}% "
+          f"({len(res['recalled_gold'])}/{len(res['gold'])})")
+    sb = res["stage_breakdown"]
+    print(f"  loss-stage breakdown:")
+    for stage in RECALL_STAGES:
+        members = sb.get(stage) or []
+        print(f"    {stage:<15} {len(members):>2}  {', '.join(members) or '—'}")
+    if res["fts_cap_warning"]:
+        print(f"  [WARN] {res['fts_cap_warning']}")
+
+
+# ---------------------------------------------------------------------------
 # --selftest (synthetic Brier math, no network)
 # ---------------------------------------------------------------------------
 
@@ -1222,6 +1503,148 @@ def _selftest() -> None:
     assert _downside_capture_rate([{"rating": "观察", "scored": True}]) is None, "no-避开 downside-capture should be None"
     print(f"  PASS: de-risk metrics — integrity={integ:.2f}, blowup-avoid={ba:.2f}, downside-capture={dc:.2f}")
 
+    # --- P8: recall@gold — measure the recall floor against a hand-built gold list ---
+    # theme_gold resolves via case-insensitive substring (compound slug), unmapped -> [].
+    assert theme_gold("deathcare") == ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"], (
+        f"P8: deathcare gold cohort mismatch: {theme_gold('deathcare')}"
+    )
+    assert theme_gold("funeral_deathcare_2026") == ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"], (
+        "P8: compound slug must resolve the gold list (substring match)"
+    )
+    assert theme_gold("ai agents") == [], "P8: an unmapped theme must have NO gold list"
+    assert recall_at_gold("ai agents", ["NVDA"]) is None, (
+        "P8: recall_at_gold must be None (not measurable) for an unmapped theme"
+    )
+
+    # Full recall: every gold member present -> recall@gold == 1.0, missing empty.
+    _full = recall_at_gold("deathcare", ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA", "NOISE"])
+    assert _full["recall_at_gold"] == 1.0, f"P8: full recall must be 1.0, got {_full['recall_at_gold']}"
+    assert _full["missing_gold"] == [], f"P8: full recall must miss none, got {_full['missing_gold']}"
+
+    # Partial recall: SIC floor catches SCI/CSV (SIC-7200) but the cross-SIC names leak ->
+    # recall@gold = 2/6, missing = the 4 cross-SIC members. This is the residual FTS-only gap.
+    _part = recall_at_gold("deathcare", ["sci", "csv"])  # lower-case -> must normalize
+    assert _part["recall_at_gold"] == round(2 / 6, 4), (
+        f"P8: partial recall must be 2/6 (rounded), got {_part['recall_at_gold']}"
+    )
+    assert _part["recalled_gold"] == ["CSV", "SCI"], f"P8: hits must normalize+sort: {_part['recalled_gold']}"
+    assert _part["missing_gold"] == ["HI", "MATW", "SNFCA", "STON"], (
+        f"P8: missing must be the cross-SIC leak: {_part['missing_gold']}"
+    )
+    assert _part["fts_cap_warning"] is None, "P8: no cap warning when fts_hit_count omitted"
+    # Default stage_breakdown (no per-stage inputs): recalled gold -> recalled_final, the rest ->
+    # fts_missed, and the five lists partition gold exactly with no double-counting.
+    _psb = _part["stage_breakdown"]
+    assert set(_psb) == set(RECALL_STAGES), f"P8: stage_breakdown keys must be RECALL_STAGES: {set(_psb)}"
+    assert _psb["recalled_final"] == ["CSV", "SCI"], f"P8: default recalled_final: {_psb['recalled_final']}"
+    assert _psb["fts_missed"] == ["HI", "MATW", "SNFCA", "STON"], (
+        f"P8: default missing -> fts_missed: {_psb['fts_missed']}"
+    )
+    assert _psb["sic_recovered"] == [] and _psb["dropped_mktcap"] == [] and _psb["gated_out"] == [], (
+        "P8: no per-stage inputs => only recalled_final/fts_missed populated"
+    )
+    _allmembers = [t for st in RECALL_STAGES for t in _psb[st]]
+    assert sorted(_allmembers) == sorted(_part["gold"]), "P8: stages must partition gold exactly"
+    assert len(_allmembers) == len(set(_allmembers)), "P8: each gold member in exactly one stage"
+    assert len(_psb["recalled_final"]) + len(_psb["sic_recovered"]) == len(_part["recalled_gold"]), (
+        "P8: recalled_final ∪ sic_recovered must reconcile to recall hits"
+    )
+
+    # FTS top-1000 cap warning: a recall set at/over the cap warns; below the cap does not.
+    _capped = recall_at_gold("deathcare", ["SCI"], fts_hit_count=FTS_TOP_HITS_CAP)
+    assert _capped["fts_cap_warning"] is not None and "cap" in _capped["fts_cap_warning"], (
+        "P8: fts_hit_count >= 1000 must set the top-1000 cap warning"
+    )
+    _uncapped = recall_at_gold("deathcare", ["SCI"], fts_hit_count=999)
+    assert _uncapped["fts_cap_warning"] is None, "P8: below the cap must NOT warn"
+
+    # P8 loss-stage breakdown — a SYNTHETIC candidate set + gold list exercising every stage.
+    # Deathcare gold = {SCI, CSV, MATW, HI, STON, SNFCA}; construct one member per stage:
+    #   SCI   -> recalled_final (FTS hit, survived to the final set)
+    #   MATW  -> sic_recovered  (FTS missed it, SIC reverse-recall caught it)
+    #   STON  -> dropped_mktcap (recalled then dropped by the market-cap band)
+    #   HI    -> gated_out      (survived to deep-dive, then gated buy_ineligible)
+    #   CSV   -> fts_missed     (never recalled by any channel)
+    #   SNFCA -> fts_missed     (never recalled by any channel)
+    _gold = theme_gold("deathcare")
+    _sb = recall_stage_breakdown(
+        _gold,
+        recalled_tickers=["SCI"],
+        fts_tickers=["SCI"],              # MATW absent from FTS -> SIC recovery is real
+        sic_tickers=["SCI", "MATW"],     # MATW recovered by the SIC floor
+        mktcap_dropped=["STON"],
+        gated_out=["HI"],
+    )
+    assert _sb["recalled_final"] == ["SCI"], f"P8 stage: recalled_final: {_sb['recalled_final']}"
+    assert _sb["sic_recovered"] == ["MATW"], f"P8 stage: sic_recovered: {_sb['sic_recovered']}"
+    assert _sb["dropped_mktcap"] == ["STON"], f"P8 stage: dropped_mktcap: {_sb['dropped_mktcap']}"
+    assert _sb["gated_out"] == ["HI"], f"P8 stage: gated_out: {_sb['gated_out']}"
+    assert _sb["fts_missed"] == ["CSV", "SNFCA"], f"P8 stage: fts_missed: {_sb['fts_missed']}"
+    # Stages partition gold exactly (every member once, no leaks, no double-count).
+    _members = [t for st in RECALL_STAGES for t in _sb[st]]
+    assert sorted(_members) == sorted(_gold), f"P8 stage: must partition gold exactly: {_members}"
+    assert len(_members) == len(set(_members)) == len(_gold), "P8 stage: each member exactly once"
+    # A member recalled into the final set is recalled_final even if also tagged elsewhere
+    # (recalled wins; stage order is pipeline-priority). Verify precedence.
+    _sb2 = recall_stage_breakdown(
+        ["SCI"], recalled_tickers=["SCI"], sic_tickers=["SCI"], mktcap_dropped=["SCI"], gated_out=["SCI"],
+    )
+    assert _sb2["recalled_final"] == ["SCI"] and all(
+        _sb2[s] == [] for s in RECALL_STAGES if s != "recalled_final"
+    ), "P8 stage: recalled_final must take precedence over downstream tags"
+    # recall_at_gold carries the same stage_breakdown when per-stage inputs are passed, and the
+    # recall ratio reconciles to recalled_final ∪ sic_recovered.
+    _resb = recall_at_gold(
+        "deathcare", ["SCI"], fts_tickers=["SCI"], sic_tickers=["SCI", "MATW"],
+        mktcap_dropped=["STON"], gated_out=["HI"],
+    )
+    assert _resb["stage_breakdown"] == _sb, "P8 stage: recall_at_gold must embed the breakdown"
+    _hits = len(_resb["stage_breakdown"]["recalled_final"]) + len(_resb["stage_breakdown"]["sic_recovered"])
+    # recalled_gold is the final-set ∩ gold (SCI only); sic_recovered is an ADDITIONAL floor hit.
+    assert _resb["recalled_gold"] == ["SCI"], f"P8 stage: recalled_gold (final set): {_resb['recalled_gold']}"
+    assert _hits == 2, f"P8 stage: recall hits incl SIC recovery = 2, got {_hits}"
+
+    # _recall_set_from_candidate_files: reads ticker + recall_channel + downstream-drop tags,
+    # tolerates list and dict-wrapped shapes, dedupes, counts FTS-channel rows, and returns the
+    # per-stage ticker sets used by the breakdown.
+    import tempfile
+    with tempfile.TemporaryDirectory() as _td:
+        _cf = Path(_td) / "candidates_deathcare.json"
+        _cf.write_text(json.dumps([
+            {"ticker": "SCI", "recall_channel": "both"},
+            {"ticker": "CSV", "recall_channel": "fts"},
+            {"ticker": "MATW", "recall_channel": "sic_reverse"},          # SIC-only -> not in fts count
+            {"ticker": "sci", "recall_channel": "fts"},                   # dupe (case) -> one ticker
+            {"ticker": "STON", "recall_channel": "both", "dropped_stage": "mktcap"},  # dropped on mktcap
+            {"ticker": "HI", "recall_channel": "fts", "buy_ineligible": True},        # gated out
+        ]), encoding="utf-8")
+        _rset, _fts, _stages = _recall_set_from_candidate_files([_cf])
+        # STON/HI tagged dropped downstream -> NOT in the final recall set.
+        assert _rset == {"SCI", "CSV", "MATW"}, f"P8: recall set dedupe/normalize: {_rset}"
+        assert _fts == 5, f"P8: FTS-channel count (fts+both, excl sic_reverse): {_fts}"
+        assert _stages["sic"] == {"SCI", "MATW", "STON"}, f"P8: SIC-channel set: {_stages['sic']}"
+        assert _stages["mktcap_dropped"] == {"STON"}, f"P8: mktcap-dropped set: {_stages['mktcap_dropped']}"
+        assert _stages["gated_out"] == {"HI"}, f"P8: gated-out set: {_stages['gated_out']}"
+        _res = recall_at_gold(
+            "deathcare", _rset,
+            fts_tickers=_stages["fts"], sic_tickers=_stages["sic"],
+            mktcap_dropped=_stages["mktcap_dropped"], gated_out=_stages["gated_out"],
+        )
+        assert _res["recall_at_gold"] == round(3 / 6, 4), (
+            f"P8: 3 of 6 gold recalled from candidate file, got {_res['recall_at_gold']}"
+        )
+        # File-driven stage breakdown: SCI/CSV/MATW survived to the final set (recalled_final);
+        # STON dropped on mktcap; HI gated out; SNFCA never recalled (fts_missed). recalled wins
+        # over the SIC tag, so MATW (in _rset) is recalled_final, not sic_recovered.
+        _fsb = _res["stage_breakdown"]
+        assert _fsb["recalled_final"] == ["CSV", "MATW", "SCI"], f"P8 file stage recalled_final: {_fsb['recalled_final']}"
+        assert _fsb["sic_recovered"] == [], f"P8 file stage sic_recovered (recalled wins): {_fsb['sic_recovered']}"
+        assert _fsb["dropped_mktcap"] == ["STON"], f"P8 file stage dropped_mktcap: {_fsb['dropped_mktcap']}"
+        assert _fsb["gated_out"] == ["HI"], f"P8 file stage gated_out: {_fsb['gated_out']}"
+        assert _fsb["fts_missed"] == ["SNFCA"], f"P8 file stage fts_missed: {_fsb['fts_missed']}"
+    print("  P8 recall@gold: floor measured + loss-stage breakdown "
+          "(full/partial/cap-warn + 5-stage partition + file read)  OK")
+
     print("\ntrack_forward selftest PASS — all Brier/calibration/de-risk/FP math verified")
 
 
@@ -1272,6 +1695,10 @@ def main() -> None:
     ap.add_argument("--backfill-validation-fp", action="store_true", dest="backfill_validation_fp",
                     help="Inject the 19 validation BUY false-positives as adjudication="
                          "data_false_positive (P12d). Idempotent. Kept out of the price-Brier.")
+    ap.add_argument("--recall-gold", nargs="+", dest="recall_gold", metavar="CANDIDATES_JSON",
+                    help="P8: compute recall@gold for --theme against its hand-built gold "
+                         "true-member list, reading the run's recall set from one or more "
+                         "candidate JSON files (FTS ∪ SIC-reverse union).")
     ap.add_argument("--selftest", action="store_true",
                     help="Run synthetic Brier math selftest (no network)")
     args = ap.parse_args()
@@ -1303,6 +1730,10 @@ def main() -> None:
 
     if args.backfill_validation_fp:
         cmd_backfill_validation_fp(args)
+        return
+
+    if args.recall_gold:
+        cmd_recall_gold(args)
         return
 
     ap.print_help()

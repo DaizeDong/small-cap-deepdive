@@ -237,7 +237,14 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # FCF (MoS null) as before, NOT by this label.
     if der.get("low_revenue_loss_ratio"):
         _lrl_detail = der.get("low_revenue_loss_ratio_detail", "")
-        dq.append(f"low_revenue_loss_ratio:{_lrl_detail}")
+        # A4: distinguish the EXTREME (>20x) tier (gates buy_eligible) from the advisory label.
+        _lrl_tag = "low_revenue_loss_ratio_extreme" if der.get("low_revenue_loss_ratio_extreme") else "low_revenue_loss_ratio"
+        dq.append(f"{_lrl_tag}:{_lrl_detail}")
+    # A2: concentration_unquantified — text customer-concentration flag True but no XBRL magnitude
+    # (text-only / pre-/early-XBRL filer, the SWMR/LFCR SIGA-class blind spot). Advisory ONLY:
+    # surfaced in data_quality so a PM sees the unquantified concentration; does NOT gate.
+    if der.get("concentration_unquantified"):
+        dq.append("concentration_unquantified:text_flag_true_but_xbrl_magnitude_null")
 
     # --- C2: financial-SIC guard — exclude financial sector from FCF-cap model ---
     # SIC prefixes: 60=banks, 61=non-depository credit, 63=insurance carriers,
@@ -245,10 +252,21 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     _FINANCIAL_SIC_PREFIXES = ("60", "61", "63", "64", "67")
     sic_code = str(der.get("sic") or "").strip()
     _financial_sic = bool(sic_code and any(sic_code.startswith(p) for p in _FINANCIAL_SIC_PREFIXES))
+    # A3: insurance_concepts_present — an insurance underwriter / insurance-subsidiary holdco
+    # detected from XBRL concepts (PremiumsEarned / policy reserves / losses&LAE / policyholder
+    # funds). These route like a financial_sic name (nav/abstain, never an fcf_cap BUY) EVEN when
+    # the top-level SIC is non-financial — closing the BOC SIC-65 surety-insurance-holdco hole
+    # where prefix 65 is not in _FINANCIAL_SIC_PREFIXES. Distinct buy_eligible gate below.
+    _insurance_concepts_present = bool(der.get("insurance_concepts_present", False))
     _financial_sic_forced_unsuitable = False
     if _financial_sic:
         _financial_sic_forced_unsuitable = True
         dq.append(f"financial_sic_fcf_unsuitable:sic={sic_code}")
+    elif _insurance_concepts_present:
+        # A3: insurance-bearing holdco on a non-financial SIC routes like financial_sic.
+        _financial_sic_forced_unsuitable = True
+        _ins_concept = der.get("insurance_concept_matched", "")
+        dq.append(f"insurance_concepts_present_fcf_unsuitable:concept={_ins_concept}")
     elif not sic_code:
         # C2-fallback: SEC submissions sometimes omit the top-level SIC (observed on
         # several BDCs / closed-end funds, e.g. WHF). Detect the investment-company
@@ -675,6 +693,15 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         _buy_ineligible_reasons.append("fcf_sustainability_uncertain")
     if _financial_sic_forced_unsuitable:
         _buy_ineligible_reasons.append("financial_sic_forced_unsuitable")
+    # A3: insurance_concepts_present gates buy_eligible (distinct from financial_sic_forced_
+    # unsuitable so the reason-string is accurate even on a non-financial SIC, e.g. BOC SIC-65).
+    if _insurance_concepts_present:
+        _buy_ineligible_reasons.append("insurance_concepts_present")
+    # A4: low_revenue_loss_ratio_extreme (|NI|/rev>20x — STSS/MVIS/TIPT tail) gates buy_eligible
+    # with the accurate label, replacing the old wrong_entity_suspected co-fire on that tail. The
+    # non-extreme low_revenue_loss_ratio (>2x) stays a data_quality label ONLY (does NOT gate).
+    if der.get("low_revenue_loss_ratio_extreme"):
+        _buy_ineligible_reasons.append("low_revenue_loss_ratio_extreme")
     if der.get("debt_truncation_suspected"):
         _buy_ineligible_reasons.append("debt_truncation_suspected")
     if der.get("wrong_entity_suspected"):
@@ -743,6 +770,12 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "peak_contamination_flag": _peak_contamination_flag,
         # P-B: early/pre-revenue resource label (data-quality only; does NOT flip buy_eligible)
         "low_revenue_loss_ratio": bool(der.get("low_revenue_loss_ratio", False)),
+        # A4: the >20x EXTREME tier (gates buy_eligible with the accurate label)
+        "low_revenue_loss_ratio_extreme": bool(der.get("low_revenue_loss_ratio_extreme", False)),
+        # A3: insurance underwriter / insurance-subsidiary holdco (routes nav/abstain, gates BUY)
+        "insurance_concepts_present": _insurance_concepts_present,
+        # A2: text concentration flag True but XBRL magnitude null (advisory; does NOT gate)
+        "concentration_unquantified": bool(der.get("concentration_unquantified", False)),
         # P-G: filing-form provenance (10-K/20-F/40-F) for the trust banner
         "form_used": der.get("form_used"),
         # P3: concentration kill/watch (read from producer derived)
@@ -1527,6 +1560,115 @@ def _selftest():
     )
     print("  P-B relabel safety: previously-blocked early-rev name stays NON-tradeable "
           "(MoS null; low_rev_loss never a block)  OK")
+
+    # --- A4: low_revenue_loss_ratio_extreme (>20x) GATES buy_eligible (STSS/MVIS/TIPT tail) ---
+    # The clean fixture is buy_eligible=True on fcf_cap. Setting ONLY the extreme tier (with the
+    # advisory label also True, as the producer always co-sets them) must flip buy_eligible=False
+    # with the accurate reason-string — replacing the old wrong_entity_suspected co-fire.
+    _dd_lrl_ext = dict(_dd_clean_base)
+    _dd_lrl_ext["derived"] = dict(_dd_clean_base["derived"])
+    _dd_lrl_ext["ticker"] = "TEST_LOW_REV_LOSS_EXTREME"
+    _dd_lrl_ext["derived"]["low_revenue_loss_ratio"] = True
+    _dd_lrl_ext["derived"]["low_revenue_loss_ratio_extreme"] = True
+    _dd_lrl_ext["derived"]["low_revenue_loss_ratio_detail"] = (
+        "latest_net_income=-1384.0M vs revenue=1.0M (|NI|/rev=1384.0x) — early/pre-revenue pattern, "
+        "right entity; EXTREME (>20x) — gates buy_eligible"
+    )
+    _block_lrl_ext = compute_valuation(_dd_lrl_ext, 120_000_000, cfg)
+    assert _block_lrl_ext.get("low_revenue_loss_ratio_extreme") is True, (
+        "A4: producer low_revenue_loss_ratio_extreme must be read into the valuation block"
+    )
+    assert _block_lrl_ext.get("buy_eligible") is False, (
+        f"A4: low_revenue_loss_ratio_extreme (>20x) MUST gate buy_eligible=False, "
+        f"reasons={_block_lrl_ext.get('buy_ineligible_reasons')}"
+    )
+    assert "low_revenue_loss_ratio_extreme" in _block_lrl_ext.get("buy_ineligible_reasons", []), (
+        "A4: low_revenue_loss_ratio_extreme must appear in buy_ineligible_reasons (accurate label)"
+    )
+    assert "wrong_entity_suspected" not in _block_lrl_ext.get("buy_ineligible_reasons", []), (
+        "A4: the extreme tail must gate on low_revenue_loss_ratio_extreme, NOT wrong_entity_suspected"
+    )
+    assert any("low_revenue_loss_ratio_extreme" in str(x) for x in _block_lrl_ext.get("data_quality", [])), (
+        "A4: low_revenue_loss_ratio_extreme must surface in data_quality"
+    )
+    print("  A4 low_revenue_loss_ratio_extreme: >20x gates buy_eligible=False (not wrong_entity)  OK")
+
+    # A4-regression: the NON-extreme label (>2x, <=20x) must NOT gate — buy_eligible unchanged.
+    _dd_lrl_mild = dict(_dd_clean_base)
+    _dd_lrl_mild["derived"] = dict(_dd_clean_base["derived"])
+    _dd_lrl_mild["ticker"] = "TEST_LOW_REV_LOSS_MILD"
+    _dd_lrl_mild["derived"]["low_revenue_loss_ratio"] = True
+    _dd_lrl_mild["derived"]["low_revenue_loss_ratio_extreme"] = False
+    _dd_lrl_mild["derived"]["low_revenue_loss_ratio_detail"] = "|NI|/rev=2.7x — right entity"
+    _block_lrl_mild = compute_valuation(_dd_lrl_mild, 120_000_000, cfg)
+    assert _block_lrl_mild.get("buy_eligible") == _block_clean.get("buy_eligible"), (
+        "A4: non-extreme low_revenue_loss_ratio must NOT change buy_eligible (label-only)"
+    )
+    assert "low_revenue_loss_ratio_extreme" not in _block_lrl_mild.get("buy_ineligible_reasons", []), (
+        "A4: non-extreme must NOT add low_revenue_loss_ratio_extreme to buy_ineligible_reasons"
+    )
+    print("  A4 non-extreme low_revenue_loss_ratio: >2x stays label-only (no gate)  OK")
+
+    # --- A3: insurance_concepts_present routes nav/abstain AND gates buy_eligible ---
+    # An insurance-subsidiary holdco on a NON-financial SIC (BOC SIC-65 = 6510, NOT in the
+    # financial-SIC prefix list) must route like financial_sic (nav/abstain, never fcf_cap) and
+    # gate buy_eligible with a distinct, accurate reason — closing the latent fcf_cap-BUY hole.
+    _dd_ins = dict(_dd_clean_base)
+    _dd_ins["derived"] = dict(_dd_clean_base["derived"])
+    _dd_ins["ticker"] = "TEST_INSURANCE_HOLDCO"
+    _dd_ins["derived"]["sic"] = "6510"            # SIC-65 real-estate operator (BOC) — NON-financial prefix
+    _dd_ins["derived"]["insurance_concepts_present"] = True
+    _dd_ins["derived"]["insurance_concept_matched"] = "PremiumsEarnedNet"
+    _block_ins = compute_valuation(_dd_ins, 120_000_000, cfg)
+    assert _block_ins.get("insurance_concepts_present") is True, (
+        "A3: producer insurance_concepts_present must be read into the valuation block"
+    )
+    assert _block_ins.get("mos_basis") in ("nav", "abstain"), (
+        f"A3: insurance_concepts_present must route nav/abstain (never fcf_cap), "
+        f"got {_block_ins.get('mos_basis')!r}"
+    )
+    assert _block_ins.get("fcf_cap_model_unsuitable") is True, (
+        "A3: insurance_concepts_present must force fcf_cap_model_unsuitable=True"
+    )
+    assert _block_ins.get("buy_eligible") is False, (
+        f"A3: insurance_concepts_present must gate buy_eligible=False, "
+        f"reasons={_block_ins.get('buy_ineligible_reasons')}"
+    )
+    assert "insurance_concepts_present" in _block_ins.get("buy_ineligible_reasons", []), (
+        "A3: insurance_concepts_present must appear (distinctly) in buy_ineligible_reasons"
+    )
+    assert any("insurance_concepts_present" in str(x) for x in _block_ins.get("data_quality", [])), (
+        "A3: insurance_concepts_present must surface in data_quality"
+    )
+    # CRITICAL: a SIC-65 insurance holdco must NEVER produce an fcf_cap BUY (the BOC latent hole).
+    _ins_tradeable_buy = (
+        _block_ins.get("buy_eligible") is True
+        and _block_ins.get("mos_basis") == "fcf_cap"
+    )
+    assert _ins_tradeable_buy is False, (
+        "A3 CRITICAL: a SIC-65 insurance-subsidiary holdco must never reach an fcf_cap BUY"
+    )
+    print("  A3 insurance_concepts_present: SIC-65 holdco routes nav/abstain + gates BUY  OK")
+
+    # --- A2: concentration_unquantified surfaces in data_quality but does NOT gate ---
+    _dd_cu = dict(_dd_clean_base)
+    _dd_cu["derived"] = dict(_dd_clean_base["derived"])
+    _dd_cu["ticker"] = "TEST_CONC_UNQUANT"
+    _dd_cu["derived"]["concentration_unquantified"] = True
+    _block_cu = compute_valuation(_dd_cu, 120_000_000, cfg)
+    assert _block_cu.get("concentration_unquantified") is True, (
+        "A2: producer concentration_unquantified must be read into the valuation block"
+    )
+    assert any("concentration_unquantified" in str(x) for x in _block_cu.get("data_quality", [])), (
+        "A2: concentration_unquantified must surface in data_quality"
+    )
+    assert "concentration_unquantified" not in _block_cu.get("buy_ineligible_reasons", []), (
+        "A2: concentration_unquantified is advisory ONLY — must NOT gate buy_eligible"
+    )
+    assert _block_cu.get("buy_eligible") == _block_clean.get("buy_eligible"), (
+        "A2: concentration_unquantified must NOT change buy_eligible (advisory)"
+    )
+    print("  A2 concentration_unquantified: surfaced in data_quality, does NOT gate  OK")
 
     # --- P10: lumpy-OCF normalization guard fires on a peak year > 2x median ---
     # Cyclical series with one BARDA-like peak (95M) vs others (~11-49M); contamination<1.

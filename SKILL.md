@@ -72,9 +72,12 @@ disclosure non-filers — before any analyst time is spent.
    search and return candidate tickers. This over-recalls by design — expect hundreds of results.
 
 2. **Two-stage precision gate (mandatory — see next section).** Pass the raw list through
-   `tools/filter_by_sic.py` (Gate 1, coarse SIC exclusion), then run the LLM theme-fit gate
-   (Gate 2) on surviving candidates to classify each as `pure_play / partial / misrecall`.
-   Drop `misrecall`. Retain `pure_play` and `partial` for deep-dive.
+   `tools/filter_by_sic.py` (Gate 1, coarse SIC exclusion **+ SIC reverse-recall floor**: for a
+   theme with dedicated SIC code(s), enumerate ALL registrants in that SIC via EDGAR browse-by-SIC /
+   EFTS `sic` filter and UNION with the FTS recall so SIC acts as a recall floor, not only a
+   precision exclude — P8), then run the LLM theme-fit gate (Gate 2) on surviving candidates to
+   classify each as `pure_play / partial / misrecall`. Drop `misrecall`. Retain `pure_play` and
+   `partial` for deep-dive.
 
 3. **Mechanical de-risk.** For each retained candidate, run `tools/cheap_pass.py --ticker <T>`.
    Any candidate that returns a hard kill-flag (`going_concern`, `death_spiral`, `material_weakness`
@@ -200,11 +203,21 @@ swept the entire biotech sector. Zero of these were railcar companies. Only the 
 and LLM theme-fit gate cleared the field. Skipping either gate would have sent the entire biotech
 sector to the deep-dive queue.
 
-**Gate 1 — SIC Coarse Exclusion** (`tools/filter_by_sic.py`)
+**Gate 1 — SIC Coarse Exclusion + Reverse-Recall Floor** (`tools/filter_by_sic.py`)
 Drops companies whose SIC code definitively places them outside plausible theme membership.
 Hard-coded default exclusion blocks (pharma, medical devices, finance, retail, toys) are in
 `discovery-engine.md §Gate 1`. Override per-theme via `sic_exclusion_blocks` in `config.json`.
 Companies with no SIC on file: **keep** for Gate 2 — do not auto-exclude.
+
+**SIC reverse-recall floor (P8, iteration 3).** For a theme that maps to dedicated SIC code(s),
+SIC is no longer used *only* as a precision coarse-exclude — it is also a recall **FLOOR**.
+`filter_by_sic.py` ENUMERATES every registrant in the theme's dedicated SIC code(s) via EDGAR
+browse-by-SIC / EFTS `sic` filter, and UNIONs that set with the FTS keyword recall. This guarantees
+that a true member with the right SIC but an unlucky keyword phrasing cannot be lost by FTS recall
+alone — the SIC enumeration backstops it. The union is the deep-dive universe (still passed through
+Gate 2 for theme-fit). **FTS top-1000 cap warning:** EDGAR full-text search caps at 1000 hits, so
+on a broad keyword the FTS arm may be truncated; the SIC reverse-recall arm is the floor that keeps
+recall from collapsing under that cap, and `track_forward` warns when the FTS arm hit the cap.
 
 **Gate 2 — LLM Theme-Fit Gate**
 For each Gate 1 survivor, prompt an LLM subagent with the company's 10-K business description.
@@ -230,15 +243,17 @@ Run `python tools/valuation.py` before rating; read `mos_basis`, `margin_of_safe
 | `nav` | `nav_margin_of_safety_pct ≥ 30%` AND kill-flags = 0 AND no T3 thesis AND `buy_eligible == true` | Multiply raw conviction by 0.6 before recording `confidence` field; surface as "asset-heavy / NAV basis" |
 | `abstain` | No MoS BUY/AVOID trigger; rank on EV/EBITDA + EV/Sales only | Never penalize for model mismatch |
 
-**`buy_eligible` mechanical gate (ANDed into every BUY):** `valuation.py` emits `buy_eligible = (not extreme_mos_review_required) AND (not large_cap_out_of_scope) AND (not fcf_sustainability_uncertain) AND (not financial_sic forced-unsuitable) AND (not debt_truncation_suspected) AND (not wrong_entity_suspected) AND (concentration_flag != "kill") AND (not fundamental_decline_flag) AND (not peak_contamination_flag)`, plus `buy_ineligible_reasons` (list[str]). These guards previously existed only as advisory strings the trigger never blocked on; they now bite. When `buy_eligible == false`, the rating downgrades to WATCH (AVOID if a hard kill-flag is also present) and the BUY-trigger line must list `buy_ineligible_reasons` verbatim. `wrong_entity_suspected` and `debt_truncation_suspected` were refined (P-B) to fire only on genuine unit-mistag / wrong-CIK / implausible magnitudes — no longer on a real producer's present-but-tiny-revenue + large-loss ramp (now carried by the data-quality label `low_revenue_loss_ratio`, see below). Full source of truth: `reference/judgment-rubric.md`.
+**`buy_eligible` mechanical gate (ANDed into every BUY):** `valuation.py` emits `buy_eligible = (not extreme_mos_review_required) AND (not large_cap_out_of_scope) AND (not fcf_sustainability_uncertain) AND (not financial_sic forced-unsuitable) AND (not debt_truncation_suspected) AND (not wrong_entity_suspected) AND (concentration_flag != "kill") AND (not fundamental_decline_flag) AND (not peak_contamination_flag) AND (not insurance_concepts_present) AND (not low_revenue_loss_ratio_extreme)`, plus `buy_ineligible_reasons` (list[str]). These guards previously existed only as advisory strings the trigger never blocked on; they now bite. When `buy_eligible == false`, the rating downgrades to WATCH (AVOID if a hard kill-flag is also present) and the BUY-trigger line must list `buy_ineligible_reasons` verbatim. **Iteration 3 (A3/A4)** adds two composite terms — `(not insurance_concepts_present)` (insurance-subsidiary holdcos routed like financial-SIC regardless of SIC) and `(not low_revenue_loss_ratio_extreme)` (`|net_income|/revenue > 20` extreme tail) — and refines `wrong_entity_suspected` to fire ONLY on genuine unit-mistag / wrong-CIK (`shares_outstanding < 1000` OR ticker absent from `company_tickers.json` OR CIK mismatch); the `|net_income|/revenue` ratio trigger is REMOVED, that tail now carried by the tiered `low_revenue_loss_ratio` (advisory) / `low_revenue_loss_ratio_extreme` (gating) labels. `debt_truncation_suspected` continues to fire only on genuinely implausible/truncated debt magnitudes. Full source of truth: `reference/judgment-rubric.md`.
 
 **Concentration kill/watch (P3):** `concentration_flag = "kill"` when `top_program_pct > 60` OR `top_customer_pct > 40` (forces `buy_eligible = false`, caps Dim 3 at 2); `"watch"` when either ratio is in the 40–60 band (surfaced, does not block BUY by itself); null otherwise. Magnitude-based from XBRL `RevenueFromContractWithCustomer` segment members — replaces the old English substring.
 
-**Fundamental-decline veto (P6, mechanical carve-out):** `fundamental_decline_flag = true` when `rev_slope_sign < 0` AND `contamination_ratio < 1.0` AND `latest_below_avg == true`. It downgrades a would-be BUY to WATCH even at MoS ≥ 30% — the melting-ice-cube defense. This is a measured-data veto, explicitly distinct from (and NOT) the qualitative cyclical-turn forward judgment the perpetual-veto prohibition still bans.
+**Fundamental-decline veto (P6, mechanical carve-out):** `fundamental_decline_flag = true` when `rev_slope_sign < 0` AND `0 < contamination_ratio < 1.0` AND `latest_below_avg == true`. It downgrades a would-be BUY to WATCH even at MoS ≥ 30% — the melting-ice-cube defense. This is a measured-data veto, explicitly distinct from (and NOT) the qualitative cyclical-turn forward judgment the perpetual-veto prohibition still bans. The `0 <` lower bound (A1, iteration 3) is the degenerate-base guard — see V-shape veto below.
 
-**V-shape value-trap veto (P-A, mechanical sibling):** `peak_contamination_flag = true` when `contamination_ratio < 0.8` AND `latest_below_avg == true` AND `latest_net_income < 0`, **independent of `rev_slope_sign`**. It is ANDed into `buy_eligible` and downgrades a would-be BUY to WATCH even at MoS ≥ 30% — same downgrade-only discipline as `fundamental_decline_flag`. It exists because `fundamental_decline_flag` is gated on `rev_slope_sign < 0` and therefore MISSES the trough→peak→rollover V-shape (the whole-window linear fit slopes up, so the AND-of-three never fires). NRP is the canonical catch: `rev_slope_sign = +1`, `contamination_ratio = 0.7445`, `latest_below_avg = true`, `latest_net_income = −$84.8M` → `fundamental_decline_flag = false` but `peak_contamination_flag = true`, so the clean mechanical BUY (MoS +36.8%) is now downgraded to WATCH by the machine rather than only by analyst judgment.
+**V-shape value-trap veto (P-A, mechanical sibling) + degenerate-base guard (A1):** `peak_contamination_flag = true` when `0 < contamination_ratio < 0.8` AND `latest_below_avg == true` AND `latest_net_income < 0`, **independent of `rev_slope_sign`**. It is ANDed into `buy_eligible` and downgrades a would-be BUY to WATCH even at MoS ≥ 30% — same downgrade-only discipline as `fundamental_decline_flag`. It exists because `fundamental_decline_flag` is gated on `rev_slope_sign < 0` and therefore MISSES the trough→peak→rollover V-shape (the whole-window linear fit slopes up, so the AND-of-three never fires). NRP is the canonical catch: `rev_slope_sign = +1`, `contamination_ratio = 0.7445`, `latest_below_avg = true`, `latest_net_income = −$84.8M` → `fundamental_decline_flag = false` but `peak_contamination_flag = true`, so the clean mechanical BUY (MoS +36.8%) is now downgraded to WATCH by the machine rather than only by analyst judgment. **Degenerate-base guard (A1, iteration 3):** both vetoes now require a POSITIVE normalization base — the `0 <` lower bound on `contamination_ratio` rejects a negative/degenerate base (`contamination_ratio = latest base / 5yr-avg`; a negative base would let the bare `< 0.8` / `< 1.0` test pass trivially). BWIN fired `peak_contamination_flag` in iteration 2 at `contamination_ratio = −2.4618` (a negative base, uninterpretable as "peak-contaminated") — with the lower bound it is now **False**.
 
-**Early/pre-revenue resource label (P-B, data-quality only):** `low_revenue_loss_ratio = true` when revenue is present but small AND `|net_income|/revenue > 2.0` — the early/pre-revenue resource pattern (large loss vs tiny revenue). It is surfaced in `data_quality` ONLY; it is NOT part of the `buy_eligible` composite and does NOT by itself flip `buy_eligible` or change the rating (those names stay blocked by their own null/negative-FCF MoS as before). It replaces the prior `wrong_entity_suspected` misfire on real producers (URG, ASPI, etc.) so a PM reads the correct cause rather than a misleading "wrong entity."
+**Early/pre-revenue resource label (P-B, now TIERED — A4):** `low_revenue_loss_ratio = true` when revenue is present but small AND `|net_income|/revenue > 2.0` — the early/pre-revenue resource pattern (large loss vs tiny revenue). It is surfaced in `data_quality` ONLY (advisory tier); NOT part of the `buy_eligible` composite and does NOT change the rating (those names stay blocked by their own null/negative-FCF MoS as before). **Extreme tier (A4, iteration 3):** when `|net_income|/revenue > 20`, `deepdive_data.py` ALSO emits `low_revenue_loss_ratio_extreme`, which IS in the `buy_eligible` composite and gates BUY. This preserves the iteration-2 block on STSS (≈1,384x) / MVIS (≈78.6x) / TIPT (≈71.6x) with the *correct* gating reason instead of the misleading `wrong_entity_suspected`. The advisory `low_revenue_loss_ratio` (ratio>2, non-extreme) stays label-only.
+
+**Insurance-subsidiary holdco routing (A3, iteration 3):** `insurance_concepts_present = true` when insurance XBRL concepts are present (e.g. `PremiumsEarned` / policy reserves / `LossesAndLossAdjustmentExpense` / `PolicyholderFunds`). It is ANDed into `buy_eligible` (forcing `buy_eligible = false`) and routes the company like `financial_sic` (NAV / abstain, never fcf_cap BUY). It closes the BOC hole — Boston Omaha is SIC 6510 (a non-financial real-estate prefix) but owns a surety-insurance subsidiary; on positive FCF it would otherwise slip the financial gate. `insurance_concepts_present` catches such holdcos on the *presence of insurance accounting* rather than on the SIC, so they are treated as financial regardless of registered SIC.
 
 **Catalyst modifier (closed enumerated list — no other types qualify):** (a) spinoff filing Form 10-12B/15-12B with documented index-fund forced-selling mechanism; (b) cluster open-market insider purchases Form 4 ≥2–3 insiders within 90 days, cash purchases only — not option exercises/grants; (c) court-ordered asset sale or special distribution per 8-K with scheduled completion date; (d) exchange delisting-avoidance / deficiency event per 8-K creating forced selling. Each requires a dated trigger. Earnings guidance, product launches, customer wins, and any organic-growth narrative do NOT qualify. Populate `catalyst` field with category, T1 source, and dated trigger; null otherwise. **MoS-waiver FROZEN (iteration 1):** a verified catalyst yields **WATCH-with-catalyst, NOT BUY** — it no longer waives the MoS threshold. Temporary, pending mechanism-verification + per-category Brier in iteration 2 (§5-Q3 of the iteration-1 design).
 
@@ -258,7 +273,10 @@ by narrative quality or management explanation:
 | AR growing faster than revenue | **Required red flag note** in Dim 1 basis |
 | S-3 shelf / ATM program active with < 4Q runway | **Dim 1 score = 1** |
 | Single customer > 40% OR single program > 60% (`concentration_flag == "kill"`) | **Dim 3 capped at 2**; forces `buy_eligible = false` (blocks BUY) |
-| `peak_contamination_flag == true` (V-shape: `contamination_ratio<0.8` AND `latest_below_avg` AND `latest_net_income<0`; independent of `rev_slope_sign`) | Forces `buy_eligible = false` → **downgrades would-be BUY to WATCH** even at MoS ≥ 30% (AVOID if hard kill-flag also present) |
+| `peak_contamination_flag == true` (V-shape: `0<contamination_ratio<0.8` AND `latest_below_avg` AND `latest_net_income<0`; independent of `rev_slope_sign`) | Forces `buy_eligible = false` → **downgrades would-be BUY to WATCH** even at MoS ≥ 30% (AVOID if hard kill-flag also present). The `0<` lower bound (A1) rejects negative/degenerate bases — BWIN at `cr=−2.4618` no longer fires |
+| `insurance_concepts_present == true` (insurance XBRL concepts: `PremiumsEarned` / policy reserves / `LossesAndLossAdjustmentExpense` / `PolicyholderFunds`) | Forces `buy_eligible = false` → routed like `financial_sic` (NAV / abstain, never fcf_cap BUY) (A3) — catches insurance-subsidiary holdcos on non-financial SICs (e.g. BOC, SIC-65) |
+| `low_revenue_loss_ratio_extreme == true` (revenue present-but-small AND `\|net_income\|/revenue > 20`) | Forces `buy_eligible = false` → **blocks BUY** (A4) — gating extreme tier; preserves the STSS/MVIS/TIPT block with the correct reason-string vs the misleading `wrong_entity_suspected` |
+| `concentration_unquantified == true` (text concentration flag True AND magnitude `concentration_flag == null`) | **Advisory only (A2)** — surface in `data_quality` + Dim 3; analyst must read the 10-K footnote. Does NOT gate `buy_eligible` or cap any dimension |
 | `insider_net_sell` strongly negative AND dilution rate ≥ 15%/yr | **Dim 4 capped at 2** |
 | Critical data unavailable (runway, revenue, insider trades all null) | **Confidence capped at 40%** |
 | Company has no current theme revenue (pure concept-playing) | **Theme-fit dimension capped at 2**; cannot rate BUY |
@@ -351,5 +369,23 @@ the horizon matures. This is the only way to determine if the rubric is correctl
    calibration table is statistically meaningless. See `reference/track-forward.md` for
    the full Brier / calibration methodology and the benchmark choice rationale (IWM, not SPY).
 
+5. **Recall@gold (P8, iteration 3) — measure discovery recall, not just precision.** Gate-2
+   precision is already documented (the 6.8%-precision FTS over-recall problem); recall has until
+   now been audited only by manual blurb re-scan. `track_forward` now computes **`recall@gold`** for
+   any theme that has a hand-built gold true-member list: the fraction of gold members the
+   discovery union (FTS ∪ SIC reverse-recall, P8) actually recalled. Example gold list — deathcare:
+   `{SCI, CSV, MATW, HI, STON, SNFCA}`. A miss in `recall@gold` is a direct discovery-floor failure
+   (a true member the union dropped); `track_forward` **warns when the FTS arm hit the top-1000 cap**,
+   since a capped FTS arm is the most likely cause of a sub-1.0 recall@gold and signals the SIC
+   reverse-recall floor should be carrying more of the load.
+
 **Note:** Verdicts from 2026-06 runs mature in 2027-06. The correct scorecard state until then
 is "0 scored, N pending — calibration unknown." This is not a bug; it is the honest state.
+
+**Run finalization — Gate-2 misrecall resolved, not missing (A5, iteration 3).** `finalize_run`
+reads the run's `gate2_results.json` and treats names in the Gate-2 misrecall set as **resolved**,
+NOT "missing." A `band=deep` candidate that was dropped at Gate 2 for theme-fit is an intentional,
+auditable exclusion — not a forgotten deep-dive — so it no longer counts toward the spurious
+"N missing" warning. This kills the manual re-band / `--allow-missing` step that every iteration-2
+theme required, and the denominator now reflects genuine deep-dive coverage rather than raw
+`band=deep` row count.
