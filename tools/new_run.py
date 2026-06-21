@@ -16,7 +16,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from _common import CFG, today
+from _common import CFG, run_state_path, today
 
 _REPO = Path(__file__).resolve().parent.parent
 
@@ -67,6 +67,12 @@ def main() -> None:
     (run_dir / "_run.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+
+    # v0.3.2 #10: park run-state under THIS run's batch dir (per-SMALLCAP_RUN), never a
+    # single shared /tmp/smallcap_run.txt — so concurrent agents on different themes do
+    # not clobber each other. run_state_path(run=run_name) resolves to <run_dir>/_run_state.txt.
+    state_path = run_state_path(run=run_name)
+    state_path.write_text(run_name + "\n", encoding="utf-8")
 
     # stdout = the batch name, consumed by: export SMALLCAP_RUN=$(python tools/new_run.py --label X)
     print(run_name)
