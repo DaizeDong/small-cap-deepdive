@@ -61,6 +61,18 @@ def _fmt(v, suffix: str = "", nd: int = 1) -> str:
         return str(v)
 
 
+def _fmt_pct_ratio(v, nd: int = 1) -> str:
+    """Format a DECIMAL-fraction return (0.34 -> '34.0%') as a percent, or 'N/A' when null.
+    signals.py emits price returns as fractions (last/anchor - 1), so they must be ×100 for
+    display — distinct from _fmt(...,'%') which appends '%' to an already-percent number."""
+    if v is None:
+        return "N/A"
+    try:
+        return f"{float(v) * 100:.{nd}f}%"
+    except (TypeError, ValueError):
+        return str(v)
+
+
 def _killflag_count(deep: dict) -> int:
     """Mechanical kill-flag count: prefer explicit killflag_count, else sum the tenk booleans
     PLUS a concentration 'kill' (P3 concentration_flag is BUY-blocking)."""
@@ -185,6 +197,125 @@ def strip_placeholders(md: str) -> str:
     return "\n".join(out_lines)
 
 
+# ---------------------------------------------------------------------------
+# T2 DIAGNOSTIC SIGNALS section (P15/P16/P17 firewall — see THE FIREWALL).
+#
+# This renders the TOP-LEVEL "signals" namespace (a sibling of "derived", produced by
+# signals.py). It is DIAGNOSTIC-ONLY context. The firewall (design §5 Q2): valuation.py,
+# buy_eligible, and the BUY trigger NEVER read signals.* — and a PM reading this report must
+# not mistake it for a rating driver. So the section is rendered well BELOW the rating contract
+# + trust banner, behind its own "---" rule, with an explicit non-rating header and a banner
+# that restates "context only — NOT used in the rating".
+# ---------------------------------------------------------------------------
+
+# The exact header string is part of the contract: callers/selftests assert on it and a PM
+# scanning the report keys off it. Keep it verbatim.
+SIGNALS_HEADER = "## T2 DIAGNOSTIC SIGNALS (context only — NOT used in the rating)"
+
+_DIVERGENCE_GLOSS = {
+    "unpriced_improvement": "fundamentals improving while price flat/down — the diffusion "
+                            "thesis (a real change the market has not priced). DIAGNOSTIC "
+                            "context for an analyst; it does NOT originate or up-weight a BUY.",
+    "melting_ice_cube_priced": "fundamentals declining while price up/elevated — a value trap "
+                               "the market is already pricing (SIGA-like).",
+    "aligned": "fundamentals and price moving together — no divergence.",
+    "unclear": "insufficient/ambiguous data to label divergence.",
+}
+
+
+def build_signals_section(signals: dict | None) -> str:
+    """Render the top-level "signals" namespace as a clearly-labeled, non-rating T2 section.
+
+    Reads ONLY from the passed `signals` dict (deep['signals'], a sibling of 'derived'); it
+    never touches valuation or the rating contract — that is the firewall. Always returns a
+    section (even when signals is absent/errored) so a PM knows the side-channel state, and
+    always carries the explicit "NOT used in the rating" labeling so it cannot be mistaken for
+    a driver of the decision block above.
+    """
+    lines = [
+        SIGNALS_HEADER,
+        "",
+        "> 🧱 **FIREWALL — diagnostic only.** Everything in this section is between-filings T2 "
+        "context. It is NEVER read by valuation, by `buy_eligible`, or by the BUY trigger, and "
+        "it CANNOT originate or up-weight a rating. The rating/decision block is anchored to T1 "
+        "filing-derived valuation + zero kill-flags above; read this section only as labeled "
+        "context (it is snapshotted by track_forward for FUTURE per-signal calibration).",
+        "",
+    ]
+
+    if not signals:
+        lines.append("_No signals namespace present on this deepdive "
+                     "(side-channel not run or unavailable)._")
+        return "\n".join(lines)
+
+    if signals.get("signals_error"):
+        lines.append(f"> ⚠️ signals partial — `signals_error`: {signals['signals_error']}")
+        lines.append("")
+
+    lines.append(_render_price_divergence(signals.get("price_divergence")))
+    lines.append("")
+    lines.append(_render_ownership(signals.get("ownership")))
+
+    meta = signals.get("signals_meta") or {}
+    if meta:
+        srcs = ", ".join(meta.get("sources") or []) or "n/a"
+        lines.append("")
+        lines.append(f"_Signals meta: diagnostic_only={meta.get('diagnostic_only')}, "
+                     f"never_affects_buy={meta.get('never_affects_buy')}. Sources: {srcs}._")
+    return "\n".join(lines)
+
+
+def _render_price_divergence(pd: dict | None) -> str:
+    """P16 sub-block: divergence label + 6/12-mo returns + the READ fundamental trajectory."""
+    if not pd:
+        return "### Price ↔ fundamentals divergence (P16)\n_Unavailable._"
+    label = pd.get("divergence_label") or "unclear"
+    gloss = _DIVERGENCE_GLOSS.get(label, "")
+    ft = pd.get("fundamental_trajectory") or {}
+    out = [
+        "### Price ↔ fundamentals divergence (P16)",
+        f"- **divergence_label: `{label}`** — {gloss}" if gloss
+        else f"- **divergence_label: `{label}`**",
+        f"- price_return_6m: {_fmt_pct_ratio(pd.get('price_return_6m'))}   "
+        f"price_return_12m: {_fmt_pct_ratio(pd.get('price_return_12m'))}   "
+        f"(source: {pd.get('price_source') or 'N/A'})",
+        f"- fundamental_trajectory (read from filings, not recomputed): "
+        f"rev_slope_sign={ft.get('rev_slope_sign')}, "
+        f"contamination_ratio={_fmt(ft.get('contamination_ratio'), nd=2)}, "
+        f"fundamental_decline_flag={ft.get('fundamental_decline_flag')}",
+    ]
+    if pd.get("note"):
+        out.append(f"- note: {pd['note']}")
+    if pd.get("price_error"):
+        out.append(f"- ⚠️ price_error: {pd['price_error']}")
+    return "\n".join(out)
+
+
+def _render_ownership(own: dict | None) -> str:
+    """P17 sub-block: recent 13D/13G + short interest, staleness ALWAYS labeled."""
+    if not own:
+        return "### Ownership / positioning (P17)\n_Unavailable._"
+    out = ["### Ownership / positioning (P17)"]
+    filings = own.get("recent_13d_13g") or []
+    count = own.get("recent_13d_13g_count")
+    if count is None:
+        count = len(filings)
+    if filings:
+        out.append(f"- recent 13D/13G filings (subject CIK, last ~12mo): {count}")
+        for f in filings[:8]:
+            out.append(f"  - {f.get('file_date', '?')}  {f.get('form', '?')}  "
+                       f"— {f.get('filer') or 'unknown filer'}")
+        if len(filings) > 8:
+            out.append(f"  - …and {len(filings) - 8} more")
+    else:
+        out.append("- recent 13D/13G filings (subject CIK, last ~12mo): none found")
+    si = own.get("short_interest_pct")
+    out.append(f"- short_interest_pct: {_fmt(si, '%') if si is not None else 'null (unavailable)'}"
+               f"   short_trend: {own.get('short_trend') or 'null'}")
+    out.append(f"- ⏳ staleness: {own.get('staleness_note') or 'unlabeled'}")
+    return "\n".join(out)
+
+
 def build_trust_banner(flags: list[str]) -> str:
     """The DATA-QUALITY TRUST BANNER rendered under the rating. Always present (even when
     clean) so a PM knows the check ran — an empty banner is itself a signal."""
@@ -209,6 +340,10 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
 
     rating_block = build_rating_block(deep, val)
     banner = build_trust_banner(collect_trust_flags(deep, val))
+    # FIREWALL: signals is the TOP-LEVEL namespace (sibling of 'derived'), produced by
+    # signals.py. We read it here ONLY to render the diagnostic section — never to influence
+    # the rating block / banner / any number above. valuation.py never sees it.
+    signals_section = build_signals_section(deep.get("signals"))
 
     rev = der.get("latest_revenue")
     rev_M = round(rev / 1e6, 1) if rev else None
@@ -291,6 +426,14 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
         "- <data point that could not be obtained, with reason>",
         "- <assumption that is load-bearing but unverified>",
         "",
+        # FIREWALL: the T2 diagnostic side-channel is rendered LAST, behind its own rule, far
+        # below the rating contract + trust banner, so a PM cannot mistake it for a driver of
+        # the decision block. It carries no '<...>' placeholders (strip_placeholders is a no-op
+        # on it) and is built purely from the top-level 'signals' namespace.
+        "---",
+        "",
+        signals_section,
+        "",
     ]
     # P-E: strip unfilled prose `<...>` placeholders (the machine-decision block has none, so it
     # is preserved). A PM never sees literal template tokens; numbers already pre-filled remain.
@@ -368,6 +511,36 @@ def _selftest() -> None:
         },
         "tenk": {"has_going_concern": False, "has_material_weakness": False,
                  "has_death_spiral": False},
+        # FIREWALL: top-level "signals" namespace (sibling of "derived"), as produced by
+        # signals.py. melting-ice-cube + an activist 13D — diagnostic-only T2 context.
+        "signals": {
+            "price_divergence": {
+                "price_return_6m": 0.34, "price_return_12m": 0.41,
+                "price_source": "yfinance",
+                "fundamental_trajectory": {
+                    "rev_slope_sign": -1, "contamination_ratio": 0.68,
+                    "fundamental_decline_flag": True,
+                    "read_from": "deepdive_derived (NOT recomputed)",
+                },
+                "divergence_label": "melting_ice_cube_priced",
+                "note": "fundamentals down, price elevated",
+            },
+            "ownership": {
+                "recent_13d_13g": [
+                    {"form": "SC 13D", "file_date": "2026-05-01", "filer": "ACTIVIST FUND LP"},
+                    {"form": "SC 13G", "file_date": "2026-02-14", "filer": "INDEX HOLDER INC"},
+                ],
+                "recent_13d_13g_count": 2,
+                "short_interest_pct": None, "short_trend": None,
+                "staleness_note": "FINRA short interest is bi-monthly and not pulled here — "
+                                  "treat as UNAVAILABLE/STALE.",
+            },
+            "signals_meta": {
+                "diagnostic_only": True, "never_affects_buy": True,
+                "sources": ["yfinance (price returns)", "EDGAR EFTS (13D/13G)"],
+                "notes": "Quarantined T2 side-channel (design §5 Q2).",
+            },
+        },
     }
     val = {
         "ticker": "TST", "mos_basis": "fcf_cap", "margin_of_safety_pct": 76.0,
@@ -435,9 +608,53 @@ def _selftest() -> None:
     assert read_json_utf8(p)["ticker"] == "中文", "utf-8 read helper round-trip"
     os.unlink(p)
 
+    # 5. FIREWALL — T2 DIAGNOSTIC SIGNALS section (P15/P16/P17).
+    # 5a. The section renders with its exact contract header and is marked non-rating.
+    assert SIGNALS_HEADER in md, "T2 DIAGNOSTIC SIGNALS section header must render"
+    assert "context only — NOT used in the rating" in md, "section must be marked non-rating"
+    assert "FIREWALL — diagnostic only" in md, "section must carry the firewall banner"
+    assert "NEVER read by valuation" in md and "CANNOT originate or up-weight" in md, \
+        "firewall banner must state signals never drive the rating"
+    # 5b. Signal content renders from the top-level signals namespace.
+    assert "melting_ice_cube_priced" in md, "P16 divergence_label must render"
+    assert "price_return_6m" in md and "price_return_12m" in md, "P16 returns must render"
+    # decimal-fraction returns (0.34) must display as percent (34.0%), not 0.3%.
+    assert "34.0%" in md and "41.0%" in md, "P16 returns must be rendered as percent (x100)"
+    assert _fmt_pct_ratio(0.34) == "34.0%" and _fmt_pct_ratio(None) == "N/A", "pct-ratio fmt"
+    assert "fundamental_trajectory" in md, "P16 read trajectory must render"
+    assert "ACTIVIST FUND LP" in md and "SC 13D" in md, "P17 13D/13G must render"
+    assert "staleness" in md.lower(), "P17 short-interest staleness must be labeled"
+    # 5c. FIREWALL placement: the signals section is rendered strictly BELOW the rating contract
+    # and trust banner, so a PM cannot mistake it for a driver of the decision block.
+    assert md.index("```rating") < md.index("DATA-QUALITY TRUST BANNER") < md.index(SIGNALS_HEADER), \
+        "signals section must be below rating contract + trust banner (firewall)"
+    # 5d. The machine-decision contract must NOT contain any signals field name — proves the
+    # rating block / parser is not fed by the side-channel (firewall at the contract level).
+    rating_block_text = md.split("```rating", 1)[1].split("```", 1)[0]
+    for forbidden in ("divergence", "price_return", "short_interest", "13d", "13g", "signals"):
+        assert forbidden not in rating_block_text.lower(), \
+            f"rating contract must not reference signal '{forbidden}' (firewall)"
+    # 5e. Graceful degradation: a deepdive WITHOUT a signals namespace still renders the section
+    # (so the side-channel state is always visible) and never crashes.
+    assert SIGNALS_HEADER in md_clean, "section renders even when no signals namespace present"
+    assert "No signals namespace present" in md_clean, "absent-signals must be stated, not crash"
+    # 5f. signals_error surfaces but the section still renders (guard-failure path).
+    deep_err = dict(deep)
+    deep_err["signals"] = {"price_divergence": None, "ownership": None,
+                           "signals_meta": {"diagnostic_only": True, "never_affects_buy": True},
+                           "signals_error": "price_divergence:HTTPError:boom"}
+    md_err = render_report(deep_err, val, date="2026-06-20")
+    assert "signals_error" in md_err and "boom" in md_err, "signals_error must surface"
+    assert SIGNALS_HEADER in md_err, "section renders on partial signals"
+    # 5g. The signals section carries no literal <...> placeholder tokens (P-E-safe).
+    assert _PLACEHOLDER_RE.search(build_signals_section(deep["signals"])) is None, \
+        "signals section must be placeholder-free"
+
     print("make_report selftest PASS (trust banner surfaces flags + fenced rating contract parses "
           "+ clean-banner + killflag count incl. concentration + utf-8 read + P-E no literal "
-          "<...> placeholders survive while machine-decision block preserved)")
+          "<...> placeholders survive while machine-decision block preserved + T2 DIAGNOSTIC "
+          "SIGNALS section renders below the rating block, marked non-rating, with the rating "
+          "contract firewalled from every signal field)")
 
 
 # parse_rating_block is defined in finalize_run; import lazily for selftest reuse to keep a

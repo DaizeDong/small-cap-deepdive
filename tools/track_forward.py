@@ -502,6 +502,88 @@ def _buy_data_integrity_rate(rows: list[dict]) -> float | None:
 
 
 # ---------------------------------------------------------------------------
+# Signals snapshot (P15/P16/P17) — DIAGNOSTIC-ONLY, RECORDED-BUT-INERT.
+#
+# THE FIREWALL (approved philosophy decision Q2): the between-filings side-channel computed by
+# tools/signals.py lives in a SEPARATE top-level "signals" namespace and NEVER originates or
+# up-weights a BUY. track_forward's only contact with it is to SNAPSHOT a compact summary into
+# the verdict row so per-signal predictive value can be Brier-calibrated LATER. This snapshot is
+# WRITE-ONLY from the scorer's perspective: implied_prob, rating, and every scoring path
+# (_implied_prob_from_confidence, _brier, cmd_score, the scorecard) MUST NOT read it. It is
+# recorded-but-inert — present in the row for future per-signal calibration, load-bearing on
+# nothing today. The selftest asserts implied_prob/rating are identical with vs without it.
+# ---------------------------------------------------------------------------
+
+def _signals_snapshot(signals: dict | None) -> dict | None:
+    """Build a compact, inert snapshot of the diagnostic signals for a verdict row.
+
+    `signals` is the top-level "signals" namespace produced by tools/signals.compute_signals
+    (a SIBLING of "derived", never inside it). This extracts just two diagnostic labels:
+
+      - divergence_label   (P16): price_divergence.divergence_label, one of
+                            {unpriced_improvement, melting_ice_cube_priced, aligned, unclear}.
+      - ownership          (P17): a compact summary — the recent 13D/13G count, the single
+                            newest 13D/13G filing (form/file_date/filer), short_interest_pct,
+                            short_trend, and the explicit staleness_note label.
+
+    Returns None when `signals` is absent/empty or carries nothing usable (so a row without a
+    side-channel simply has signals_snapshot=None — no fabricated structure). The returned dict
+    is for FORWARD CALIBRATION ONLY and is never consulted by any scoring code path.
+    """
+    if not isinstance(signals, dict) or not signals:
+        return None
+
+    snap: dict[str, Any] = {}
+
+    pd = signals.get("price_divergence")
+    if isinstance(pd, dict):
+        snap["divergence_label"] = pd.get("divergence_label")
+
+    own = signals.get("ownership")
+    if isinstance(own, dict):
+        filings = own.get("recent_13d_13g") or []
+        count = own.get("recent_13d_13g_count")
+        if count is None:
+            count = len(filings)
+        latest = None
+        if filings:
+            f0 = filings[0]
+            if isinstance(f0, dict):
+                latest = {
+                    "form": f0.get("form"),
+                    "file_date": f0.get("file_date"),
+                    "filer": f0.get("filer"),
+                }
+        snap["ownership"] = {
+            "recent_13d_13g_count": count,
+            "latest_13d_13g": latest,
+            "short_interest_pct": own.get("short_interest_pct"),
+            "short_trend": own.get("short_trend"),
+            "staleness_note": own.get("staleness_note"),
+        }
+
+    # Stamp the firewall provenance so a reader of verdicts.jsonl cannot mistake this for an input.
+    if snap:
+        snap["diagnostic_only"] = True
+        return snap
+    return None
+
+
+def _extract_signals(rec: dict) -> dict | None:
+    """Pull the diagnostic "signals" namespace out of a verdict-source record, if present.
+
+    The deepdive output carries signals as a TOP-LEVEL key (sibling of "derived"). A verdict
+    record fanned out from it may forward that namespace verbatim under "signals". Returns the
+    dict or None — never raises. Reading the namespace here is the ONLY place the calibration
+    layer touches it, and it is used solely to build the recorded-but-inert snapshot.
+    """
+    if not isinstance(rec, dict):
+        return None
+    sig = rec.get("signals")
+    return sig if isinstance(sig, dict) else None
+
+
+# ---------------------------------------------------------------------------
 # --record
 # ---------------------------------------------------------------------------
 
@@ -561,6 +643,10 @@ def _build_verdict_from_flags(args) -> dict:
         "brier": None,
         "adjudication": None,
         "fp_cause": None,
+        # P15/P16/P17 diagnostic side-channel snapshot — recorded-but-inert (firewall). The CLI
+        # flag path carries no signals namespace, so this is None here; the JSON-fanout path
+        # (_build_verdicts_from_json) populates it from the deepdive's top-level "signals".
+        "signals_snapshot": None,
         "notes": None,
     }
 
@@ -623,6 +709,11 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
         entry_price = _fetch_close(ticker, entry_date, verbose=True) if ticker else None
         benchmark_entry_price = _fetch_close(DEFAULT_BENCHMARK, entry_date, verbose=True)
 
+        # P15/P16/P17 firewall: snapshot the diagnostic side-channel (recorded-but-inert). Read
+        # the top-level "signals" namespace from the source record and compact it for FUTURE
+        # per-signal Brier calibration. This does NOT touch rating/implied_prob computed above.
+        signals_snapshot = _signals_snapshot(_extract_signals(rec))
+
         row = {
             "verdict_date": verdict_date,
             "ticker": ticker,
@@ -646,6 +737,7 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
             "brier": None,
             "adjudication": None,
             "fp_cause": None,
+            "signals_snapshot": signals_snapshot,
             "notes": None,
         }
         rows.append(row)
@@ -838,6 +930,7 @@ def _build_validation_fp_rows() -> list[dict]:
             "brier": None,
             "adjudication": "data_false_positive",
             "fp_cause": fp_cause,
+            "signals_snapshot": None,  # backfilled FP cohort predates the side-channel
             "notes": "[validation 2026-06-19 BUY false-positive] kept OUT of price-Brier; "
                      "feeds BUY-data-integrity metric. See docs/2026-06-19-validation-report.md.",
         })
@@ -1645,7 +1738,123 @@ def _selftest() -> None:
     print("  P8 recall@gold: floor measured + loss-stage breakdown "
           "(full/partial/cap-warn + 5-stage partition + file read)  OK")
 
-    print("\ntrack_forward selftest PASS — all Brier/calibration/de-risk/FP math verified")
+    # --- P15/P16/P17 (FIREWALL): signals_snapshot is RECORDED-BUT-INERT ---
+    # The diagnostic side-channel may be SNAPSHOT into a verdict row for FUTURE per-signal Brier
+    # calibration, but it must NEVER change implied_prob, rating, or any scoring. These tests
+    # verify (a) the snapshot is built with the compact contracted shape, (b) it is recorded on
+    # the row by the JSON-fanout record path, and (c) implied_prob/rating/Brier are byte-identical
+    # with vs without a signals_snapshot present.
+    #
+    # A representative top-level "signals" namespace (sibling of "derived", per the firewall).
+    _signals_ns = {
+        "price_divergence": {
+            "price_return_6m": -0.22,
+            "price_return_12m": -0.35,
+            "divergence_label": "melting_ice_cube_priced",
+            "note": "fundamentals declining, price elevated",
+        },
+        "ownership": {
+            "recent_13d_13g": [
+                {"form": "SC 13D", "file_date": "2026-05-12", "filer": "ACTIVIST CAPITAL LP"},
+                {"form": "SC 13G", "file_date": "2026-02-03", "filer": "INDEX FUND TRUST"},
+            ],
+            "recent_13d_13g_count": 2,
+            "short_interest_pct": 18.4,
+            "short_trend": "rising",
+            "staleness_note": "13F lags ~45d; short interest bi-monthly — positioning context only",
+        },
+        "signals_meta": {"diagnostic_only": True, "never_affects_buy": True, "sources": ["EDGAR"]},
+    }
+
+    # (a) snapshot shape — compact divergence_label + ownership summary (newest filing only).
+    _snap = _signals_snapshot(_signals_ns)
+    assert _snap is not None, "FIREWALL: snapshot must be built from a populated signals namespace"
+    assert _snap["divergence_label"] == "melting_ice_cube_priced", (
+        f"FIREWALL: snapshot must carry price_divergence.divergence_label, got {_snap.get('divergence_label')}"
+    )
+    assert _snap["ownership"]["recent_13d_13g_count"] == 2, "FIREWALL: ownership count must be snapshotted"
+    assert _snap["ownership"]["latest_13d_13g"] == {
+        "form": "SC 13D", "file_date": "2026-05-12", "filer": "ACTIVIST CAPITAL LP"
+    }, f"FIREWALL: latest_13d_13g must be the newest filing, got {_snap['ownership']['latest_13d_13g']}"
+    assert _snap["ownership"]["short_interest_pct"] == 18.4, "FIREWALL: short_interest_pct snapshotted"
+    assert _snap["ownership"]["short_trend"] == "rising", "FIREWALL: short_trend snapshotted"
+    assert _snap["ownership"]["staleness_note"], "FIREWALL: staleness_note must be carried (labeled stale)"
+    assert _snap["diagnostic_only"] is True, "FIREWALL: snapshot must stamp diagnostic_only=True"
+    # Absent / empty / non-dict signals -> None (no fabricated structure).
+    assert _signals_snapshot(None) is None, "FIREWALL: no signals -> snapshot None"
+    assert _signals_snapshot({}) is None, "FIREWALL: empty signals -> snapshot None"
+    assert _signals_snapshot({"signals_meta": {}}) is None, "FIREWALL: meta-only signals -> snapshot None"
+    assert _extract_signals({"signals": _signals_ns}) is _signals_ns, "_extract_signals must pull the namespace"
+    assert _extract_signals({"ticker": "X"}) is None, "_extract_signals must return None when absent"
+
+    # (b) the snapshot is RECORDED on the row by the JSON-fanout record path, and (c) the rating/
+    # implied_prob/Brier are IDENTICAL whether the signals namespace is present or not. Build two
+    # otherwise-identical source records — one WITH signals, one WITHOUT — through the real builder
+    # (network is exercised for prices, which we don't assert on; the firewall fields are local).
+    import tempfile as _tempfile
+    _base_rec = {
+        "ticker": "TESTX", "rating": "买入", "confidence": 0.72,
+        "margin_of_safety_pct": 41.0, "mos_basis": "fcf_cap",
+        "theme": "firewalltest", "verdict_date": "2026-06-20", "cik": "0000000000",
+    }
+    # Stub price fetches so this block stays offline (selftest is no-network by contract); the
+    # firewall assertions are on the local snapshot fields, not on prices.
+    _orig_fetch_close = globals()["_fetch_close"]
+    globals()["_fetch_close"] = lambda *a, **k: None
+    try:
+        with _tempfile.TemporaryDirectory() as _td:
+            _p_with = Path(_td) / "with_signals.json"
+            _p_without = Path(_td) / "without_signals.json"
+            _rec_with = dict(_base_rec); _rec_with["signals"] = _signals_ns
+            _rec_without = dict(_base_rec)
+            _p_with.write_text(json.dumps([_rec_with]), encoding="utf-8")
+            _p_without.write_text(json.dumps([_rec_without]), encoding="utf-8")
+            _row_with = _build_verdicts_from_json(_p_with)[0]
+            _row_without = _build_verdicts_from_json(_p_without)[0]
+    finally:
+        globals()["_fetch_close"] = _orig_fetch_close
+
+    # (b) recorded: WITH-signals row carries the snapshot; WITHOUT-signals row has it as None.
+    assert _row_with["signals_snapshot"] is not None, "FIREWALL: snapshot must be RECORDED on the row"
+    assert _row_with["signals_snapshot"]["divergence_label"] == "melting_ice_cube_priced", (
+        "FIREWALL: recorded snapshot must carry the divergence label"
+    )
+    assert _row_with["signals_snapshot"]["ownership"]["recent_13d_13g_count"] == 2, (
+        "FIREWALL: recorded snapshot must carry the ownership summary"
+    )
+    assert _row_without["signals_snapshot"] is None, (
+        "FIREWALL: a row built WITHOUT a signals namespace must have signals_snapshot=None"
+    )
+    assert "signals_snapshot" in _row_without, "schema: signals_snapshot key present even when None"
+
+    # (c) INERT: the snapshot changes NOTHING about scoring. rating + implied_prob byte-identical.
+    assert _row_with["rating"] == _row_without["rating"], (
+        f"FIREWALL: rating must be identical with/without signals: "
+        f"{_row_with['rating']} vs {_row_without['rating']}"
+    )
+    assert _row_with["implied_prob"] == _row_without["implied_prob"], (
+        f"FIREWALL: implied_prob must be identical with/without signals: "
+        f"{_row_with['implied_prob']} vs {_row_without['implied_prob']}"
+    )
+    # The two rows must be identical in EVERY other field — the ONLY permitted difference is the
+    # signals_snapshot field itself (the recorded-but-inert diagnostic). Prices are stubbed to None
+    # above so even entry_price/benchmark_entry_price match, leaving signals_snapshot the sole delta.
+    _scoring_keys = [k for k in _row_with if k != "signals_snapshot"]
+    for k in _scoring_keys:
+        assert _row_with[k] == _row_without[k], (
+            f"FIREWALL: field '{k}' differs with vs without signals "
+            f"({_row_with[k]!r} vs {_row_without[k]!r}) — snapshot must be inert"
+        )
+
+    # And confirm the recorded snapshot can be Brier-scored LATER without affecting today's Brier:
+    # the scorer reads implied_prob (unchanged by the snapshot), never signals_snapshot.
+    _b_with = _brier(_row_with["implied_prob"], True)
+    _b_without = _brier(_row_without["implied_prob"], True)
+    assert _b_with == _b_without, "FIREWALL: Brier must not depend on the presence of a snapshot"
+    print("  P15/P16/P17 FIREWALL: signals_snapshot RECORDED-BUT-INERT "
+          "(snapshot shape + recorded on row + rating/implied_prob/Brier identical with vs without)  OK")
+
+    print("\ntrack_forward selftest PASS — all Brier/calibration/de-risk/FP/firewall math verified")
 
 
 # ---------------------------------------------------------------------------
