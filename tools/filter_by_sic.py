@@ -78,6 +78,35 @@ THEME_SIC: dict[str, list[str]] = {
     "water-utilities": ["4941"],          # water supply
     "railcar-leasing": ["3743", "4741"],  # railroad equipment + railcar rental
     "regional-gaming": ["7990", "7011"],  # amusement/recreation + hotels-casinos
+    # v0.3.1 backlog #5 (2026-06-20): wire SIC recall floors for the ~30 coverage-test
+    # themes that previously rested on FTS alone (unfloored & unmeasured). Canonical
+    # dedicated SIC code(s) per theme. Slugs match the coverage-test theme dirs so the
+    # substring match in theme_sics() resolves compound run slugs (e.g. "cov-coal-metcoal").
+    "coal-metcoal": ["1220", "1221"],         # bituminous coal & lignite mining
+    "midstream-mlp": ["4610", "4922", "4924"],  # pipelines + natural gas transmission/distribution
+    "gold-silver-miners": ["1040", "1090", "1000"],  # gold mining + misc metal mining + metal mining
+    "rare-earths": ["1000", "1040", "1090"],  # metal mining + gold + misc metal ores
+    "timber-forest": ["2400", "0800"],        # lumber & wood products + forestry
+    "beverages": ["2080", "2082", "2086"],    # beverages + malt beverages + bottled/canned soft drinks
+    "tobacco-alternatives": ["2100", "2111"],  # tobacco products + cigarettes
+    "local-broadcasting": ["4832", "4833"],   # radio broadcasting + television broadcasting
+    "waste-recycling": ["4953", "5093"],      # refuse systems + scrap & waste materials
+    "semiconductors": ["3674"],               # semiconductors & related devices
+    "biotech-clinical": ["2836", "8731"],     # biological products + commercial physical/biological research
+    "machinery": ["3500", "3550", "3559", "3561", "3590"],  # industrial & commercial machinery
+    "restaurants": ["5812"],                  # eating places
+    "homebuilders-land": ["1531"],            # operative builders (homebuilders / land)
+    "refiners": ["2911"],                     # petroleum refining
+    "steel-fab": ["3310", "3312", "3317"],    # steel works/blast furnaces + steel pipe & tubes
+    "lithium-battery-materials": ["1090", "2890", "3690"],  # misc metal ores + industrial chemicals + electrical equipment
+    "auto-parts-dealers": ["3714", "5013", "5531"],  # motor vehicle parts + auto parts wholesale/retail
+    "oilsvc": ["1389"],                       # oil & gas field services
+    "logistics-3pl": ["4731", "4700"],        # arrangement of transportation + transportation services
+    "it-services": ["7370", "7372", "7389"],  # computer/data processing services + prepackaged software + computer services
+    "rural-telecom-fiber": ["4813"],          # telephone communications (no radiotelephone)
+    "household-personal": ["2840", "2844"],   # soap/detergents + perfumes/cosmetics/toiletries
+    "diagnostics": ["8071", "2835"],          # medical laboratories + in-vitro/in-vivo diagnostics
+    "building-products-hvac": ["3585", "3430", "3440"],  # refrigeration/heating equipment + heating/plumbing + fabricated metal
 }
 
 # EDGAR browse-by-SIC enumeration endpoint (the recall-floor channel). The structured
@@ -312,6 +341,34 @@ def _selftest():
     assert theme_sics("railcar-leasing run") == ["3743", "4741"], "railcar must floor to 3743/4741"
     assert theme_sics("regional-gaming") == ["7990", "7011"], "regional-gaming must floor to 7990/7011"
     assert theme_sics("ai agents") == [], "theme with no dedicated SIC -> [] (opt-in no-op)"
+
+    # v0.3.1 backlog #5: every previously-unfloored coverage-test theme must now resolve to
+    # its canonical dedicated SIC(s). Slugs prefixed with "cov-" exercise the substring match.
+    assert theme_sics("cov-coal-metcoal") == ["1220", "1221"], "coal-metcoal must floor to 1220/1221"
+    assert theme_sics("cov-midstream-mlp") == ["4610", "4922", "4924"], "midstream-mlp must floor to 4610/4922/4924"
+    assert theme_sics("cov-gold-silver-miners") == ["1040", "1090", "1000"], "gold-silver-miners must floor to 1040/1090/1000"
+    assert theme_sics("cov-rare-earths") == ["1000", "1040", "1090"], "rare-earths must floor to 1000/1040/1090"
+    assert theme_sics("cov-timber-forest") == ["2400", "0800"], "timber-forest must floor to 2400/0800"
+    assert theme_sics("cov-beverages") == ["2080", "2082", "2086"], "beverages must floor to 2080/2082/2086"
+    assert theme_sics("cov-tobacco-alternatives") == ["2100", "2111"], "tobacco-alternatives must floor to 2100/2111"
+    assert theme_sics("cov-local-broadcasting") == ["4832", "4833"], "local-broadcasting must floor to 4832/4833"
+    assert theme_sics("cov-waste-recycling") == ["4953", "5093"], "waste-recycling must floor to 4953/5093"
+    assert theme_sics("cov-semiconductors") == ["3674"], "semiconductors must floor to 3674"
+    assert theme_sics("cov-biotech-clinical") == ["2836", "8731"], "biotech-clinical must floor to 2836/8731"
+    assert theme_sics("cov-machinery") == ["3500", "3550", "3559", "3561", "3590"], "machinery must floor to 3500-series"
+    assert theme_sics("cov-restaurants") == ["5812"], "restaurants must floor to 5812"
+    assert theme_sics("cov-homebuilders-land") == ["1531"], "homebuilders-land must floor to 1531"
+    assert theme_sics("cov-refiners") == ["2911"], "refiners must floor to 2911"
+    assert theme_sics("cov-steel-fab") == ["3310", "3312", "3317"], "steel-fab must floor to 3310/3312/3317"
+    assert theme_sics("cov-lithium-battery-materials") == ["1090", "2890", "3690"], "lithium-battery-materials must floor to 1090/2890/3690"
+    assert theme_sics("cov-auto-parts-dealers") == ["3714", "5013", "5531"], "auto-parts-dealers must floor to 3714/5013/5531"
+    assert theme_sics("cov-oilsvc") == ["1389"], "oilsvc must floor to 1389"
+    assert theme_sics("cov-logistics-3pl") == ["4731", "4700"], "logistics-3pl must floor to 4731/4700"
+    assert theme_sics("cov-it-services") == ["7370", "7372", "7389"], "it-services must floor to 7370/7372/7389"
+    assert theme_sics("cov-rural-telecom-fiber") == ["4813"], "rural-telecom-fiber must floor to 4813"
+    assert theme_sics("cov-household-personal") == ["2840", "2844"], "household-personal must floor to 2840/2844"
+    assert theme_sics("cov-diagnostics") == ["8071", "2835"], "diagnostics must floor to 8071/2835"
+    assert theme_sics("cov-building-products-hvac") == ["3585", "3430", "3440"], "building-products-hvac must floor to 3585/3430/3440"
 
     # _parse_browse_edgar: pure parser on a real-shaped browse-edgar fixture.
     fixture = (
