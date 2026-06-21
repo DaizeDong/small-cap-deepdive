@@ -1,5 +1,42 @@
 # Roadmap
 
+## v0.3.0 — Optimization campaign (2026-06-20) ✓ SHIPPED
+
+A 5-iteration, subagent-driven, test-driven campaign (reflect → design → implement → test →
+iterate). Closed all four top structural diagnoses from a 10-lens reflection. Full write-up:
+`docs/superpowers/specs/2026-06-20-campaign-final-report.md`.
+
+- **Decision layer ✓** `buy_eligible` mechanical gate (guards now block, not advise); magnitude
+  concentration kill-flag; V-shape value-trap vetoes (`fundamental_decline_flag` +
+  `peak_contamination_flag`); financial-SIC + insurance-holdco exclusion; second-source
+  cross-check gate; extreme-MoS / large-cap / FCF-sustainability gates.
+- **Data/robustness ✓** debt-truncation / wrong-entity / low-revenue-loss / degenerate-base guards;
+  EBIT concept cascade; market-cap fallback + `band=unknown` flow-through (recall 0→271 regbank,
+  12→219 shipping); `form_used` provenance; deepdive crash-surfacing.
+- **Recall ✓** SIC reverse-recall floor (UNION with FTS) + `recall@gold` metric (deathcare = 100%).
+- **Calibration ✓** confidence-as-probability + dividend-adjusted total return + de-risk metrics +
+  19 backfilled false-positive BUYs.
+- **Ergonomics ✓** `new_run.py` batch outputs + `_run.json` manifests; `finalize_run.py`
+  deterministic reports/verdicts/RANKING + trust banner; `make_report.py`; `rank.py` front-matter.
+- **Diagnostic alpha ✓** firewalled `signals.py` side-channel — price-divergence (P16) + ownership
+  (P17), strictly diagnostic, never touches `buy_eligible` (P15 alt-data agent-gathered). The
+  delayed-information-diffusion thesis is now *measured* (diagnostically), not just asserted.
+
+### Forward roadmap (deferred — non-blocking for real-world-usable)
+
+- **P14 — forensic spine:** Sloan accruals, diluted-share CAGR, SBC%, NI−FCF gap from XBRL with
+  hard-ceiling triggers — move the highest-halo rubric dimensions onto T1 ground.
+- **P11-full — catalyst-mechanism verification:** `{mechanism_verified, trigger_date,
+  days_remaining}` per catalyst. The MoS-waiver is currently **frozen to WATCH**; un-freeze only
+  after per-category Brier exists.
+- **Signals per-signal Brier calibration:** score the recorded `signals_snapshot` once verdicts
+  mature (~2027-06). Only then could a signal ever be considered for a non-diagnostic role — a
+  fresh human decision.
+- **P15 alt-data automation:** wire TrendsMCP / news into automated T2 capture (today agent-gathered).
+- **recall@gold expansion:** build gold true-member lists beyond deathcare.
+
+---
+
 ## v0.2.0 — Phase 2–7 buildout (2026-06-19) ✓ SHIPPED
 
 - **P2 ✓** Valuation engine (`tools/valuation.py`): reverse-DCF, EV/EBITDA multiples,
