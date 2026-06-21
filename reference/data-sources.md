@@ -61,7 +61,19 @@ rate discipline above.
 - Data freshness is not guaranteed; fields may lag by days
 - Do not use as the primary source for any metric that can be computed from EDGAR; use yfinance only as a quick-check or when EDGAR computation would be disproportionately expensive
 
-**When to use:** Initial market cap screening (cheap_pass.py uses it to confirm the company is still in the target market cap band). Current price for reverse-DCF calculation.
+**When to use:** Initial market cap screening (cheap_pass.py uses it to confirm the company is still in the target market cap band). Current price for reverse-DCF calculation. **And, as of iteration 5, the P7 second-source sanity band** (below) — the one place yfinance is read as an INDEPENDENT cross-check on SEC-XBRL fundamentals rather than only for the mktcap denominator.
+
+#### P7 — Second-Source Sanity Band (debt / revenue / shares cross-check)
+
+Until iteration 5, every financial datum in the decision path was SEC XBRL and every data-integrity guard (the C1a/C1b/C1c internal-consistency checks) operated on that *same* feed — so all of them were structurally blind to a corruption that looks internally reasonable but is externally wrong (HCI's plausible $246M revenue behind a failed SIC fetch → +118% pseudo-BUY; AL's sub-entity $331M revenue + 200-share tag; HRI's truncated $11M debt). P7 adds the FIRST external check.
+
+- **What it does.** On **survivors only** (at the deepdive level, after `cheap_pass` — to respect EDGAR/yfinance rate limits), `deepdive_data.py` fetches a SECOND, INDEPENDENT source for `total_debt` / `revenue` / `shares_outstanding` from yfinance (`Ticker(t).info` totalDebt / totalRevenue / sharesOutstanding, falling back to `.balance_sheet` / `.financials` / `.get_shares_full` — newest non-null) and compares it to the SEC-XBRL-derived `latest_total_debt` / `latest_revenue` / `latest_shares`.
+- **What it emits** (into the deepdive `derived` block — read by `valuation.py`, NOT the firewalled `signals` namespace):
+  - `cross_source_checked` (bool) — True if at least one field had BOTH a SEC and a yfinance value.
+  - `cross_source_mismatch` (bool) — True if, for ANY field where both values are present and non-trivial (`abs > $1M` floor), `max(a,b)/min(a,b) > 2.5` (a gross disagreement that means the single SEC value cannot be trusted).
+  - `cross_source_detail` (str) — which field(s) disagreed + both values + the ratio.
+- **It is a DATA-INTEGRITY gate, and that is the point.** `valuation.py` ANDs `(not cross_source_mismatch)` into `buy_eligible`; a mismatch forces `buy_eligible = false`, adds `cross_source_mismatch` to `buy_ineligible_reasons`, and downgrades a would-be static-MoS BUY → WATCH/abstain. This is deliberately DIFFERENT from the firewalled diagnostic side-channel below (P15/P16/P17): those are between-filings *market* signals that may NEVER originate or up-weight a BUY and are firewalled out of the decision path. P7 is about *trusting the input numbers themselves* — blocking BUY when the SEC input is grossly contradicted by an independent source is exactly what a data-integrity gate should do, so it lives in `derived` (the decision path), not in `signals`.
+- **It NEVER blocks on an absent second source.** The fetch is guarded end-to-end (returns None on any failure — no ticker, import error, network error, all-null `.info`; never raises) and `_cross_source_check` is a pure comparator. If yfinance is unavailable or yields no comparable field (one-sided or sub-floor), `cross_source_checked = false` and `cross_source_mismatch = false`, and the name flows through the gates exactly as before P7. The diagnostic check can never take down the T1 pipeline or false-block a name on missing data.
 
 ### Finnhub / FMP / Alpha Vantage — Optional Free APIs
 
@@ -272,6 +284,7 @@ forbidden — it risks IP blocking.
 
 ## Cross-references
 
+- `judgment-rubric.md` — P7 second-source sanity band: `cross_source_mismatch` is a DATA-INTEGRITY term of the `buy_eligible` composite (distinct from the firewalled diagnostic `signals` layer above, which never gates); full gate semantics and Hard-Rules row live there
 - `discovery-engine.md` — FTS calls to `efts.sec.gov` are subject to the EDGAR rate discipline above; the two-stage precision gate design accounts for FTS over-recall
 - `mechanical-checks.md` — the five Python guards govern how EDGAR data is parsed once retrieved; openinsider fragility is Guard 2's fallback case
 - `judgment-rubric.md` — data-gap disclosures required when blind spots affect a scoring dimension

@@ -680,6 +680,20 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
             f"top_program_pct={der.get('top_program_pct')}"
         )
 
+    # --- P7: second-source sanity band (read from producer derived) ---
+    # The producer (deepdive_data.py) cross-checks SEC-XBRL latest debt/revenue/shares against an
+    # independent source (yfinance). cross_source_mismatch is True ONLY when a field disagreed
+    # grossly (>2.5x) — meaning the single SEC value cannot be trusted. This is a DATA-INTEGRITY
+    # gate (unlike the flag-only signals): it is FINE for it to gate, because a corrupted input
+    # number cannot produce a tradeable MoS. An absent second source leaves cross_source_checked
+    # False / mismatch False, so this NEVER blocks a name on missing data. When set, a static-MoS
+    # BUY is downgraded BUY->WATCH/abstain.
+    _cross_source_checked = bool(der.get("cross_source_checked", False))
+    _cross_source_mismatch = bool(der.get("cross_source_mismatch", False))
+    _cross_source_detail = der.get("cross_source_detail")
+    if _cross_source_mismatch:
+        dq.append(f"cross_source_mismatch:{_cross_source_detail}")
+
     # --- P1: compose buy_eligible — the single mechanical boolean the BUY trigger ANDs ---
     # buy_eligible is True ONLY when every blocking guard is clear. The rubric/SKILL BUY
     # trigger additionally requires mos_basis=="fcf_cap" AND MoS>=30 AND zero Tier-3-load-
@@ -713,6 +727,11 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # P-A: peak_contamination_flag downgrades BUY->WATCH like fundamental_decline_flag.
     if _peak_contamination_flag:
         _buy_ineligible_reasons.append("peak_contamination_flag")
+    # P7: cross_source_mismatch (a >2.5x SEC-vs-yfinance disagreement on debt/revenue/shares)
+    # gates buy_eligible — a corrupted single-source number cannot back a tradeable MoS. This is
+    # a DATA-INTEGRITY gate, not a between-filings signal; gating here is intended.
+    if _cross_source_mismatch:
+        _buy_ineligible_reasons.append("cross_source_mismatch")
     _buy_eligible = len(_buy_ineligible_reasons) == 0
 
     # --- Assemble output ---
@@ -768,6 +787,12 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "contamination_ratio": _contamination_ratio,
         # P-A: V-shape value-trap veto (read from producer derived; independent of slope)
         "peak_contamination_flag": _peak_contamination_flag,
+        # P7: second-source sanity band (read from producer derived). cross_source_mismatch is a
+        # DATA-INTEGRITY gate on buy_eligible (>2.5x SEC-vs-yfinance disagreement); checked=False
+        # means no second source was available (never blocks).
+        "cross_source_checked": _cross_source_checked,
+        "cross_source_mismatch": _cross_source_mismatch,
+        "cross_source_detail": _cross_source_detail,
         # P-B: early/pre-revenue resource label (data-quality only; does NOT flip buy_eligible)
         "low_revenue_loss_ratio": bool(der.get("low_revenue_loss_ratio", False)),
         # A4: the >20x EXTREME tier (gates buy_eligible with the accurate label)
@@ -1452,6 +1477,65 @@ def _selftest():
     )
     print("  P-A peak_contamination veto: V-shape buy_eligible=False via peak flag ALONE "
           "(decline_flag stays False)  OK")
+
+    # --- P7: cross_source_mismatch is a DATA-INTEGRITY gate on buy_eligible ---
+    # The producer cross-checks SEC-XBRL latest debt/revenue/shares against yfinance; a >2.5x
+    # disagreement (cross_source_mismatch=True) means the single SEC number cannot be trusted, so a
+    # static-MoS BUY must downgrade BUY->WATCH/abstain. Unlike the iter4 flag-only signals, this
+    # one is INTENDED to gate (corrupted input cannot back a tradeable MoS).
+    # (i) clean baseline (no cross_source_* keys) propagates safe defaults and does NOT block.
+    assert _block_clean.get("cross_source_checked") is False, (
+        f"P7: clean fixture (no second source) must default cross_source_checked=False, "
+        f"got {_block_clean.get('cross_source_checked')}"
+    )
+    assert _block_clean.get("cross_source_mismatch") is False, (
+        f"P7: clean fixture must default cross_source_mismatch=False, "
+        f"got {_block_clean.get('cross_source_mismatch')}"
+    )
+    assert "cross_source_mismatch" not in _block_clean.get("buy_ineligible_reasons", []), (
+        "P7: absent second source must NEVER add cross_source_mismatch to buy_ineligible_reasons"
+    )
+    # (ii) gross mismatch on an otherwise-clean name => buy_eligible False + reason + dq line.
+    _dd_xs = dict(_dd_clean_base)
+    _dd_xs["derived"] = dict(_dd_clean_base["derived"])
+    _dd_xs["ticker"] = "TEST_XSRC_MISMATCH"
+    _dd_xs["derived"]["cross_source_checked"] = True
+    _dd_xs["derived"]["cross_source_mismatch"] = True
+    _dd_xs["derived"]["cross_source_detail"] = (
+        "gross disagreement (>2.5x) — total_debt: SEC=11.0M vs yf=4000.0M (ratio 363.6x)"
+    )
+    _block_xs = compute_valuation(_dd_xs, 120_000_000, cfg)
+    assert _block_xs.get("cross_source_mismatch") is True, (
+        "P7: producer cross_source_mismatch must be read into the valuation block"
+    )
+    assert _block_xs.get("buy_eligible") is False, (
+        f"P7: cross_source_mismatch must force buy_eligible=False (DATA-INTEGRITY gate), "
+        f"reasons={_block_xs.get('buy_ineligible_reasons')}"
+    )
+    assert "cross_source_mismatch" in _block_xs.get("buy_ineligible_reasons", []), (
+        "P7: cross_source_mismatch must appear in buy_ineligible_reasons"
+    )
+    assert any("cross_source_mismatch" in str(x) for x in _block_xs.get("data_quality", [])), (
+        "P7: cross_source_mismatch detail must appear in data_quality list"
+    )
+    # (iii) checked=True but mismatch=False (sources agree within 2.5x) must NOT block.
+    _dd_xs_ok = dict(_dd_clean_base)
+    _dd_xs_ok["derived"] = dict(_dd_clean_base["derived"])
+    _dd_xs_ok["ticker"] = "TEST_XSRC_AGREE"
+    _dd_xs_ok["derived"]["cross_source_checked"] = True
+    _dd_xs_ok["derived"]["cross_source_mismatch"] = False
+    _dd_xs_ok["derived"]["cross_source_detail"] = "second source within 2.5x on all comparable fields"
+    _block_xs_ok = compute_valuation(_dd_xs_ok, 120_000_000, cfg)
+    assert _block_xs_ok.get("cross_source_checked") is True, (
+        "P7: cross_source_checked=True must propagate when a second source was compared"
+    )
+    assert _block_xs_ok.get("buy_eligible") == _block_clean.get("buy_eligible"), (
+        "P7: agreement within 2.5x must NOT change buy_eligible vs the otherwise-identical clean name"
+    )
+    assert "cross_source_mismatch" not in _block_xs_ok.get("buy_ineligible_reasons", []), (
+        "P7: agreement (mismatch=False) must NOT add cross_source_mismatch to buy_ineligible_reasons"
+    )
+    print("  P7 cross_source gate: >2.5x mismatch blocks buy_eligible; agreement/absent never block  OK")
 
     # --- P-B: low_revenue_loss_ratio is DATA-QUALITY ONLY and does NOT flip buy_eligible ---
     # A name carrying ONLY low_revenue_loss_ratio (no other blocking flag) must surface the label
