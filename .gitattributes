@@ -1,0 +1,10 @@
+# Normalize all text files to LF in the repository (avoids CRLF/LF churn on Windows).
+* text=auto eol=lf
+
+# Explicit text types
+*.py    text eol=lf
+*.js    text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.jsonl text eol=lf
+*.txt   text eol=lf
