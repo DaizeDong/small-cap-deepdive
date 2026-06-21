@@ -235,7 +235,9 @@ Both gates are mandatory. Neither can be skipped or merged into a single pass.
 
 ### Symmetric BUY Trigger (Phase 3) — three-way `mos_basis` handling
 
-Run `python tools/valuation.py` before rating; read `mos_basis`, `margin_of_safety_pct`, `nav_margin_of_safety_pct`, the mechanical `buy_eligible` / `buy_ineligible_reasons` composite, and the deepdive `derived` change-detection fields `concentration_flag`, `fundamental_decline_flag`, and `peak_contamination_flag`. Also note the data-quality-only label `low_revenue_loss_ratio` and the provenance tag `form_used` (10-K/20-F/40-F). The model (reverse-DCF, cyclical-trough normalization, NAV path, data-quality guards, eligibility composite) is specified in `reference/valuation.md` and `reference/judgment-rubric.md`.
+Run `python tools/valuation.py` before rating; read `mos_basis`, `margin_of_safety_pct`, `nav_margin_of_safety_pct`, the mechanical `buy_eligible` / `buy_ineligible_reasons` composite, and the deepdive `derived` change-detection fields `concentration_flag`, `fundamental_decline_flag`, and `peak_contamination_flag`. Also note the data-quality-only label `low_revenue_loss_ratio` and the provenance tag `form_used` (10-K/20-F/40-F — populated for foreign filers too). The model (reverse-DCF, cyclical-trough normalization, NAV path, data-quality guards, eligibility composite) is specified in `reference/valuation.md` and `reference/judgment-rubric.md`. **The rating reads ONLY these T1 fields — it MUST NOT read the top-level `signals` namespace (see "T2 diagnostic signals" below).**
+
+**T2 diagnostic signals (never drive BUY) — firewalled side-channel (iteration 4, §5-Q2).** The deepdive output carries a SEPARATE top-level `signals` key (a sibling of `derived`, NEVER inside it) populated by `tools/signals.py`: P16 `price_divergence` (fundamental-vs-price divergence label — `unpriced_improvement` / `melting_ice_cube_priced` / `aligned` / `unclear`, with trailing 6m/12m price return) and P17 `ownership` (recent 13D/13G + staleness-labeled short interest). The agent MAY ADDITIONALLY gather P15 alt-data (TrendsMCP / GDELT / news-volume) as labeled T2 corroboration at analysis time. **Firewall (non-negotiable):** these are DIAGNOSTIC-ONLY context an analyst reads — `valuation.py`, the `buy_eligible` composite, and the BUY trigger DO NOT and MUST NOT read any `signals.*` field. A BUY stays anchored to T1 filing-derived valuation + zero kill-flags + `buy_eligible`; a signal can NEVER originate or up-weight a BUY. They are **track-forward-gated**: `track_forward` snapshots them per verdict for FUTURE per-signal Brier calibration, and until each signal has earned its own Brier it gates nothing. Full layer spec: `reference/data-sources.md` ("The Firewalled Diagnostic Side-Channel") and `PHILOSOPHY.md` ("Operationalizing the diffusion thesis"). Render them in the report under "## T2 DIAGNOSTIC SIGNALS (context only — NOT used in the rating)".
 
 | `mos_basis` | BUY condition | Notes |
 |---|---|---|
@@ -378,6 +380,14 @@ the horizon matures. This is the only way to determine if the rubric is correctl
    (a true member the union dropped); `track_forward` **warns when the FTS arm hit the top-1000 cap**,
    since a capped FTS arm is the most likely cause of a sub-1.0 recall@gold and signals the SIC
    reverse-recall floor should be carrying more of the load.
+
+6. **Signals snapshot (iteration 4) — track-forward-gated, NOT a calibration input yet.** When a
+   verdict is recorded, `track_forward` snapshots the diagnostic `signals` into the verdict row under
+   `signals_snapshot` (the P16 `divergence_label` + a P17 ownership summary). This is purely so the
+   per-signal predictive value can be calibrated LATER — it is **diagnostic-gated**: it does NOT
+   change `implied_prob` or the rating, and no signal gates anything until it has accumulated its own
+   Brier score. The firewall holds end-to-end: signals enter the record only as a future-calibration
+   snapshot, never as a driver of the verdict they are stored alongside.
 
 **Note:** Verdicts from 2026-06 runs mature in 2027-06. The correct scorecard state until then
 is "0 scored, N pending — calibration unknown." This is not a bug; it is the honest state.
