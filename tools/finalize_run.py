@@ -291,12 +291,15 @@ def _tickers_from_json(path: str) -> set[str]:
 def gate2_misrecall_tickers(reports_dir: Path) -> set[str]:
     """Tickers that Gate 2 resolved (theme misrecall) and therefore intentionally did NOT deep-dive.
 
-    P-F: a deep-band name dropped by the Gate-2 theme-fit pass is RESOLVED, not a forgotten
+    A5 / P-F: a deep-band name dropped by the Gate-2 theme-fit pass is RESOLVED, not a forgotten
     deep-dive. finalize_run must subtract these from 'missing' so the completeness check stops
-    emitting the spurious "33 missing" warning. Two persisted representations are supported, since
-    runs differ in what they wrote:
+    emitting the spurious "N missing" warning (and the manual re-band / --allow-missing step is no
+    longer needed). Two persisted representations are supported, since runs differ in what they wrote:
 
-      1. gate2_results.json with explicit per-row theme_fit == 'misrecall' (royalty run).
+      1. gate2_results.json with an explicit per-row misrecall verdict (royalty run). The verdict is
+         read under any recorded spelling: theme_fit/fit/verdict/decision/status in the misrecall
+         vocabulary (misrecall/misfit/reject/drop/exclude/off_theme/...), OR an explicit
+         retained/kept/passed/survived/is_member boolean set False.
       2. candidates_gate2_survivors.json listing the names that PASSED Gate 2 — every deep-band
          candidate NOT among the survivors was gated out as misrecall (uranium run, which never
          tagged theme_fit). Derived as deep_band_tickers - survivors.
@@ -305,7 +308,15 @@ def gate2_misrecall_tickers(reports_dir: Path) -> set[str]:
     """
     out: set[str] = set()
 
-    # (1) explicit theme_fit == misrecall in gate2_results.json
+    # (1) explicit gate-2 verdict in gate2_results.json. A row counts as a resolved misrecall
+    # if it carries a misrecall verdict under any of the recorded field spellings (runs differ:
+    # theme_fit/fit/verdict/decision == 'misrecall'/'reject'/'drop'/'misfit', or an explicit
+    # retained/kept/pass boolean set False). This is the A5 contract: a Gate-2-gated name is
+    # RESOLVED, never "missing".
+    _MISRECALL_VALUES = {"misrecall", "misfit", "reject", "rejected", "drop", "dropped",
+                         "exclude", "excluded", "off_theme", "off-theme", "not_a_member"}
+    _VERDICT_KEYS = ("theme_fit", "fit", "verdict", "decision", "gate2", "gate2_result", "status")
+    _RETAINED_KEYS = ("retained", "kept", "keep", "passed", "pass", "survived", "is_member")
     for gf in glob.glob(str(reports_dir / "gate2_results.json")):
         try:
             data = read_json_utf8(gf)
@@ -315,10 +326,24 @@ def gate2_misrecall_tickers(reports_dir: Path) -> set[str]:
         if not isinstance(rows, list):
             continue
         for row in rows:
-            if isinstance(row, dict) and row.get("theme_fit") == "misrecall":
-                tk = row.get("ticker") or row.get("symbol")
-                if tk:
-                    out.add(str(tk).upper())
+            if not isinstance(row, dict):
+                continue
+            tk = row.get("ticker") or row.get("symbol")
+            if not tk:
+                continue
+            is_misrecall = False
+            for k in _VERDICT_KEYS:
+                v = row.get(k)
+                if isinstance(v, str) and v.strip().lower() in _MISRECALL_VALUES:
+                    is_misrecall = True
+                    break
+            if not is_misrecall:
+                for k in _RETAINED_KEYS:
+                    if k in row and row.get(k) is False:
+                        is_misrecall = True
+                        break
+            if is_misrecall:
+                out.add(str(tk).upper())
 
     # (2) gate2-survivors file => deep-band names not among survivors were gated out.
     survivor_files = glob.glob(str(reports_dir / "candidates_gate2_survivors.json"))
@@ -620,6 +645,40 @@ def _selftest() -> None:
         deepb, missing = assert_reports_complete(rd)
         assert missing == {"MGPI"}, f"without gate2, MGPI is missing again: {missing}"
 
+        # A5: the misrecall verdict is read under alternate field spellings + an explicit
+        # retained=False boolean — a synthetic gate2_results.json with retained vs gated rows
+        # asserting the gated name is NOT counted missing (kills the spurious "N missing" warning
+        # and the manual re-band / --allow-missing step). SIGA retained, MGPI gated by each shape.
+        for gated_row in (
+            {"ticker": "MGPI", "fit": "reject", "band": "deep"},          # fit==reject
+            {"ticker": "MGPI", "verdict": "off_theme", "band": "deep"},   # verdict==off_theme
+            {"ticker": "MGPI", "decision": "drop", "band": "deep"},       # decision==drop
+            {"ticker": "MGPI", "retained": False, "band": "deep"},        # retained boolean False
+            {"ticker": "MGPI", "is_member": False, "band": "deep"},       # is_member boolean False
+        ):
+            (rd / "gate2_results.json").write_text(json.dumps(
+                [{"ticker": "SIGA", "theme_fit": "pure_play", "band": "deep",
+                  "retained": True}, gated_row], ensure_ascii=False), encoding="utf-8")
+            spelling = next(k for k in gated_row if k not in ("ticker", "band"))
+            assert gate2_misrecall_tickers(rd) == {"MGPI"}, \
+                f"A5: MGPI gated via '{spelling}' must be in misrecall set"
+            deepb, missing = assert_reports_complete(rd)
+            assert missing == set(), \
+                f"A5: gated MGPI (via '{spelling}') must NOT be counted missing: {missing}"
+            # And a retained deep-band name without a report IS still missing (no over-resolution).
+            assert "SIGA" not in gate2_misrecall_tickers(rd), \
+                f"A5: retained SIGA must not be mis-classified as gated (via '{spelling}')"
+        # A5: the spec's nominal shape — dict-wrapped {"results": [...]} with theme_fit misrecall.
+        (rd / "gate2_results.json").write_text(json.dumps(
+            {"theme": "tst", "results": [
+                {"ticker": "SIGA", "theme_fit": "retained", "band": "deep"},
+                {"ticker": "MGPI", "theme_fit": "misrecall", "band": "deep"},
+            ]}, ensure_ascii=False), encoding="utf-8")
+        assert gate2_misrecall_tickers(rd) == {"MGPI"}, "A5: dict-wrapped results misrecall read"
+        deepb, missing = assert_reports_complete(rd)
+        assert missing == set(), f"A5: dict-wrapped gated MGPI not missing: {missing}"
+        (rd / "gate2_results.json").unlink()
+
         # P-F representation #2: a candidates_gate2_survivors.json listing only the survivors —
         # deep-band names NOT among survivors are gated-out misrecall (uranium run shape, which
         # never tagged theme_fit). SIGA survives; MGPI absent => gated, not missing.
@@ -661,7 +720,8 @@ def _selftest() -> None:
 
     print("finalize_run selftest PASS (fenced rating parse incl. english/TBD/false + deep-band "
           "completeness detects missing report + verdict block matches track_forward contract + "
-          "P-C path-doubling collapse/repair + P-F gate2-misrecall resolved-not-missing)")
+          "P-C path-doubling collapse/repair + P-F/A5 gate2-misrecall resolved-not-missing "
+          "[alt field spellings + retained=False + dict-wrapped results])")
 
 
 if __name__ == "__main__":

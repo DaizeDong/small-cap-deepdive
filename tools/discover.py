@@ -22,8 +22,34 @@ import pandas as pd
 # Import from _common
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import UA, REPORTS, slug as _slug, http_get, today, CFG, resolve_mktcap, band_for
+# P8 SIC reverse-recall (the recall FLOOR): enumerate a theme's dedicated SIC and UNION
+# with FTS so a true small-cap FTS missed (low keyword density / top-1000 cap) is recalled.
+from filter_by_sic import theme_sics, sic_reverse_recall, union_recall
 
 FTS = "https://efts.sec.gov/LATEST/search-index"
+
+# CIK -> ticker resolution for SIC-only rows (browse-edgar gives no ticker). Lazy-loaded.
+_COMPANY_TICKERS = "https://www.sec.gov/files/company_tickers.json"
+_CIK_TICKER_CACHE: dict[str, str] | None = None
+
+
+def _cik_to_ticker(cik: str) -> str:
+    """Resolve a CIK to its primary ticker via SEC company_tickers.json (cached).
+
+    SIC-reverse rows come from browse-edgar, which has no ticker column; enrich_marketcap
+    needs one. Returns "" if the CIK has no listed ticker (delisted / non-listed filer) —
+    those flow through as band='unknown' like any other ticker-less row.
+    """
+    global _CIK_TICKER_CACHE
+    if _CIK_TICKER_CACHE is None:
+        _CIK_TICKER_CACHE = {}
+        try:
+            r = http_get(_COMPANY_TICKERS, timeout=25)
+            for v in r.json().values():
+                _CIK_TICKER_CACHE[str(v["cik_str"])] = v["ticker"]
+        except Exception as e:  # pragma: no cover - network guard
+            print(f"  [warn] company_tickers load failed: {e}", file=sys.stderr)
+    return _CIK_TICKER_CACHE.get(str(cik).strip().lstrip("0"), "")
 
 # 解析 display_names: "Apple Inc.  (AAPL)  (CIK 0000320193)"
 NAME_RE = re.compile(r"^(.*?)\s*\(([^)]+)\)\s*\(CIK\s*(\d+)\)")
@@ -70,6 +96,40 @@ def fts_search(phrase: str, forms: str, startdt: str, enddt: str,
         if (page + 1) * 100 >= total:
             break
     return out
+
+
+def merge_sic_reverse(fts_hits: list[dict], theme: str, forms: str,
+                      resolve_ticker=_cik_to_ticker, fetch=None) -> list[dict]:
+    """P8: UNION the FTS recall with the theme's dedicated-SIC enumeration (recall floor).
+
+    No-op (returns fts_hits unchanged, all tagged recall_channel='fts') when the theme has
+    no dedicated SIC — opt-in by construction. Otherwise enumerates the dedicated SIC(s),
+    unions on CIK (filter_by_sic.union_recall tags fts/sic_reverse/both), and back-fills a
+    ticker for the SIC-only rows so enrich_marketcap can resolve their market cap. SIC-only
+    rows are stamped form/file_date='' and matched_phrase='[sic_reverse]' for provenance.
+    fetch is injectable for offline tests.
+    """
+    sics = theme_sics(theme)
+    if not sics:
+        # Tag the channel even on the no-floor path so the column is always present.
+        return [dict(h, recall_channel="fts") for h in fts_hits]
+    sic_rows = sic_reverse_recall(theme, forms=forms, fetch=fetch)
+    print(f"  [P8] SIC reverse-recall (dedicated SIC {sics}): {len(sic_rows)} registrants",
+          file=sys.stderr)
+    merged = union_recall(fts_hits, sic_rows)
+    for r in merged:
+        if r.get("recall_channel") == "sic_reverse":
+            if not r.get("ticker"):
+                r["ticker"] = resolve_ticker(r["cik"])
+            r.setdefault("location", "")
+            r.setdefault("form", "")
+            r.setdefault("file_date", "")
+            r.setdefault("matched_phrase", "[sic_reverse]")
+    n_sic_only = sum(1 for r in merged if r.get("recall_channel") == "sic_reverse")
+    n_both = sum(1 for r in merged if r.get("recall_channel") == "both")
+    print(f"  [P8] union: {len(merged)} total ({n_sic_only} sic_reverse-only recovered, "
+          f"{n_both} in both channels)", file=sys.stderr)
+    return merged
 
 
 def enrich_marketcap(df: pd.DataFrame) -> pd.DataFrame:
@@ -209,7 +269,55 @@ def _selftest() -> None:
     # genuinely illiquid unknown row falls out via the illiquidity gate, not a mktcap drop
     assert cand["DARK"] == False, "DARK is illiquid -> not a candidate (via liquidity gate, not mktcap)"
 
-    print("discover selftest PASS (P5 null-mktcap -> band='unknown' flow-through, no drop)")
+    # -----------------------------------------------------------------------
+    # P8 SIC reverse-recall wiring (merge_sic_reverse). Offline: mock fetch + mock
+    # ticker resolver. Asserts the union enumerates the dedicated SIC and merges with
+    # the FTS recall WITHOUT dupes, tagging recall_channel and back-filling tickers.
+    # -----------------------------------------------------------------------
+    class _Resp:
+        def __init__(self, text): self.text = text
+    # browse-edgar fixture for SIC 7200: SCI (also an FTS hit) + CSV (FTS blind spot).
+    sic_html = (
+        '<a href="x&amp;CIK=0000089089&amp;owner=include&amp;count=100&amp;type=10-K">0000089089</a></td>'
+        '<td scope="row">SERVICE CORP INTERNATIONAL</td>'
+        '<a href="x&amp;CIK=0001016281&amp;owner=include&amp;count=100&amp;type=10-K">0001016281</a></td>'
+        '<td scope="row">CARRIAGE SERVICES INC</td>'
+    )
+    def _mock_fetch(url, params=None, timeout=25):
+        return _Resp(sic_html if (params or {}).get("start", 0) == 0 else "")
+    def _mock_ticker(cik):
+        return {"1016281": "CSV", "89089": "SCI"}.get(str(cik).strip().lstrip("0"), "")
+
+    fts_hits = [
+        {"name": "SERVICE CORP INTERNATIONAL", "ticker": "SCI", "cik": "89089",
+         "sic": "7200", "matched_phrase": "deathcare"},
+        {"name": "FTS Only Co", "ticker": "ZZZZ", "cik": "999999",
+         "sic": "7200", "matched_phrase": "cremation"},
+    ]
+    # Mapped theme -> floor kicks in, union enumerates the SIC and merges.
+    merged = merge_sic_reverse(fts_hits, "deathcare", "10-K",
+                               resolve_ticker=_mock_ticker, fetch=_mock_fetch)
+    by_cik = {r["cik"]: r for r in merged}
+    assert len(merged) == 3, f"P8 union must dedupe to 3 rows (SCI once), got {len(merged)}"
+    assert set(by_cik) == {"89089", "999999", "1016281"}, f"P8 union CIK set: {set(by_cik)}"
+    assert by_cik["89089"]["recall_channel"] == "both", "SCI in FTS+SIC must tag 'both'"
+    assert by_cik["999999"]["recall_channel"] == "fts", "FTS-only must tag 'fts'"
+    assert by_cik["1016281"]["recall_channel"] == "sic_reverse", (
+        "CSV is the FTS blind spot recovered by the SIC floor -> 'sic_reverse'"
+    )
+    assert by_cik["1016281"]["ticker"] == "CSV", "SIC-only row must back-fill ticker for enrichment"
+    assert by_cik["1016281"]["matched_phrase"] == "[sic_reverse]", "SIC-only provenance stamp"
+    # Every row tagged so the DataFrame always has the recall_channel column.
+    assert all("recall_channel" in r for r in merged), "every merged row must carry recall_channel"
+    # No-op path: unmapped theme returns FTS rows tagged 'fts', no enumeration.
+    plain = merge_sic_reverse(fts_hits, "ai agents", "10-K",
+                              resolve_ticker=_mock_ticker, fetch=_mock_fetch)
+    assert len(plain) == 2 and all(r["recall_channel"] == "fts" for r in plain), (
+        "unmapped theme -> FTS-only, all tagged 'fts' (opt-in no-op)"
+    )
+    assert all("recall_channel" not in r for r in fts_hits), "merge must NOT mutate fts_hits input"
+
+    print("discover selftest PASS (P5 null-mktcap flow-through + P8 SIC reverse-recall union)")
 
 
 def main():
@@ -234,6 +342,12 @@ def main():
     ap.add_argument("--max-pages", type=int, default=10,
                     help="每短语最大翻页数 (default: 10, 每页100条)")
     ap.add_argument("--out-slug", default="", help="输出文件名 slug(多主题区分用)")
+    ap.add_argument("--sic-reverse", action="store_true",
+                    help="P8 recall FLOOR: also enumerate the theme's dedicated SIC(s) "
+                         "(filter_by_sic.THEME_SIC) via EDGAR browse-by-SIC and UNION with "
+                         "the FTS recall, so a true small-cap FTS missed is still recalled. "
+                         "Opt-in; no-op for a theme with no dedicated SIC. Tags recall_channel "
+                         "(fts/sic_reverse/both) on every row.")
     args = ap.parse_args()
 
     phrases = [p.strip() for p in args.theme.split(",") if p.strip()]
@@ -245,6 +359,17 @@ def main():
         hits = fts_search(ph, args.forms, args.startdt, args.enddt, args.max_pages)
         print(f"  '{ph}': {len(hits)} 家", file=sys.stderr)
         all_hits += hits
+    # P8 recall FLOOR: union FTS with the theme's dedicated-SIC enumeration (opt-in).
+    # Use the out-slug (or first phrase) as the theme key for THEME_SIC lookup. Done before
+    # the zero-hit guard so a SIC floor can recover candidates even on a 0-FTS-hit theme.
+    if args.sic_reverse:
+        theme_key = args.out_slug or phrases[0]
+        if theme_sics(theme_key):
+            print(f"[1b/3] P8 SIC reverse-recall (theme key '{theme_key}')...", file=sys.stderr)
+            all_hits = merge_sic_reverse(all_hits, theme_key, args.forms)
+        else:
+            print(f"  [P8] --sic-reverse set but theme '{theme_key}' has no dedicated SIC; "
+                  f"FTS-only (no floor).", file=sys.stderr)
     if not all_hits:
         print(f"  [warn] 主题 '{phrases}' SEC FTS 零命中 — 关键词可能过严(需更自然短语)", file=sys.stderr)
         date = today()
