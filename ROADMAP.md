@@ -4,7 +4,7 @@
 
 A 5-iteration, subagent-driven, test-driven campaign (reflect → design → implement → test →
 iterate). Closed all four top structural diagnoses from a 10-lens reflection. Full write-up:
-`docs/superpowers/specs/2026-06-20-campaign-final-report.md`.
+`docs/optimization-campaign-2026-06/2026-06-20-campaign-final-report.md`.
 
 - **Decision layer ✓** `buy_eligible` mechanical gate (guards now block, not advise); magnitude
   concentration kill-flag; V-shape value-trap vetoes (`fundamental_decline_flag` +

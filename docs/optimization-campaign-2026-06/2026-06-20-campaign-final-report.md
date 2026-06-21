@@ -86,8 +86,8 @@ controller adjudicated a genuine reviewer disagreement:
 - The skill remains a **de-risk scanner, not a stock picker**: **0-BUY is the common, correct output**; across the entire iter1-2 test corpus exactly one clean BUY (INVA) appeared, and every mechanical BUY still demands human balance-sheet verification.
 
 ## 8. Artifacts
-- Design + gate: `docs/superpowers/specs/2026-06-20-smallcap-optimization-design.md`
+- Design + gate: `docs/optimization-campaign-2026-06/2026-06-20-smallcap-optimization-design.md`
 - Reflection notes: `.git/sdd/reflection/` (10 lenses + `_synthesis.md`)
-- Test reports: `docs/superpowers/specs/iter1-test/` , `iter2-test/`
-- Progress tracker: `docs/superpowers/specs/2026-06-20-optimization-campaign-progress.md`
+- Test reports: `docs/optimization-campaign-2026-06/iter1-test/` , `iter2-test/`
+- Progress tracker: `docs/optimization-campaign-2026-06/2026-06-20-optimization-campaign-progress.md`
 - Per-run batches (local, gitignored): `reports/smallcap/2026-06-*/` each with a `_run.json` manifest (skill commit + config) for cross-version comparison.
