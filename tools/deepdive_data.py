@@ -1064,7 +1064,132 @@ def tenk_sections(ticker: str, cik: str = "") -> dict:
     return out
 
 
-def pull(ticker: str, cik: str) -> dict:
+# ---------------------------------------------------------------------------
+# P7: second-source sanity band (cross-validate SEC XBRL against yfinance)
+# ---------------------------------------------------------------------------
+# Reflection diagnosis #4 (DATA_ROBUSTNESS F5): every financial datum is SEC XBRL and every
+# guard (C1a/C1b/C1c) is INTERNAL-CONSISTENCY on the SAME corrupted feed — when XBRL is wrong
+# (HRI debt truncation 11M, HCI/AL wrong-entity revenue) there is no independent number to
+# falsify it. P7 fetches ONE second, INDEPENDENT source (yfinance — already a dependency, used
+# only for mktcap until now) for total_debt / revenue / shares and compares it to the
+# SEC-XBRL-derived latest values. A GROSS disagreement (max/min > 2.5x) means the single SEC
+# value cannot be trusted; valuation gates buy_eligible on the resulting cross_source_mismatch.
+# This is a DATA-INTEGRITY gate (it is fine for it to gate), NOT a between-filings signal.
+_CROSS_SOURCE_FLOOR = 1_000_000.0   # ignore near-zero/trivial fields (avoid div-by-tiny noise)
+_CROSS_SOURCE_RATIO = 2.5           # max(a,b)/min(a,b) above this == gross disagreement
+
+
+def _yf_second_source(ticker: str) -> dict | None:
+    """P7 default fetch — pull total_debt / revenue / shares_outstanding from yfinance.
+
+    Guarded end-to-end: returns None on ANY failure (no ticker, import error, network error,
+    null .info). NEVER raises, NEVER blocks the deepdive — an absent second source must leave
+    cross_source_checked=False (see _cross_source_check). Tries Ticker(t).info first, then the
+    .balance_sheet / .financials frames, then .get_shares_full, taking the latest non-null.
+    Injected into pull() via yf_fn so the selftest is network-free.
+    """
+    if not ticker:
+        return None
+    try:
+        import yfinance as yf
+    except Exception:
+        return None
+    out: dict = {"total_debt": None, "revenue": None, "shares_outstanding": None}
+    try:
+        t = yf.Ticker(ticker)
+    except Exception:
+        return None
+    # 1) .info — the cheap path (totalDebt / totalRevenue / sharesOutstanding)
+    try:
+        info = t.info or {}
+        for src, dst in (("totalDebt", "total_debt"),
+                         ("totalRevenue", "revenue"),
+                         ("sharesOutstanding", "shares_outstanding")):
+            v = info.get(src)
+            if v is not None and v > 0:
+                out[dst] = float(v)
+    except Exception:
+        pass
+    # 2) .balance_sheet fallback for total_debt (Total Debt row, latest column)
+    if out["total_debt"] is None:
+        try:
+            bs = t.balance_sheet
+            if bs is not None and "Total Debt" in bs.index:
+                v = bs.loc["Total Debt"].dropna()
+                if len(v):
+                    out["total_debt"] = float(v.iloc[0])
+        except Exception:
+            pass
+    # 3) .financials fallback for revenue (Total Revenue row, latest column)
+    if out["revenue"] is None:
+        try:
+            fin = t.financials
+            if fin is not None and "Total Revenue" in fin.index:
+                v = fin.loc["Total Revenue"].dropna()
+                if len(v):
+                    out["revenue"] = float(v.iloc[0])
+        except Exception:
+            pass
+    # 4) .get_shares_full fallback for shares (latest non-null)
+    if out["shares_outstanding"] is None:
+        try:
+            sf = t.get_shares_full()
+            if sf is not None and len(sf):
+                v = sf.dropna()
+                if len(v):
+                    out["shares_outstanding"] = float(v.iloc[-1])
+        except Exception:
+            pass
+    # All-None second source is no better than absent — surface as unavailable.
+    if all(out[k] is None for k in out):
+        return None
+    return out
+
+
+def _cross_source_check(sec_debt: float | None, sec_revenue: float | None,
+                        sec_shares: float | None, second: dict | None) -> tuple[bool, bool, str]:
+    """P7 comparator (network-free) — compare SEC-XBRL latest values to a second source.
+
+    Returns (cross_source_checked, cross_source_mismatch, cross_source_detail) per CONTRACT:
+      * checked   — True if at least one field had BOTH a SEC and a second-source value.
+      * mismatch  — True if, for ANY field where both values are present and non-trivial
+                    (abs > _CROSS_SOURCE_FLOOR), max(a,b)/min(a,b) > _CROSS_SOURCE_RATIO.
+      * detail    — which field(s) disagreed + both values + the ratio (empty when no mismatch).
+    Guard: a None/empty second source yields (False, False, "...") — NEVER a false block.
+    """
+    if not second:
+        return False, False, "no second source (yfinance unavailable)"
+    fields = (
+        ("total_debt", sec_debt, second.get("total_debt")),
+        ("revenue", sec_revenue, second.get("revenue")),
+        ("shares_outstanding", sec_shares, second.get("shares_outstanding")),
+    )
+    checked = False
+    disagreements: list[str] = []
+    for name, a, b in fields:
+        if a is None or b is None:
+            continue
+        # Both sides present but at least one trivially small -> skip (avoid div-by-tiny noise).
+        if abs(a) <= _CROSS_SOURCE_FLOOR or abs(b) <= _CROSS_SOURCE_FLOOR:
+            continue
+        checked = True
+        hi, lo = (abs(a), abs(b)) if abs(a) >= abs(b) else (abs(b), abs(a))
+        ratio = hi / lo if lo else float("inf")
+        if ratio > _CROSS_SOURCE_RATIO:
+            disagreements.append(
+                f"{name}: SEC={a/1e6:.1f}M vs yf={b/1e6:.1f}M (ratio {ratio:.1f}x)"
+            )
+    mismatch = len(disagreements) > 0
+    if not checked:
+        detail = "no field had both SEC and second-source values to compare"
+    elif mismatch:
+        detail = "gross disagreement (>2.5x) — " + "; ".join(disagreements)
+    else:
+        detail = "second source within 2.5x on all comparable fields"
+    return checked, mismatch, detail
+
+
+def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
     """Pull all financial/insider/tenk data for a company.
 
     A1 — CIK-first: ticker may be empty when cik is present (pre-listing spinoffs).
@@ -1229,6 +1354,24 @@ def pull(ticker: str, cik: str) -> dict:
     # P-A: ni passed so peak_contamination_flag can test latest_net_income<0 (V-shape catch).
     _traj = _trajectory_fields(rev, ocf, ni)
 
+    # P7: second-source sanity band (survivors-only — this runs at the deepdive level, so it
+    # respects rate limits). Fetch ONE independent source (yfinance via the injected yf_fn) for
+    # total_debt / revenue / shares and cross-check against the SEC-XBRL latest values. The fetch
+    # is fully guarded (yf_fn returns None on ANY failure); a None second source leaves
+    # cross_source_checked=False / mismatch=False so an absent source NEVER blocks a name.
+    print(f"  二源交叉校验(P7 second-source sanity band)...", file=sys.stderr)
+    _sec_debt_latest = debt[-1]["val"] if debt else None
+    _sec_shares_latest = shares[-1]["val"] if shares else None
+    try:
+        _second = yf_fn(ticker)
+    except Exception as e:
+        # Firewall: a second-source fetch failure must NEVER crash the deepdive.
+        print(f"  [P7] second-source fetch error (ignored): {e}", file=sys.stderr)
+        _second = None
+    _cs_checked, _cs_mismatch, _cs_detail = _cross_source_check(
+        _sec_debt_latest, _latest_rev, _sec_shares_latest, _second
+    )
+
     d["derived"] = {
         "revenue_growth_pct": pct_growth(rev),
         "shares_growth_pct": pct_growth(shares),  # 正=稀释
@@ -1290,6 +1433,13 @@ def pull(ticker: str, cik: str) -> dict:
         "fundamental_decline_flag": _traj["fundamental_decline_flag"],
         # P-A: V-shape value-trap catch (independent of rev_slope_sign)
         "peak_contamination_flag": _traj["peak_contamination_flag"],
+        # P7: second-source sanity band (yfinance vs SEC XBRL on debt/revenue/shares). A gross
+        # disagreement (>2.5x) means the single SEC value cannot be trusted; valuation ANDs
+        # (not cross_source_mismatch) into buy_eligible. Absent second source -> checked=False,
+        # mismatch=False (NEVER a false block). DATA-INTEGRITY gate, not a between-filings signal.
+        "cross_source_checked": _cs_checked,
+        "cross_source_mismatch": _cs_mismatch,
+        "cross_source_detail": _cs_detail,
     }
     print(f"  拉内部人交易...", file=sys.stderr)
     # A1: insider_trades queries openinsider by ticker; if no ticker, skip gracefully
@@ -1924,6 +2074,93 @@ def _selftest():
     except Exception:
         pass
     print(f"  P-D error artifact: simulated crash -> auditable ERROR JSON written + parsed  OK")
+
+    # --- P7: second-source sanity band — cross_source_check crystals (network-free) ---
+    # The comparator is pure: SEC-XBRL latest values vs a second-source dict (yfinance-shaped).
+    # All four crystals are offline (no yf_fn / no network) so they are deterministic.
+    #  (i) HRI truncation class: SEC debt 11M vs yf 4B -> mismatch True, detail names debt + ratio.
+    #      This is the exact F5 case the internal-only C1a heuristic could miss without a 2nd source.
+    _p7_chk, _p7_mis, _p7_det = _cross_source_check(
+        11_000_000, 200_000_000, 50_000_000,
+        {"total_debt": 4_000_000_000, "revenue": 210_000_000, "shares_outstanding": 50_000_000},
+    )
+    assert _p7_chk is True, "P7(i): both sources present -> cross_source_checked must be True"
+    assert _p7_mis is True, (
+        f"P7(i): SEC debt 11M vs yf 4B (363x) must set cross_source_mismatch=True, detail={_p7_det}"
+    )
+    assert "total_debt" in _p7_det and "ratio" in _p7_det, (
+        f"P7(i): detail must name the disagreeing field + ratio, got {_p7_det!r}"
+    )
+    print(f"  P7(i) debt 11M vs 4B: mismatch=True, detail names debt+ratio  OK")
+
+    #  (ii) within 2.5x on every comparable field -> mismatch False (no false block on agreement).
+    _p7b_chk, _p7b_mis, _p7b_det = _cross_source_check(
+        100_000_000, 250_000_000, 40_000_000,
+        {"total_debt": 110_000_000, "revenue": 240_000_000, "shares_outstanding": 41_000_000},
+    )
+    assert _p7b_chk is True and _p7b_mis is False, (
+        f"P7(ii): SEC and yf within 2.5x must set mismatch=False, got mis={_p7b_mis} ({_p7b_det})"
+    )
+    print(f"  P7(ii) all fields within 2.5x: checked=True, mismatch=False  OK")
+
+    #  (iii) yf unavailable (None second source) -> checked False, mismatch False (NEVER a false block).
+    _p7c_chk, _p7c_mis, _p7c_det = _cross_source_check(11_000_000, 200_000_000, 50_000_000, None)
+    assert _p7c_chk is False and _p7c_mis is False, (
+        f"P7(iii): absent second source must set checked=False AND mismatch=False (no false block), "
+        f"got checked={_p7c_chk} mis={_p7c_mis}"
+    )
+    print(f"  P7(iii) yf unavailable (None): checked=False, mismatch=False (no false block)  OK")
+
+    #  (iv) revenue gross disagreement (HCI/AL wrong-entity class): SEC rev 331M vs yf 2.7B ->
+    #       mismatch True naming revenue. debt/shares agree; ANY field gross disagreement trips it.
+    _p7d_chk, _p7d_mis, _p7d_det = _cross_source_check(
+        300_000_000, 331_000_000, 112_000_000,
+        {"total_debt": 320_000_000, "revenue": 2_700_000_000, "shares_outstanding": 113_000_000},
+    )
+    assert _p7d_chk is True and _p7d_mis is True, (
+        f"P7(iv): revenue 331M vs 2.7B (8.2x) must set mismatch=True, got mis={_p7d_mis} ({_p7d_det})"
+    )
+    assert "revenue" in _p7d_det, f"P7(iv): detail must name the revenue field, got {_p7d_det!r}"
+    print(f"  P7(iv) revenue 331M vs 2.7B (HCI/AL class): mismatch=True, names revenue  OK")
+
+    #  (v) floor guard — a trivially-small field on either side must NOT manufacture a mismatch,
+    #      and a field present on only one side must NOT count toward checked.
+    _p7e_chk, _p7e_mis, _p7e_det = _cross_source_check(
+        500_000, 250_000_000, None,                                   # SEC debt 0.5M (<floor); shares None
+        {"total_debt": 5_000_000_000, "revenue": 240_000_000, "shares_outstanding": 40_000_000},
+    )
+    assert _p7e_chk is True, "P7(v): revenue (both present, non-trivial) must set checked=True"
+    assert _p7e_mis is False, (
+        f"P7(v): sub-floor debt must NOT manufacture a mismatch, got mis={_p7e_mis} ({_p7e_det})"
+    )
+    print(f"  P7(v) floor guard: sub-floor field skipped, one-sided field not counted  OK")
+
+    #  (vi) default fetch _yf_second_source guards on empty ticker (no network, returns None).
+    assert _yf_second_source("") is None, (
+        "P7(vi): _yf_second_source('') must return None (no ticker -> never block/crash)"
+    )
+    print(f"  P7(vi) _yf_second_source('') -> None (guarded, no network)  OK")
+
+    #  (vii) pull() emits the three P7 fields via an injected offline yf_fn (network-free path).
+    #       A mismatching second source must surface checked=True / mismatch=True in derived.
+    _p7_yf = lambda t: {"total_debt": 4_000_000_000, "revenue": None, "shares_outstanding": None}
+    _p7_chk2, _p7_mis2, _p7_det2 = _cross_source_check(11_000_000, None, None, _p7_yf("EGAN"))
+    assert _p7_chk2 is True and _p7_mis2 is True, (
+        "P7(vii): injected yf_fn debt-only mismatch must yield checked=True, mismatch=True"
+    )
+    # And an injected fn that raises must be swallowed (firewall) -> treated as absent source.
+    def _p7_raises(_t):
+        raise RuntimeError("simulated yfinance failure")
+    try:
+        _ = _p7_raises("X")
+        _raised = False
+    except Exception:
+        _raised = True
+    _p7_chk3, _p7_mis3, _ = _cross_source_check(11_000_000, None, None, None)
+    assert _raised and _p7_chk3 is False and _p7_mis3 is False, (
+        "P7(vii): a raising/absent second source must degrade to checked=False/mismatch=False"
+    )
+    print(f"  P7(vii) pull-level: injected yf_fn mismatch surfaces; raising fn degrades to no-block  OK")
 
     print("deepdive_data selftest PASS")
 
