@@ -52,7 +52,8 @@ from _deepdive_concepts import (
     DA_CONCEPTS, CAPEX_CONCEPT,
     EBIT_PRIMARY_CONCEPT, EBIT_PRETAX_CONCEPTS, EBIT_INTEREST_CONCEPTS,
     INSURANCE_CONCEPTS,
-    _one_concept, concept_series, concept_series_with_ifrs, _shares_series, pct_growth,
+    _one_concept, concept_series, concept_series_asof, concept_series_with_ifrs,
+    _shares_series, pct_growth,
     _get_sec_tickers,
     _debt_series, _da_series, _ebit_with_source, _operating_lease_liability,
 )
@@ -237,7 +238,36 @@ def insider_trades(ticker: str, cik: str = "") -> dict:
         return {"available": False, "error": f"unknown insider_source: {CFG['insider_source']}"}
 
 
-def tenk_sections(ticker: str, cik: str = "") -> dict:
+def _latest_filing_asof(filings, as_of: str | None):
+    """PIT helper — pick the latest filing in `filings` with filing_date <= as_of.
+
+    `filings` is an edgartools EntityFilings collection. When as_of is None this returns
+    filings.latest(1) (the live default — byte-identical to the pre-PIT path). When as_of is set,
+    it scans the collection, keeps only entries whose filing_date <= as_of, and returns the one
+    with the most recent filing_date (no look-ahead). Returns None when the collection is empty or
+    nothing was filed on/before as_of. Fully guarded — any edgartools shape surprise degrades to
+    None rather than raising.
+    """
+    if filings is None or not len(filings):
+        return None
+    if as_of is None:
+        return filings.latest(1)
+    best = None
+    best_date = None
+    try:
+        for f in filings:
+            fd = str(getattr(f, "filing_date", "") or "")
+            if not fd or fd > as_of:
+                continue
+            if best_date is None or fd > best_date:
+                best_date = fd
+                best = f
+    except Exception:
+        return None
+    return best
+
+
+def tenk_sections(ticker: str, cik: str = "", as_of: str | None = None) -> dict:
     """取最新年报的关键文本片段(business + risk factors 节选)供判断层读。
 
     Phase 4 — 20-F / 40-F graceful fallback:
@@ -249,6 +279,10 @@ def tenk_sections(ticker: str, cik: str = "") -> dict:
 
     A1 — CIK fallback: when ticker is absent but cik is present, construct Company
     from int(cik) directly (edgartools supports numeric CIK construction).
+
+    PIT — `as_of` (YYYY-MM-DD) restricts the 10-K/20-F/40-F selection to the latest filing with
+    filing_date<=as_of (via _latest_filing_asof) instead of the all-time latest. as_of=None is the
+    live default and returns the all-time latest filing (byte-identical to the pre-PIT path).
     """
     out = {"available": False}
     try:
@@ -261,20 +295,20 @@ def tenk_sections(ticker: str, cik: str = "") -> dict:
         form_used = None
         # Primary: 10-K (amendments=False — 10-K/A 修正件常缺 going-concern 全文)
         fl = c.get_filings(form="10-K", amendments=False)
-        if fl is not None and len(fl):
-            f = fl.latest(1)
+        f = _latest_filing_asof(fl, as_of)
+        if f is not None:
             form_used = "10-K"
         # Fallback 1: 20-F (foreign-domiciled filers — Phase 4)
         if f is None:
             fl20 = c.get_filings(form="20-F", amendments=False)
-            if fl20 is not None and len(fl20):
-                f = fl20.latest(1)
+            f = _latest_filing_asof(fl20, as_of)
+            if f is not None:
                 form_used = "20-F"
         # Fallback 2: 40-F (Canadian filers — Phase 4)
         if f is None:
             fl40 = c.get_filings(form="40-F", amendments=False)
-            if fl40 is not None and len(fl40):
-                f = fl40.latest(1)
+            f = _latest_filing_asof(fl40, as_of)
+            if f is not None:
                 form_used = "40-F"
         if f is None:
             return out
@@ -445,60 +479,80 @@ def _cross_source_check(sec_debt: float | None, sec_revenue: float | None,
     return checked, mismatch, detail
 
 
-def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
+def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = None) -> dict:
     """Pull all financial/insider/tenk data for a company.
 
     A1 — CIK-first: ticker may be empty when cik is present (pre-listing spinoffs).
     XBRL concept endpoints are CIK-based and always work.
     insider_trades / tenk_sections use ticker for their HTML/edgartools calls;
     they receive the cik fallback so Company() can be constructed from CIK.
+
+    PIT (backtest, ADDITIVE) — `as_of` (a YYYY-MM-DD string) makes the entire pull point-in-time:
+    every companyconcept cascade (revenue / net-income / OCF / cash / shares / assets / equity /
+    debt / EBIT / D&A / capex / goodwill / intangibles / liabilities / lease-income / PP&E-fleet /
+    operating-lease / IFRS) is pulled via the asof variant (filed<=as_of, latest-filed per period
+    end — no look-ahead, no post-as_of restatements). tenk_sections is restricted to filings
+    filed<=as_of. as_of=None is the LIVE DEFAULT and reproduces the pre-PIT behavior
+    BYTE-IDENTICALLY (the asof kwarg is None everywhere -> the live code path is taken). The
+    insider HTML feed (openinsider) is not point-in-time-able for free, so insider is skipped under
+    as_of (recorded as note=as_of_pit_no_insider) rather than silently using current data — a BUY
+    in the backtest stays anchored to filing-derived fundamentals, never current insider activity.
+
+    NOTE (scope): the insurance-concept presence probe (_insurance_concepts_present, in the sibling
+    _deepdive_flags module) is a structural SIC-routing flag (insurer status is time-invariant) and
+    is left on the latest path; SIC routing itself uses the point-in-time-aware sic fetch below.
     """
     d = {"ticker": ticker, "cik": cik,
          "pulled_at": today()}
+    if as_of is not None:
+        d["as_of"] = as_of
     print(f"  拉财务序列...", file=sys.stderr)
     # v0.3.2 #11: revenue/net-income/OCF probe BOTH us-gaap and ifrs-full so foreign 20-F/40-F
     # filers (whose financials are tagged under ifrs-full) recover SOME data instead of returning
     # blanket-empty financials. us-gaap wins on any shared end-date; IFRS only fills gaps.
-    rev = concept_series_with_ifrs(cik, REVENUE_CONCEPTS, IFRS_REVENUE_CONCEPTS)
+    rev = concept_series_with_ifrs(cik, REVENUE_CONCEPTS, IFRS_REVENUE_CONCEPTS, asof=as_of)
     time.sleep(0.2)
-    ni = concept_series_with_ifrs(cik, "NetIncomeLoss", IFRS_NET_INCOME_CONCEPTS); time.sleep(0.2)
+    ni = concept_series_with_ifrs(cik, "NetIncomeLoss", IFRS_NET_INCOME_CONCEPTS, asof=as_of); time.sleep(0.2)
     ocf = concept_series_with_ifrs(
-        cik, "NetCashProvidedByUsedInOperatingActivities", IFRS_OCF_CONCEPTS
+        cik, "NetCashProvidedByUsedInOperatingActivities", IFRS_OCF_CONCEPTS, asof=as_of
     ); time.sleep(0.2)
-    cash = concept_series(cik, "CashAndCashEquivalentsAtCarryingValue"); time.sleep(0.2)
-    shares = _shares_series(cik); time.sleep(0.2)
-    assets = concept_series(cik, "Assets"); time.sleep(0.2)
-    equity = concept_series(cik, "StockholdersEquity"); time.sleep(0.2)
+    cash = concept_series(cik, "CashAndCashEquivalentsAtCarryingValue", asof=as_of); time.sleep(0.2)
+    shares = _shares_series(cik, asof=as_of); time.sleep(0.2)
+    assets = concept_series(cik, "Assets", asof=as_of); time.sleep(0.2)
+    equity = concept_series(cik, "StockholdersEquity", asof=as_of); time.sleep(0.2)
 
     # Phase 2 additions: valuation inputs
     print(f"  拉估值输入序列(债务/EBIT/D&A/CapEx/Goodwill/Intangibles)...", file=sys.stderr)
-    debt, debt_source = _debt_series(cik)
+    debt, debt_source = _debt_series(cik, asof=as_of)
     time.sleep(0.2)
     # P9: EBIT concept cascade. Pull OperatingIncomeLoss first; if absent, _ebit_with_source
     # falls back to pretax-continuing-ops (+interest addback) so EV/EBITDA recovers.
-    _op_income = concept_series(cik, EBIT_PRIMARY_CONCEPT); time.sleep(0.2)
-    ebit, ebit_source = _ebit_with_source(cik, _op_income)
+    _op_income = concept_series(cik, EBIT_PRIMARY_CONCEPT, asof=as_of); time.sleep(0.2)
+    ebit, ebit_source = _ebit_with_source(cik, _op_income, asof=as_of)
     time.sleep(0.2)
-    da, da_source = _da_series(cik)
+    da, da_source = _da_series(cik, asof=as_of)
     time.sleep(0.2)
-    capex_raw = concept_series(cik, CAPEX_CONCEPT); time.sleep(0.2)
+    capex_raw = concept_series(cik, CAPEX_CONCEPT, asof=as_of); time.sleep(0.2)
     # CapEx from XBRL is a cash outflow stored as a positive number in PaymentsTo... concept.
     # We keep it positive (absolute value of spend) in the series for transparency.
     capex = capex_raw
 
     # NAV inputs: goodwill and intangibles (needed for tangible equity calculation)
-    goodwill = concept_series(cik, "Goodwill"); time.sleep(0.2)
-    intangibles = concept_series(cik, "IntangibleAssetsNetExcludingGoodwill"); time.sleep(0.2)
+    goodwill = concept_series(cik, "Goodwill", asof=as_of); time.sleep(0.2)
+    intangibles = concept_series(cik, "IntangibleAssetsNetExcludingGoodwill", asof=as_of); time.sleep(0.2)
 
     # C1a: liabilities series for debt-truncation cross-check (Liabilities - Equity = implied debt)
     # Also serves as fallback for Assets when Assets concept is empty (C1c balance-sheet identity)
     print(f"  拉 Liabilities 序列(用于 C1 债务截断检验)...", file=sys.stderr)
-    liabilities = concept_series(cik, "Liabilities"); time.sleep(0.2)
+    liabilities = concept_series(cik, "Liabilities", asof=as_of); time.sleep(0.2)
     # C1c: if Assets is empty, try LiabilitiesAndStockholdersEquity as fallback
     if not assets:
-        assets = concept_series(cik, "LiabilitiesAndStockholdersEquity"); time.sleep(0.2)
+        assets = concept_series(cik, "LiabilitiesAndStockholdersEquity", asof=as_of); time.sleep(0.2)
 
-    # C1: pull SIC from EDGAR company metadata for financial-sector guard (C2)
+    # C1: pull SIC from EDGAR company metadata for financial-sector guard (C2). SIC is structural
+    # entity metadata (an entity's SIC classification is not a between-filings disclosure), so the
+    # submissions endpoint is read directly even under as_of — this is the same SIC an investor at
+    # `as_of` would have classified the filer under.
     sic_code: str | None = None
     try:
         sic_url = f"https://data.sec.gov/submissions/CIK{cik.zfill(10)}.json"
@@ -593,6 +647,10 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
     # valuation can route SIC-65 insurance holdcos (BOC) like financial_sic instead of fcf_cap.
     # v0.3.1 #4: pass sic_code so the precision rule (insurance SIC 63/64 OR >=2 distinct concepts)
     # can suppress single-stray-tag false positives on non-insurers (SPB/ASTE/SKIL/ALLR/TOPP).
+    # NOTE (PIT scope): _insurance_concepts_present lives in the sibling _deepdive_flags module and
+    # is a structural SIC-routing presence flag (insurer status is time-invariant — a name that ever
+    # tagged insurance concepts was an insurer at `as_of` too). It is left on the latest path under
+    # as_of; the routing it feeds is conservative (financial-SIC -> nav/abstain), never a +BUY.
     print(f"  探测保险 XBRL 概念(A3)...", file=sys.stderr)
     _insurance_present, _insurance_concept = _insurance_concepts_present(cik, sic_code=sic_code)
     time.sleep(0.2)
@@ -605,7 +663,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
     _lease_income_present = False
     for _lic in LEASE_INCOME_CONCEPTS:
         try:
-            if _one_concept(cik, _lic):
+            if _one_concept(cik, _lic, asof=as_of):
                 _lease_income_present = True
                 break
         except Exception:
@@ -615,7 +673,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
     _ppe_best_end: str | None = None
     for _pfc in PPE_FLEET_CONCEPTS:
         try:
-            _pf_entries = _one_concept(cik, _pfc)
+            _pf_entries = _one_concept(cik, _pfc, asof=as_of)
         except Exception:
             _pf_entries = []
         time.sleep(0.1)
@@ -636,7 +694,8 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
     # 10-K sections pulled BEFORE derived so P3 concentration can read the footnote text.
     print(f"  拉 10-K 章节...", file=sys.stderr)
     # A1: tenk_sections uses CIK fallback when ticker absent
-    d["tenk"] = tenk_sections(ticker, cik=cik)
+    # PIT: as_of restricts the 10-K/20-F/40-F selection to filings filed<=as_of (no look-ahead).
+    d["tenk"] = tenk_sections(ticker, cik=cik, as_of=as_of)
 
     # v0.3.2 #11: foreign-filer un-valuable label. After the us-gaap+ifrs-full cascade, if a
     # 20-F/40-F filer STILL has empty revenue/net-income/OCF, flag foreign_filer_unvaluable so the
@@ -688,7 +747,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
     # cross-source comparison, not latest_total_debt (EV uses contractual debt).
     _sec_debt_latest = _ev_debt
     print(f"  拉经营租赁负债(ASC842 lease-adjust for cross-source)...", file=sys.stderr)
-    _op_lease = _operating_lease_liability(cik)
+    _op_lease = _operating_lease_liability(cik, asof=as_of)
     time.sleep(0.2)
     _sec_debt_lease_adj = _sec_debt_latest
     if _op_lease is not None:
@@ -793,8 +852,14 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
         "cross_source_detail": _cs_detail,
     }
     print(f"  拉内部人交易...", file=sys.stderr)
-    # A1: insider_trades queries openinsider by ticker; if no ticker, skip gracefully
-    if ticker:
+    # A1: insider_trades queries openinsider by ticker; if no ticker, skip gracefully.
+    # PIT: the openinsider screener returns CURRENT/recent rows and is not point-in-time-able for
+    # free. Under as_of we MUST NOT inject current insider activity into a backtest cell (look-ahead
+    # / survivorship leak), so insider is skipped with an explicit note rather than silently using
+    # present-day data. A backtest BUY stays anchored to filing-derived fundamentals only.
+    if as_of is not None:
+        d["insider"] = {"available": False, "note": "as_of_pit_no_insider"}
+    elif ticker:
         d["insider"] = insider_trades(ticker, cik=cik)
         time.sleep(0.3)
     else:
@@ -808,6 +873,16 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source) -> dict:
     # signals.py can never crash the deepdive: on ANY error we set signals.signals_error and
     # continue. A BUY stays anchored to T1 filing-derived valuation + zero kill-flags only.
     print(f"  计算 T2 诊断信号(side-channel, diagnostic-only)...", file=sys.stderr)
+    if as_of is not None:
+        # PIT: the diagnostic side-channel reads CURRENT price/ownership (not point-in-time-able for
+        # free). It never affects buy (firewall), but in a backtest cell it would carry present-day
+        # data, so skip it under as_of with an explicit diagnostic-only stub. Placement contract
+        # (top-level sibling of derived, never inside derived) is preserved.
+        d["signals"] = {
+            "signals_error": "skipped_under_as_of_pit",
+            "signals_meta": {"diagnostic_only": True, "never_affects_buy": True},
+        }
+        return d
     try:
         from signals import compute_signals  # lazy import — never gate the deepdive on it
         d["signals"] = compute_signals(ticker, cik, d["derived"])
@@ -1655,7 +1730,8 @@ def _selftest():
     _orig_one_concept = _dc._one_concept
 
     def _make_stub(present_set):
-        def _stub(cik, concept, taxonomy="us-gaap"):
+        # asof accepted (ignored) so the stub matches the PIT-extended _one_concept signature.
+        def _stub(cik, concept, taxonomy="us-gaap", asof=None):
             return [{"end": "2024-12-31", "val": 1.0}] if concept in present_set else []
         return _stub
 
@@ -1906,7 +1982,8 @@ def _selftest():
 
     def _make_tax_stub(gaap_present, ifrs_present):
         """Stub _one_concept: returns a value only for the named concept under its taxonomy."""
-        def _stub(cik, concept, taxonomy="us-gaap"):
+        # asof accepted (ignored) so the stub matches the PIT-extended _one_concept signature.
+        def _stub(cik, concept, taxonomy="us-gaap", asof=None):
             if taxonomy == "us-gaap" and concept in gaap_present:
                 return [{"end": "2024-12-31", "val": gaap_present[concept]}]
             if taxonomy == "ifrs-full" and concept in ifrs_present:
@@ -1955,6 +2032,125 @@ def _selftest():
     )
     print("  #11 IFRS recovery + foreign_filer_unvaluable: ifrs-full Revenue recovers (us-gaap "
           "wins ties); empty 20-F/40-F -> unvaluable True; recovered/domestic -> False  OK")
+
+    # --- PIT (backtest PIECE 1): concept_series_asof — filed<=asof, latest-filed-per-end-date ---
+    # Synthetic companyconcept facts with DISTINCT "filed" dates exercise the as-of filter:
+    #   * the asof variant drops facts filed AFTER asof (no look-ahead),
+    #   * per period END it picks the LATEST-FILED fact <= asof (the disclosure an investor at asof
+    #     could have seen — a later restatement filed after asof is ignored),
+    #   * asof=None reproduces the LIVE default (all facts, last-in-API-order dedup).
+    # We patch _dc.http_get to return the synthetic JSON so the REAL _one_concept asof logic runs
+    # (patching _one_concept itself would bypass the very logic under test). Restored in finally.
+    _orig_http_get = _dc.http_get
+
+    class _FakeResp:
+        def __init__(self, payload):
+            self.status_code = 200
+            self._payload = payload
+        def json(self):
+            return self._payload
+
+    # FY2022 (end 2022-12-31): original filed 2023-03-01 val=100; restated filed 2024-03-01 val=110.
+    # FY2023 (end 2023-12-31): filed 2024-03-01 val=200.
+    # FY2024 (end 2024-12-31): filed 2025-03-01 val=300 (filed AFTER a 2024-06-30 asof).
+    _pit_payload = {"units": {"USD": [
+        {"start": "2022-01-01", "end": "2022-12-31", "val": 100, "fy": 2022, "fp": "FY",
+         "form": "10-K", "filed": "2023-03-01"},
+        {"start": "2022-01-01", "end": "2022-12-31", "val": 110, "fy": 2022, "fp": "FY",
+         "form": "10-K/A", "filed": "2024-03-01"},   # restatement of FY2022, filed 2024
+        {"start": "2023-01-01", "end": "2023-12-31", "val": 200, "fy": 2023, "fp": "FY",
+         "form": "10-K", "filed": "2024-03-01"},
+        {"start": "2024-01-01", "end": "2024-12-31", "val": 300, "fy": 2024, "fp": "FY",
+         "form": "10-K", "filed": "2025-03-01"},      # filed AFTER a 2024-06-30 asof
+    ]}}
+    try:
+        _dc.http_get = lambda *a, **k: _FakeResp(_pit_payload)
+
+        # (a) asof = 2024-06-30: must see FY2022 (restated val=110, latest-filed<=asof) + FY2023
+        #     (val=200); MUST NOT see FY2024 (filed 2025-03-01 > asof) -> no look-ahead.
+        _asof_a = concept_series_asof("0000000001", "Revenues", "2024-06-30")
+        _by_end_a = {x["end"]: x["val"] for x in _asof_a}
+        assert _by_end_a == {"2022-12-31": 110, "2023-12-31": 200}, (
+            f"PIT(a): asof=2024-06-30 must yield FY2022 restated (110, latest-filed<=asof) + FY2023 "
+            f"(200), and DROP FY2024 (filed after asof), got {_by_end_a}"
+        )
+
+        # (b) asof = 2023-06-30: FY2022 only the ORIGINAL (val=100) is visible — the restatement was
+        #     filed 2024-03-01 (> asof). FY2023/FY2024 not yet filed. The latest-filed<=asof rule
+        #     must therefore pick the ORIGINAL, not the (future) restated value.
+        _asof_b = concept_series_asof("0000000001", "Revenues", "2023-06-30")
+        _by_end_b = {x["end"]: x["val"] for x in _asof_b}
+        assert _by_end_b == {"2022-12-31": 100}, (
+            f"PIT(b): asof=2023-06-30 must see ONLY FY2022 original (100) — the restatement filed "
+            f"2024-03-01 is future, FY2023/FY2024 not yet filed, got {_by_end_b}"
+        )
+
+        # (c) asof BEFORE any filing -> empty (every fact is future-filed; never a crash).
+        _asof_c = concept_series_asof("0000000001", "Revenues", "2020-01-01")
+        assert _asof_c == [], f"PIT(c): asof before all filings must be empty, got {_asof_c}"
+
+        # (d) the asof variant routes through concept_series(asof=...): a cascade list still merges
+        #     (later concept overrides earlier at a shared end-date) under the as-of filter.
+        _dc.http_get = lambda *a, **k: _FakeResp(_pit_payload)
+        _asof_d = concept_series("0000000001", ["SalesRevenueNet", "Revenues"], asof="2024-06-30")
+        assert {x["end"]: x["val"] for x in _asof_d} == {"2022-12-31": 110, "2023-12-31": 200}, (
+            f"PIT(d): concept_series(asof=...) must apply the as-of filter through the cascade, "
+            f"got {[(x['end'], x['val']) for x in _asof_d]}"
+        )
+
+        # (e) EQUIVALENCE: asof=None must reproduce the LIVE default — all four facts visible,
+        #     last-in-API-order dedup (FY2022 -> the SECOND/restated 110). This is the byte-identical
+        #     invariant the live path must preserve under the additive PIT change.
+        _live = concept_series("0000000001", "Revenues", asof=None)
+        _by_end_live = {x["end"]: x["val"] for x in _live}
+        assert _by_end_live == {"2022-12-31": 110, "2023-12-31": 200, "2024-12-31": 300}, (
+            f"PIT(e): asof=None (live default) must see ALL facts (incl. FY2024) with last-in-order "
+            f"dedup (FY2022->110), got {_by_end_live}"
+        )
+
+        # (f) a fact with NO "filed" field is conservatively DROPPED in the asof path (cannot be
+        #     dated <= T) but KEPT in the live path (asof=None).
+        _undated_payload = {"units": {"USD": [
+            {"start": "2023-01-01", "end": "2023-12-31", "val": 500, "fy": 2023, "fp": "FY",
+             "form": "10-K"},  # no "filed"
+        ]}}
+        _dc.http_get = lambda *a, **k: _FakeResp(_undated_payload)
+        assert concept_series_asof("0000000001", "Revenues", "2025-01-01") == [], (
+            "PIT(f): a fact with no 'filed' date must be DROPPED in the asof path (cannot date<=T)"
+        )
+        assert concept_series("0000000001", "Revenues", asof=None) == [
+            {"end": "2023-12-31", "val": 500, "fy": 2023, "fp": "FY", "form": "10-K"}
+        ], "PIT(f): the same undated fact must be KEPT in the live default path (asof=None)"
+
+        # (g) VALUE-CHANGING restatement no-leak (the real SIGA Assets 2014-12-31 shape: a later
+        #     filing carries a DIFFERENT value for the same period end — 166.4M originally, restated
+        #     DOWN to 160.7M in a filing ~1y later). Here the original (1000) and restatement (900)
+        #     differ, so the as-of boundary is load-bearing: asof BEFORE the restatement must return
+        #     the ORIGINAL value and the restated (lower) value must NOT leak across the boundary;
+        #     asof ON/AFTER it must adopt the restated value (latest-filed<=asof). This isolates the
+        #     `filed >= prev["_filed"]` selection in a way case (a)'s 100->110 (whose 110 is also the
+        #     live result) cannot — a strict/inclusive off-by-one on the filed compare would fail it.
+        _restate_payload = {"units": {"USD": [
+            {"end": "2014-12-31", "val": 1000, "fy": 2014, "filed": "2015-03-06"},   # original
+            {"end": "2014-12-31", "val": 900,  "fy": 2014, "filed": "2016-03-04"},   # restated DOWN
+        ]}}
+        _dc.http_get = lambda *a, **k: _FakeResp(_restate_payload)
+        # asof one day BEFORE the restatement -> original 1000 (restated 900 must NOT leak).
+        _pre = {x["end"]: x["val"] for x in concept_series_asof("0000000001", "Assets", "2016-03-03")}
+        assert _pre == {"2014-12-31": 1000}, (
+            f"PIT(g): asof before the restatement must keep the ORIGINAL 1000 (restated 900 must NOT "
+            f"leak across the as-of boundary), got {_pre}"
+        )
+        # asof ON the restatement filing date -> adopt the restated 900 (latest-filed<=asof, inclusive).
+        _on = {x["end"]: x["val"] for x in concept_series_asof("0000000001", "Assets", "2016-03-04")}
+        assert _on == {"2014-12-31": 900}, (
+            f"PIT(g): asof ON the restatement filing date must adopt the restated 900 "
+            f"(filed<=asof is inclusive), got {_on}"
+        )
+    finally:
+        _dc.http_get = _orig_http_get
+    print("  PIT concept_series_asof: filed<=asof + latest-filed-per-end-date (drops look-ahead "
+          "& future restatements); asof=None == live default byte-identical  OK")
 
     print("deepdive_data selftest PASS")
 
