@@ -56,6 +56,7 @@ from _deepdive_concepts import (
     _shares_series, pct_growth,
     _get_sec_tickers,
     _debt_series, _da_series, _ebit_with_source, _operating_lease_liability,
+    reset_asof_filed_tracker, get_asof_max_filed,
 )
 from _deepdive_flags import (
     _CONC_SINGLE_CUSTOMER, _CONC_SINGLE_PROGRAM, _CONC_REVENUE_TERM, _CONC_PCT, _CONC_WINDOW,
@@ -506,6 +507,12 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
          "pulled_at": today()}
     if as_of is not None:
         d["as_of"] = as_of
+        # FIX 1 — reset the as-of filed-date accumulator before the point-in-time cascade. Every
+        # as-of _one_concept call below records the max "filed" date of the facts it kept; we read it
+        # back after all pulls (combined with the as-of tenk filing date) to emit
+        # derived.asof_max_filing_date — the look-ahead audit evidence (asserted <= as_of). Reset is
+        # gated on as_of so the live (as_of=None) path never touches the accumulator.
+        reset_asof_filed_tracker()
     print(f"  拉财务序列...", file=sys.stderr)
     # v0.3.2 #11: revenue/net-income/OCF probe BOTH us-gaap and ifrs-full so foreign 20-F/40-F
     # filers (whose financials are tagged under ifrs-full) recover SOME data instead of returning
@@ -763,6 +770,20 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         _sec_debt_lease_adj, _latest_rev, _sec_shares_latest, _second
     )
 
+    # FIX 1 — compose derived.asof_max_filing_date (emitted ONLY when as_of is set). Combine the max
+    # "filed" date recorded across ALL as-of concept pulls (revenue/ni/ocf/cash/shares/assets/equity/
+    # debt/ebit/da/capex/goodwill/intangibles/liabilities/lease-income/PP&E-fleet/operating-lease/
+    # IFRS — every cascade routes through _one_concept, which records into the accumulator) with the
+    # as-of 10-K/20-F/40-F filing date (tenk). This is the newest filing date that fed ANY value in
+    # the point-in-time reconstruction; the look-ahead audit asserts it is <= as_of. None when truly
+    # nothing was datable. as_of=None path leaves the field ABSENT (byte-identical live default).
+    _asof_max_filing_date = None
+    if as_of is not None:
+        _concept_max_filed = get_asof_max_filed()
+        _tenk_filed = d["tenk"].get("filing_date") or None
+        _candidates = [x for x in (_concept_max_filed, _tenk_filed) if x]
+        _asof_max_filing_date = max(_candidates) if _candidates else None
+
     d["derived"] = {
         "revenue_growth_pct": pct_growth(rev),
         "shares_growth_pct": pct_growth(shares),  # 正=稀释
@@ -851,6 +872,11 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         "cross_source_mismatch": _cs_mismatch,
         "cross_source_detail": _cs_detail,
     }
+    # FIX 1 — emit asof_max_filing_date ONLY under as_of (the look-ahead audit reads it; harness
+    # asserts <= as_of). Added AFTER the dict literal + gated on as_of so the live (as_of=None)
+    # derived block is byte-identical to the pre-FIX output (the key is simply absent).
+    if as_of is not None:
+        d["derived"]["asof_max_filing_date"] = _asof_max_filing_date
     print(f"  拉内部人交易...", file=sys.stderr)
     # A1: insider_trades queries openinsider by ticker; if no ticker, skip gracefully.
     # PIT: the openinsider screener returns CURRENT/recent rows and is not point-in-time-able for
@@ -2151,6 +2177,117 @@ def _selftest():
         _dc.http_get = _orig_http_get
     print("  PIT concept_series_asof: filed<=asof + latest-filed-per-end-date (drops look-ahead "
           "& future restatements); asof=None == live default byte-identical  OK")
+
+    # --- FIX 1: derived.asof_max_filing_date — max "filed" across as-of pulls (+ tenk) <= asof ---
+    # The look-ahead audit is VACUOUS unless the as-of deepdive surfaces the filing dates it used.
+    # _one_concept records the max "filed" of the facts it KEEPS (filed<=asof, latest-filed-per-end)
+    # into a module accumulator; pull() resets it before the cascade and reads it back, combined with
+    # the as-of tenk filing date, into derived.asof_max_filing_date. Here we exercise that accumulator
+    # with synthetic facts of KNOWN filed dates so the result is deterministic and network-free.
+    _orig_http_get_f1 = _dc.http_get
+
+    # Two concepts, distinct filed dates. Under asof=2024-06-30 the KEPT facts are:
+    #   Revenues: FY2022 restated (filed 2024-03-01) + FY2023 (filed 2024-03-15); FY2024 (filed
+    #             2025-03-01) is future-filed and DROPPED. -> max filed kept = 2024-03-15.
+    #   Assets:   FY2023 instant (filed 2024-04-10). -> max filed kept = 2024-04-10.
+    # So the accumulator across BOTH pulls must reach 2024-04-10 (the global max kept filed <= asof).
+    _f1_revenues = {"units": {"USD": [
+        {"start": "2022-01-01", "end": "2022-12-31", "val": 100, "fy": 2022, "fp": "FY",
+         "form": "10-K", "filed": "2023-03-01"},
+        {"start": "2022-01-01", "end": "2022-12-31", "val": 110, "fy": 2022, "fp": "FY",
+         "form": "10-K/A", "filed": "2024-03-01"},   # restatement, latest-filed<=asof
+        {"start": "2023-01-01", "end": "2023-12-31", "val": 200, "fy": 2023, "fp": "FY",
+         "form": "10-K", "filed": "2024-03-15"},
+        {"start": "2024-01-01", "end": "2024-12-31", "val": 300, "fy": 2024, "fp": "FY",
+         "form": "10-K", "filed": "2025-03-01"},      # FUTURE-filed vs a 2024-06-30 asof -> dropped
+    ]}}
+    _f1_assets = {"units": {"USD": [
+        {"end": "2022-12-31", "val": 5000, "fy": 2022, "filed": "2023-04-10"},
+        {"end": "2023-12-31", "val": 5200, "fy": 2023, "filed": "2024-04-10"},  # latest kept <= asof
+    ]}}
+
+    def _f1_router(payload_by_concept):
+        """http_get stub that returns a payload chosen by the concept embedded in the URL."""
+        def _get(url, *a, **k):
+            for _concept, _payload in payload_by_concept.items():
+                if f"/{_concept}.json" in url:
+                    return _FakeResp(_payload)
+            return _FakeResp({"units": {}})
+        return _get
+
+    try:
+        _dc.http_get = _f1_router({"Revenues": _f1_revenues, "Assets": _f1_assets})
+
+        # (a) accumulator across TWO as-of concept pulls -> global max KEPT filed (<= asof).
+        _dc.reset_asof_filed_tracker()
+        _r = concept_series("0000000001", "Revenues", asof="2024-06-30")
+        assert {x["end"]: x["val"] for x in _r} == {"2022-12-31": 110, "2023-12-31": 200}, (
+            f"FIX1(a): Revenues as-of must keep FY2022 restated + FY2023, got {_r}"
+        )
+        assert get_asof_max_filed() == "2024-03-15", (
+            f"FIX1(a): after Revenues pull, max kept filed must be 2024-03-15, got {get_asof_max_filed()}"
+        )
+        _a = concept_series("0000000001", "Assets", asof="2024-06-30")
+        assert {x["end"]: x["val"] for x in _a} == {"2022-12-31": 5000, "2023-12-31": 5200}, (
+            f"FIX1(a): Assets as-of must keep both instants, got {_a}"
+        )
+        assert get_asof_max_filed() == "2024-04-10", (
+            f"FIX1(a): accumulator across both pulls must be the global max kept filed 2024-04-10, "
+            f"got {get_asof_max_filed()}"
+        )
+        # By construction the recorded max is <= asof — the look-ahead audit invariant.
+        assert get_asof_max_filed() <= "2024-06-30", "FIX1(a): recorded max filed must be <= asof"
+
+        # (b) the future-filed FY2024 fact (filed 2025-03-01 > asof) must NOT contaminate the max.
+        assert get_asof_max_filed() < "2025-03-01", (
+            "FIX1(b): a future-filed fact (dropped by the asof filter) must NOT enter the accumulator"
+        )
+
+        # (c) reset clears it; a pull whose ALL facts are future-filed records NOTHING -> None.
+        _dc.reset_asof_filed_tracker()
+        assert get_asof_max_filed() is None, "FIX1(c): reset must clear the accumulator to None"
+        _none = concept_series("0000000001", "Revenues", asof="2020-01-01")  # before all filings
+        assert _none == [] and get_asof_max_filed() is None, (
+            f"FIX1(c): asof before all filings keeps nothing -> accumulator stays None, "
+            f"got series={_none} max={get_asof_max_filed()}"
+        )
+
+        # (d) the LIVE default (asof=None) must NEVER record — the accumulator stays None so the
+        #     emit-gate leaves derived.asof_max_filing_date absent (byte-identical live default).
+        _dc.reset_asof_filed_tracker()
+        _live = concept_series("0000000001", "Revenues", asof=None)
+        assert _live and get_asof_max_filed() is None, (
+            f"FIX1(d): a live (asof=None) pull must NOT touch the accumulator, got {get_asof_max_filed()}"
+        )
+
+        # (e) pull-level composition: max(concept-accumulator, tenk filing date). A tenk filed LATER
+        #     than every concept fact (but still <= asof) must become the surfaced max; a tenk filed
+        #     EARLIER must leave the concept max as the surfaced value. (Mirrors pull()'s max() of the
+        #     two candidates; computed offline so no live tenk fetch is needed.)
+        _dc.reset_asof_filed_tracker()
+        concept_series("0000000001", "Assets", asof="2024-06-30")  # concept max -> 2024-04-10
+        _concept_max = get_asof_max_filed()
+        _tenk_late = "2024-05-20"   # later 10-K filing, still <= asof
+        _composed_late = max([x for x in (_concept_max, _tenk_late) if x])
+        assert _composed_late == "2024-05-20", (
+            f"FIX1(e): a later (<=asof) tenk filing date must become asof_max_filing_date, "
+            f"got {_composed_late}"
+        )
+        _tenk_early = "2024-01-05"  # earlier than the concept max
+        _composed_early = max([x for x in (_concept_max, _tenk_early) if x])
+        assert _composed_early == "2024-04-10", (
+            f"FIX1(e): an earlier tenk filing date must leave the concept max as the surfaced value, "
+            f"got {_composed_early}"
+        )
+        # Both None -> None (truly nothing datable).
+        assert max([x for x in (None, None) if x], default=None) is None, (
+            "FIX1(e): both concept-max and tenk-date None -> asof_max_filing_date None"
+        )
+    finally:
+        _dc.http_get = _orig_http_get_f1
+        _dc.reset_asof_filed_tracker()
+    print("  FIX1 asof_max_filing_date: accumulator = max KEPT filed across pulls (<=asof, drops "
+          "future-filed); reset clears; asof=None records nothing; tenk-date composes via max  OK")
 
     print("deepdive_data selftest PASS")
 
