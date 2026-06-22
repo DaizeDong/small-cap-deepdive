@@ -161,13 +161,21 @@ def bucket_name(deep: dict, val: dict) -> dict:
 def _filing_dates_from_deep(deep: dict) -> list[str]:
     """Every observable filing date a single PIT pull exposes (YYYY-MM-DD strings, non-empty).
 
-    The 10-K/20-F/40-F selection carries an explicit tenk.filing_date (the most recent periodic
-    disclosure an investor at asof could read). The concept-series entries drop their per-fact filed
-    dates, so the tenk filing date is the authoritative observable upper bound; the structural
-    guarantee that NO concept used a fact filed>asof comes from threading as_of into every pull
-    (verified byte-identically in the data-layer selftests). We audit what is observable.
+    Two observable upper bounds, both filed<=asof by construction of the as-of pull:
+      * derived.asof_max_filing_date (FIX 1) — the AUTHORITATIVE one: the max "filed" date actually
+        used across EVERY concept pull (revenue/ni/ocf/debt/... + the as-of 10-K/20-F/40-F). This is
+        what makes the look-ahead audit NON-vacuous — without it the audit observed only the tenk
+        date (and was empty when no tenk resolved). Emitted only when as_of is set; null/absent on
+        the live latest-filing path.
+      * tenk.filing_date — the most recent periodic disclosure an investor at asof could read; a
+        secondary observable that survives even if asof_max_filing_date is null.
+    We audit every observable date; max across them is the cell's look-ahead upper bound.
     """
     out: list[str] = []
+    derived = deep.get("derived") or {}
+    amfd = str(derived.get("asof_max_filing_date", "") or "").strip()
+    if amfd:
+        out.append(amfd[:10])
     tenk = deep.get("tenk") or {}
     fd = str(tenk.get("filing_date", "") or "").strip()
     if fd:
@@ -175,15 +183,20 @@ def _filing_dates_from_deep(deep: dict) -> list[str]:
     return out
 
 
-def look_ahead_audit(rows: list[dict], asof: str, benchmark: dict) -> dict:
+def look_ahead_audit(rows: list[dict], asof: str, benchmark: dict,
+                     *, expect_dates: bool = False) -> dict:
     """Assert no look-ahead across the whole cell + record entry/exit/benchmark dates.
 
     rows are per-name result dicts (each may carry filing_dates + the forward_return block). The
     AUDIT (spec: "Per-cell audit asserts max(filing_date) <= T"):
       * max_filing_date <= asof  — RAISES AssertionError if any observable filing date is AFTER asof.
+      * NON-VACUOUS: when expect_dates is True (a real cell with names), at least ONE filing date
+        MUST have been observed — RAISES AssertionError otherwise. An audit that observed 0 dates is
+        VACUOUS (it asserts nothing about look-ahead), which was bug (B): the whole validity point.
+        non_vacuous in the returned dict records whether n_filing_dates_observed > 0.
       * records max_filing_date, the entry/exit date RANGE actually resolved by the price layer, and
         the benchmark's entry/exit dates, so the cell JSON proves the window used.
-    Returns the audit dict (only reached when the assertion passed).
+    Returns the audit dict (only reached when the assertions passed).
     """
     filing_dates: list[str] = []
     entry_dates: list[str] = []
@@ -198,16 +211,24 @@ def look_ahead_audit(rows: list[dict], asof: str, benchmark: dict) -> dict:
         if fr.get("exit_date"):
             exit_dates.append(fr["exit_date"])
 
+    n_observed = len(filing_dates)
     max_fd = max(filing_dates) if filing_dates else None
     # THE look-ahead assertion. A filing observed after asof would be a leak — fail loud.
     assert max_fd is None or max_fd <= asof, (
         f"LOOK-AHEAD LEAK: max filing_date {max_fd} used in cell is AFTER asof {asof}")
+    # NON-VACUITY assertion (bug B). A real cell that surfaced 0 filing dates proves nothing about
+    # look-ahead — the audit would pass vacuously. Demand at least one observed date.
+    if expect_dates:
+        assert n_observed > 0, (
+            "VACUOUS AUDIT: 0 filing dates observed across the cell — the look-ahead audit asserts "
+            "nothing (bug B). Each name's PIT pull must surface derived.asof_max_filing_date.")
 
     return {
         "asof": asof,
         "max_filing_date": max_fd,
         "max_filing_date_le_asof": (max_fd is None or max_fd <= asof),
-        "n_filing_dates_observed": len(filing_dates),
+        "n_filing_dates_observed": n_observed,
+        "non_vacuous": n_observed > 0,
         "entry_date_range": [min(entry_dates), max(entry_dates)] if entry_dates else None,
         "exit_date_range": [min(exit_dates), max(exit_dates)] if exit_dates else None,
         "benchmark": benchmark.get("benchmark"),
@@ -230,24 +251,43 @@ def _median(xs: list[float]) -> float | None:
     return round(statistics.median(xs), 6) if xs else None
 
 
+def _is_unpriceable(r: dict) -> bool:
+    """A name with NO ticker or NO priceable forward return (bug C).
+
+    Unpriceable = (a) ticker-less filer (a CIK-only shell that slipped through, or the no_ticker
+    return path), OR (b) a name whose forward return never resolved to a real price
+    (no_entry_price / no_exit_price / not_found). These are NOT tradable names with real forward
+    returns, so they are EXCLUDED from the graded per-bucket stats + blowup-avoidance entirely and
+    reported as unpriceable_count. (They are still bucketed + retained in `names` for audit; FIX 2
+    drops genuine ticker-less shells upstream, so this is the residual safety net.)
+    """
+    if not str(r.get("ticker") or "").strip():
+        return True
+    return r.get("total_return") is None
+
+
 def per_bucket_stats(rows: list[dict], bench_return: float | None) -> dict:
     """Per-bucket mean/median forward return, EXCESS vs IWM, win-rate, n (spec §Metrics).
 
-    A row counts in the stats only when it has a realized forward return (status=="ok"); names with
-    no_entry_price / no_exit_price are recorded separately (n_no_return) and NEVER fabricated into a
-    number. Excess = total_return - bench_return (per name); win-rate = fraction with total_return>0.
+    Only PRICEABLE names (a real ticker + a realized forward return) are graded: unpriceable names
+    (no ticker / no priceable return) are EXCLUDED so buckets reflect real tradable names with real
+    forward returns (bug C — returns null everywhere made buckets meaningless). The excluded count
+    is reported per bucket as `unpriceable_count`. n counts priceable members only. Excess =
+    total_return - bench_return (per name); win-rate = fraction with total_return>0.
     """
     stats: dict = {}
     for b in BUCKETS:
         members = [r for r in rows if r.get("bucket") == b]
-        with_ret = [r for r in members if r.get("total_return") is not None]
-        rets = [float(r["total_return"]) for r in with_ret]
+        priceable = [r for r in members if not _is_unpriceable(r)]
+        unpriceable = len(members) - len(priceable)
+        rets = [float(r["total_return"]) for r in priceable]
         excess = ([rr - bench_return for rr in rets] if bench_return is not None else [])
         wins = sum(1 for rr in rets if rr > 0)
         stats[b] = {
-            "n": len(members),
-            "n_with_return": len(with_ret),
-            "n_no_return": len(members) - len(with_ret),
+            "n": len(priceable),
+            "n_with_return": len(priceable),
+            "n_no_return": 0,
+            "unpriceable_count": unpriceable,
             "mean_return": _mean(rets),
             "median_return": _median(rets),
             "mean_excess_vs_iwm": _mean(excess) if excess else None,
@@ -261,17 +301,20 @@ def blowup_avoidance(rows: list[dict]) -> dict:
     """Of names that suffered a >40% drawdown over the horizon, what fraction did the scanner steer
     into AVOID/abstain (spec §Metrics "Blowup-avoidance"; higher = the scanner earns its name).
 
-    Only names with a realized forward return are eligible (a name with no return cannot be a
-    measured blowup). avoided = put in AVOID or abstain; fraction = avoided / blowups.
+    Only PRICEABLE names (real ticker + realized forward return) are eligible — unpriceable names
+    (no ticker / no priceable return) cannot be measured blowups and are EXCLUDED, reported as
+    unpriceable_count (bug C). avoided = put in AVOID or abstain; fraction = avoided / blowups.
     """
-    blowups = [r for r in rows
-               if r.get("total_return") is not None and float(r["total_return"]) <= BLOWUP_THRESHOLD]
+    priceable = [r for r in rows if not _is_unpriceable(r)]
+    unpriceable = len(rows) - len(priceable)
+    blowups = [r for r in priceable if float(r["total_return"]) <= BLOWUP_THRESHOLD]
     avoided = [r for r in blowups if r.get("bucket") in (BUCKET_AVOID, BUCKET_ABSTAIN)]
     return {
         "blowup_threshold": BLOWUP_THRESHOLD,
         "n_blowups": len(blowups),
         "n_blowups_in_avoid_or_abstain": len(avoided),
         "blowup_avoidance_fraction": (round(len(avoided) / len(blowups), 4) if blowups else None),
+        "unpriceable_count": unpriceable,
         "blowup_tickers": [r.get("ticker") for r in blowups],
         "blowup_buckets": {r.get("ticker"): r.get("bucket") for r in blowups},
     }
@@ -382,11 +425,14 @@ def run_cell(theme: str, asof: str, horizon: int = DEFAULT_HORIZON_MONTHS,
     bench = benchmark_fn(asof, horizon)
     bench_ret = bench.get("total_return") if bench.get("status") == "ok" else None
 
-    audit = look_ahead_audit(rows, asof, bench)  # RAISES on a look-ahead leak
+    # RAISES on a look-ahead leak; also RAISES if a non-empty cell surfaced 0 filing dates (vacuous
+    # audit, bug B). An empty universe legitimately has nothing to observe -> don't demand dates.
+    audit = look_ahead_audit(rows, asof, bench, expect_dates=bool(rows))
     stats = per_bucket_stats(rows, bench_ret)
     blowups = blowup_avoidance(rows)
 
     bucket_counts = {b: sum(1 for r in rows if r.get("bucket") == b) for b in BUCKETS}
+    unpriceable_count = sum(1 for r in rows if _is_unpriceable(r))
     cell = {
         "theme": theme,
         "asof": asof,
@@ -394,6 +440,7 @@ def run_cell(theme: str, asof: str, horizon: int = DEFAULT_HORIZON_MONTHS,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "universe_size": len(universe),
         "n_processed": len(rows),
+        "unpriceable_count": unpriceable_count,
         "bucket_counts": bucket_counts,
         "benchmark": {
             "ticker": bench.get("benchmark"),
@@ -440,13 +487,20 @@ def _selftest() -> None:
     horizon = 12
 
     # ---- synthetic deepdive + valuation builders (only the fields the harness reads) ----
-    def _deep(ticker, cik, filing_date, going_concern=False, conc_kill=False):
+    # asof_max_filing_date (FIX 1) defaults to the tenk filing_date here but is an INDEPENDENT field:
+    # in production it's the max "filed" across every concept pull (often >= the tenk date). The
+    # audit reads it FIRST (the authoritative non-vacuous source), then the tenk date.
+    def _deep(ticker, cik, filing_date, going_concern=False, conc_kill=False,
+              asof_max_filing_date=None):
         return {
             "ticker": ticker, "cik": cik,
             "tenk": {"available": True, "filing_form": "10-K", "filing_date": filing_date,
                      "has_going_concern": going_concern, "has_material_weakness": False,
                      "has_death_spiral": False},
-            "derived": {"concentration_flag": ("kill" if conc_kill else None)},
+            "derived": {"concentration_flag": ("kill" if conc_kill else None),
+                        "asof_max_filing_date": (asof_max_filing_date
+                                                 if asof_max_filing_date is not None
+                                                 else filing_date)},
         }
 
     def _val(mos_basis, mos_frac, buy_eligible, reasons=None):
@@ -464,7 +518,9 @@ def _selftest() -> None:
         "WATCHR": _deep("WATCHR", "222", "2020-04-01"),
         "TRAP": _deep("TRAP", "333", "2019-12-20"),
         "DYING": _deep("DYING", "444", "2020-02-10", going_concern=True),
-        "FORGN": _deep("FORGN", "555", "2020-05-05"),
+        # FORGN's tenk is 2020-05-05 but a later concept fact was filed 2020-06-15 (<=asof): the
+        # authoritative asof_max_filing_date the audit must surface, proving it reads the FIX-1 field.
+        "FORGN": _deep("FORGN", "555", "2020-05-05", asof_max_filing_date="2020-06-15"),
     }
     VAL = {
         "BUYME": _val("fcf_cap", 0.45, True),                              # band+MoS45+eligible+0kill -> BUY
@@ -570,10 +626,15 @@ def _selftest() -> None:
     # BUYME (+40%) and WATCHR (+5%) are NOT blowups.
     assert "BUYME" not in ba["blowup_tickers"] and "WATCHR" not in ba["blowup_tickers"]
 
-    # ---- 4) look-ahead audit: max filing date (2020-05-05) <= asof, and dates recorded ----
+    # ---- 4) look-ahead audit: NON-VACUOUS, reads derived.asof_max_filing_date (FIX 1) ----
     au = cell["look_ahead_audit"]
-    assert au["max_filing_date"] == "2020-05-05", f"max filing date observed: {au['max_filing_date']}"
+    # Max comes from FORGN's asof_max_filing_date (2020-06-15), NOT its tenk date (2020-05-05) —
+    # proves the audit reads the FIX-1 field, the whole point of making the audit non-vacuous.
+    assert au["max_filing_date"] == "2020-06-15", f"max filing date observed: {au['max_filing_date']}"
     assert au["max_filing_date"] <= asof and au["max_filing_date_le_asof"] is True, "audit passed"
+    # NON-VACUOUS: each of 5 names surfaces BOTH asof_max_filing_date + tenk date -> 10 observed.
+    assert au["n_filing_dates_observed"] == 10, f"non-vacuous observed count: {au['n_filing_dates_observed']}"
+    assert au["non_vacuous"] is True, "audit must be non-vacuous (>0 filing dates) for a real cell"
     assert au["benchmark"] == "IWM" and au["benchmark_exit_date"] == "2021-06-30", f"bench dates: {au}"
     assert au["entry_date_range"] == ["2020-06-30", "2020-06-30"], f"entry range: {au['entry_date_range']}"
 
@@ -586,7 +647,19 @@ def _selftest() -> None:
         raised = True
     assert raised, "look_ahead_audit MUST raise AssertionError when a filing_date is AFTER asof"
 
-    # ---- 6) a name with no realized return is recorded, never fabricated into a number ----
+    # ---- 5b) the audit MUST RAISE on a VACUOUS cell (expect_dates but 0 dates observed, bug B) ----
+    no_date_rows = [{"ticker": "NODATE", "filing_dates": [], "forward_return": {}}]
+    # Without expect_dates a 0-date cell is allowed (e.g. an empty universe) and must NOT raise.
+    au_vac = look_ahead_audit(no_date_rows, asof, {"benchmark": "IWM"})
+    assert au_vac["non_vacuous"] is False and au_vac["max_filing_date"] is None, "0-date audit recorded vacuous"
+    raised_vac = False
+    try:
+        look_ahead_audit(no_date_rows, asof, {"benchmark": "IWM"}, expect_dates=True)
+    except AssertionError:
+        raised_vac = True
+    assert raised_vac, "look_ahead_audit MUST raise on a VACUOUS audit (0 filing dates) when expect_dates"
+
+    # ---- 6) a name with no priceable return is EXCLUDED from graded stats (bug C), not fabricated ----
     def fake_forward_noret(ticker, a, h):
         if ticker == "WATCHR":
             return {"status": "no_exit_price", "total_return": None,
@@ -600,12 +673,57 @@ def _selftest() -> None:
     )
     w = {r["ticker"]: r for r in cell2["names"]}["WATCHR"]
     assert w["total_return"] is None and w["return_status"] == "no_exit_price", "no-return name recorded w/ reason"
-    assert cell2["per_bucket_stats"][BUCKET_WATCH]["n_no_return"] == 1, "no-return counted, not fabricated"
-    assert cell2["per_bucket_stats"][BUCKET_WATCH]["n_with_return"] == 0, "WATCH has no realized return now"
+    stW = cell2["per_bucket_stats"][BUCKET_WATCH]
+    # WATCHR was the only WATCH name and is now unpriceable -> WATCH bucket is excluded from grading.
+    assert stW["n"] == 0 and stW["n_with_return"] == 0, "unpriceable WATCH name excluded from graded n"
+    assert stW["unpriceable_count"] == 1, f"unpriceable WATCH name counted: {stW}"
+    assert stW["mean_return"] is None and stW["win_rate"] is None, "no fabricated number for an unpriceable bucket"
+    assert cell2["unpriceable_count"] == 1, f"cell-level unpriceable_count: {cell2['unpriceable_count']}"
+    # The no-priceable-return name is still surfaced in `names` (audit), just not graded.
+    assert any(r["ticker"] == "WATCHR" for r in cell2["names"]), "unpriceable name retained for audit"
+
+    # ---- 7) a ticker-less name (CIK-only shell, bug A residual) is EXCLUDED + counted unpriceable ----
+    universe3 = universe + [
+        {"ticker": "", "cik": "999", "name": "Shell Finance Corp", "recall_channel": "sic_reverse",
+         "delisted_after_asof": False},
+    ]
+    DEEP3 = dict(DEEP)
+    # The shell still surfaces a filing date (filed<=asof) so the cell audit stays non-vacuous.
+    DEEP3[""] = _deep("", "999", "2020-01-10")
+    VAL3 = dict(VAL); VAL3[""] = _val("abstain", None, False, ["no_financials"])
+    RET3 = dict(RET)  # no entry for "" — but ticker-less names never call forward_fn.
+
+    def fake_universe3(theme, a):
+        return universe3
+    def fake_pull3(ticker, cik, as_of=None):
+        assert as_of == asof
+        return DEEP3[ticker]
+    def fake_valuation3(deep, market_cap, cfg):
+        return VAL3[deep["ticker"]]
+    def fake_forward3(ticker, a, h):
+        return RET3[ticker]
+
+    cell3 = run_cell(
+        "deathcare", asof, horizon,
+        universe_fn=fake_universe3, pull_fn=fake_pull3, valuation_fn=fake_valuation3,
+        mktcap_fn=fake_mktcap, forward_fn=fake_forward3, benchmark_fn=fake_bench,
+        write=False,
+    )
+    shell = {r["cik"]: r for r in cell3["names"]}["999"]
+    assert shell["return_status"] == "no_ticker", "ticker-less name flagged no_ticker (never priced)"
+    # The shell lands in abstain but must NOT be graded; the real FORGN abstain blowup still is.
+    stAb = cell3["per_bucket_stats"][BUCKET_ABSTAIN]
+    assert stAb["unpriceable_count"] == 1, f"ticker-less abstain name counted unpriceable: {stAb}"
+    assert stAb["n"] == 1, f"only the priceable abstain name (FORGN) graded: {stAb}"
+    assert cell3["unpriceable_count"] == 1, "cell-level unpriceable_count counts the shell"
+    # Blowup-avoidance still sees the 3 priceable blowups (shell has no return -> not a blowup).
+    assert cell3["blowup_avoidance"]["n_blowups"] == 3, f"shell excluded from blowups: {cell3['blowup_avoidance']}"
+    assert cell3["blowup_avoidance"]["unpriceable_count"] == 1, "blowup-avoidance reports unpriceable_count"
 
     print("backtest selftest PASS (bucketing BUY-contract; per-bucket mean/median/excess-vs-IWM/win-rate; "
-          "blowup-avoidance 3/3 in AVOID+abstain; look-ahead audit max-filing<=asof AND raises on leak; "
-          "no-return names recorded not fabricated)")
+          "blowup-avoidance 3/3 in AVOID+abstain; look-ahead audit reads asof_max_filing_date, NON-vacuous, "
+          "raises on leak AND on vacuous cell; unpriceable no-ticker/no-return names EXCLUDED from grading "
+          "+ counted unpriceable_count)")
 
 
 # ---------------------------------------------------------------------------
