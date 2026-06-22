@@ -169,6 +169,40 @@ INSURANCE_CONCEPTS = [
 ]
 
 
+# PIT (backtest, FIX 1) — as-of filed-date accumulator. When a point-in-time pull runs (asof set),
+# _one_concept records the max "filed" date of the facts it actually KEPT (filed<=asof, the latest-
+# filed-per-end-date disclosures an investor at `asof` could have seen) into this module-level
+# accumulator. deepdive_data.pull() resets it before its as-of cascade and reads it back after, so
+# derived.asof_max_filing_date reflects the newest filing date that fed ANY concept value used in the
+# point-in-time reconstruction. This is what makes the look-ahead audit NON-vacuous (the harness
+# asserts asof_max_filing_date <= asof). The accumulator is process-global but ALWAYS reset by the
+# caller via reset_asof_filed_tracker() at the top of an as-of pull, so concurrent live (asof=None)
+# pulls — which NEVER touch it — cannot corrupt it. The asof=None path does not record anything, so
+# the live default stays byte-identical.
+_asof_max_filed: str | None = None
+
+
+def reset_asof_filed_tracker() -> None:
+    """Reset the as-of filed-date accumulator to None (call before an as-of pull cascade)."""
+    global _asof_max_filed
+    _asof_max_filed = None
+
+
+def get_asof_max_filed() -> str | None:
+    """Return the max 'filed' date (YYYY-MM-DD) recorded across as-of concept pulls since the last
+    reset_asof_filed_tracker(), or None if no as-of fact was kept."""
+    return _asof_max_filed
+
+
+def _record_asof_filed(filed: str | None) -> None:
+    """Record a kept fact's 'filed' date into the as-of accumulator, keeping the max. No-op on None."""
+    global _asof_max_filed
+    if not filed:
+        return
+    if _asof_max_filed is None or filed > _asof_max_filed:
+        _asof_max_filed = filed
+
+
 def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap", asof: str | None = None) -> list:
     """拉单个 XBRL 概念的年度序列。
 
@@ -258,6 +292,11 @@ def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap", asof: str | 
             # Latest-filed wins; tie on filed -> later API-order wins (mirrors live dedup).
             if prev is None or filed >= prev["_filed"]:
                 seen_pit[v["end"]] = {"_filed": filed, "entry": entry}
+        # FIX 1 — record the max "filed" date of the facts actually KEPT (the latest-filed-per-end
+        # disclosures that feed the returned values). This is the look-ahead-audit evidence: every
+        # recorded date is, by construction, <= asof. Live (asof=None) path never reaches here.
+        for x in seen_pit.values():
+            _record_asof_filed(x["_filed"])
         return [x["entry"] for x in seen_pit.values()]
     except Exception:
         return []
