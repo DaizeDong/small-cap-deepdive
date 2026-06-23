@@ -108,6 +108,7 @@ THEME_SIC: dict[str, list[str]] = {
     "household-personal": ["2840", "2844"],   # soap/detergents + perfumes/cosmetics/toiletries
     "diagnostics": ["8071", "2835"],          # medical laboratories + in-vitro/in-vivo diagnostics
     "building-products-hvac": ["3585", "3430", "3440"],  # refrigeration/heating equipment + heating/plumbing + fabricated metal
+    "regbank": ["6020", "6021", "6022", "6035", "6036", "6712"],  # commercial banks + savings institutions + bank holding cos (PIT-universe floor; was missing -> empty backtest universe)
 }
 
 # EDGAR browse-by-SIC enumeration endpoint (the recall-floor channel). The structured
@@ -411,6 +412,7 @@ def _selftest():
     assert theme_sics("cov-household-personal") == ["2840", "2844"], "household-personal must floor to 2840/2844"
     assert theme_sics("cov-diagnostics") == ["8071", "2835"], "diagnostics must floor to 8071/2835"
     assert theme_sics("cov-building-products-hvac") == ["3585", "3430", "3440"], "building-products-hvac must floor to 3585/3430/3440"
+    assert theme_sics("regbank") == ["6020", "6021", "6022", "6035", "6036", "6712"], "regbank must floor to bank SICs (PIT universe was empty without this)"
 
     # _parse_browse_edgar: pure parser on a real-shaped browse-edgar fixture.
     fixture = (

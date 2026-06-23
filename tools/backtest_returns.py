@@ -33,6 +33,10 @@ from _common import resolve_mktcap  # noqa: E402  (resolve-then-band fallback ch
 
 DEFAULT_BENCHMARK = "IWM"   # Russell 2000 small-cap ETF — matches track_forward.DEFAULT_BENCHMARK
 DEFAULT_HORIZON_MONTHS = 12
+# Sub-$0.10 entry => a penny/sub-penny forward return is a data artifact, not a tradeable outcome
+# (e.g. GNOLF 2024 oilsvc: entry $0.00001 -> exit $0.01 = a fake +999x that swung the raw panel mean
+# by +26). Flagged status="penny_unreliable" and excluded from stats (forward_return returns None).
+_MIN_ENTRY_PRICE = 0.10
 
 # ---------------------------------------------------------------------------
 # Price resolution
@@ -206,6 +210,11 @@ def forward_return_with_reason(
     if entry_price <= 0:
         return {**base, "status": "no_entry_price",
                 "reason": f"non-positive entry price ({entry_price}) for {ticker} at {asof}"}
+    if entry_price < _MIN_ENTRY_PRICE:
+        return {**base, "entry_price": entry_price, "entry_date": entry_date,
+                "status": "penny_unreliable",
+                "reason": f"sub-${_MIN_ENTRY_PRICE:.2f} entry price ({entry_price}) for {ticker} at "
+                          f"{asof} - penny/sub-penny forward return is a data artifact; excluded from stats"}
 
     exit_ = price_fn(ticker, target_exit)
     if not exit_:
@@ -364,6 +373,13 @@ def _selftest() -> None:
     assert r["realized_to_last_close"] is False, "normal name is NOT realized-to-last-close"
     assert r["entry_date"] == "2020-06-30" and r["exit_date"] == "2021-06-30", "normal entry/exit dates"
     assert r["target_exit_date"] == "2021-06-30", "target exit date"
+
+    # ---- 1b) penny guard: sub-$0.10 entry -> penny_unreliable, excluded (forward_return None) ----
+    _penny = forward_return_with_reason("PNY", "2020-06-30", 12,
+                                        price_fn=lambda t, d: (0.00001, "2020-06-30"))
+    assert _penny["status"] == "penny_unreliable", f"sub-$0.10 entry must be penny_unreliable, got {_penny['status']}"
+    assert forward_return("PNY", "2020-06-30", 12,
+                          price_fn=lambda t, d: (0.00001, "2020-06-30")) is None, "penny entry -> forward_return None (excluded from stats)"
 
     # ---- 2) a DELISTED name (price series ends mid-horizon) realizes to LAST close ----
     d = forward_return("ZZZ", "2020-06-30", 12, price_fn=fake_price)
