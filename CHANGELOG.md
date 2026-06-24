@@ -1,6 +1,12 @@
 # Changelog
 
+All notable changes to this project are documented here (Keep a Changelog style).
+
 ## v0.3.2 — 2026-06-20
+
+### Docs
+- Unify repo structure (Skill Repo Spec v1) — philosophy-first README section order, standardized top block (tagline + badges + bilingual switch), 1:1 EN/CN sections, added `.claude-plugin/plugin.json`, single-sourced version across plugin.json / README badges / ROADMAP / CHANGELOG.
+
 
 Coverage-test backlog cleanup (the MEDIUM items deferred from v0.3.1):
 - **#8 lessor NAV routing** — `lessor_asset_heavy` (leasing SIC / lease-income concept / high
