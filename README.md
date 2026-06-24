@@ -1,19 +1,19 @@
 # small-cap-deepdive
 
-A disciplined orchestration skill for neglected small-cap US equity research. Given an investment
-theme or a single ticker, it enumerates the SEC-filing universe, applies hard mechanical kill-flags,
-runs falsifiable deep-dive due diligence with forced disconfirmation, and ranks surviving candidates.
+Mechanically de-risk the SEC small-cap universe for a theme or ticker — kill the landmines, then deep-dive the survivors.
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Depends on](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
-[![Version](https://img.shields.io/badge/version-0.3.2-purple?style=flat)](CHANGELOG.md)
+[![De-risk Scanner](https://img.shields.io/badge/De--risk-Scanner-green?style=flat)](#-read-this-first--the-design-philosophy)
+[![Depends](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
+[![Languages](https://img.shields.io/badge/Languages-EN%20%2F%20CN-blue?style=flat)](#languages)
+[![Roadmap](https://img.shields.io/badge/Roadmap-v0.3.2-purple?style=flat)](ROADMAP.md)
 
 [English](README.md) | [中文版](README_CN.md)
 
 ---
 
-## Read this first: what this tool is and is not
+## ⭐ Read this first — the design philosophy
 
 **Being neglected is not the same as being undervalued.**
 
@@ -37,11 +37,21 @@ for that theme does not contain clean industrial beneficiaries at this time. Tha
 and useful answer. A scanner that cannot say "nothing found" is not a scanner; it is a
 narrative generator.
 
-📜 **[Read the design philosophy → PHILOSOPHY.md](PHILOSOPHY.md)**
+The one-sentence version: **the tool's edge is mechanical discipline applied consistently
+across the full candidate set, not narrative synthesis on any individual company.** Every tool,
+invariant, and hard rule in this repo exists because of four principles — root-cause design (not
+symptom patching), Hybrid-not-thin (the data layer earns its keep), discipline-as-moat, and a
+single source of truth in `reference/`.
+
+📜 **[Read the full design philosophy → PHILOSOPHY.md](PHILOSOPHY.md)**
 
 ---
 
-## What it does
+## What it is (and isn't)
+
+Given an investment theme or a single ticker, the skill enumerates the SEC-filing universe,
+applies hard mechanical kill-flags, runs falsifiable deep-dive due diligence with forced
+disconfirmation, and ranks surviving candidates. What it does, step by step:
 
 0. **Open a run batch** (`new_run.py`): every run writes into `reports/smallcap/<date>_<label>/`
    with a `_run.json` manifest (skill git commit + valuation config snapshot) so runs stay
@@ -96,9 +106,7 @@ narrative generator.
    **ownership** (13D/13G + short interest). It **never** touches `buy_eligible` or the BUY decision;
    it is recorded for future per-signal calibration only.
 
----
-
-## What it does not do
+**What it does not do:**
 
 - Factor/quant screening or backtesting — empirical evidence that factor alpha evaporates
   net of transaction costs is baked into the design; that decision space is out of scope.
@@ -112,17 +120,22 @@ narrative generator.
 
 ## Install
 
-```bash
-git clone https://github.com/DaizeDong/small-cap-deepdive.git
-cd small-cap-deepdive
-pip install -r tools/requirements.txt
+```
+/plugin install github:DaizeDong/small-cap-deepdive
 ```
 
-Then configure once:
+Or clone manually:
 
 ```bash
-cp reference/config.example.json \
-   reference/config.json
+git clone https://github.com/DaizeDong/small-cap-deepdive.git ~/.claude/plugins/small-cap-deepdive
+```
+
+Then install the data-layer dependencies and configure once:
+
+```bash
+cd ~/.claude/plugins/small-cap-deepdive
+pip install -r tools/requirements.txt
+cp reference/config.example.json reference/config.json
 ```
 
 Open `config.json` and set `"sec_user_agent"` to your real name and email:
@@ -134,7 +147,7 @@ Open `config.json` and set `"sec_user_agent"` to your real name and email:
 This is the only required field. EDGAR requires a valid `User-Agent` header on every request
 (SEC policy). Omitting it or using a fake value causes 403 errors from `efts.sec.gov`.
 
-To use the skill from Claude Code, add a junction (Windows) or symlink:
+To use the skill from Claude Code via a junction (Windows) or symlink instead of `/plugin install`:
 
 ```bash
 # Windows (run as Administrator)
@@ -146,11 +159,13 @@ ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 
 ---
 
-## Four Entry Modes
+## Quick start
 
 > **Open a run batch first** (any mode): `export SMALLCAP_RUN=$(python tools/new_run.py --label <name>)`
 > routes all outputs into `reports/smallcap/<date>_<name>/` with a `_run.json` manifest (skill commit +
 > config) so runs are reproducible and comparable across versions. Unset = flat (legacy).
+
+There are four entry modes.
 
 ### 1. Theme run — full universe screen
 
@@ -158,12 +173,6 @@ For a ranked shortlist of small-cap pure-plays in a theme:
 
 ```
 /small-cap-deepdive theme "railcar leasing"
-```
-
-Or in natural language in any Claude Code session:
-
-```
-Run small-cap-deepdive on the theme "railcar leasing"
 ```
 
 Full step-by-step: **[runbooks/theme-run.md](runbooks/theme-run.md)**
@@ -223,7 +232,43 @@ Expected token budget: ~300k tokens for a full event-mode run with deep-dives.
 
 ---
 
-## Architecture
+## How to invoke
+
+Use the slash command in any mode, e.g. `/small-cap-deepdive theme "railcar leasing"` or
+`/small-cap-deepdive ticker EGAN`. Or trigger it with natural language in any Claude Code
+session:
+
+```
+Run small-cap-deepdive on the theme "railcar leasing"
+Deep-dive EGAN as a small-cap with small-cap-deepdive
+Screen the small-cap SEC universe for "industrial water treatment"
+```
+
+The skill triggers on small-cap / microcap value research, thematic stock screening, and
+single-company deep DD. It does **not** trigger for large-cap / sell-side coverage,
+factor/quant screening, trading signals, or execution.
+
+---
+
+## Example output
+
+Each candidate is rated mechanically. The scorecard quick reference:
+
+| Score | Meaning | Action |
+|---|---|---|
+| 4–5 | Survived all gates, real theme exposure, no structural red flags | Merits full human diligence |
+| 3 | Borderline — one weak dimension | Read dimension detail before deciding |
+| 1–2 | Hard-rule ceiling applied | Named structural problem; do not invest without resolving it |
+| Eliminated | Kill-flag fired at `cheap_pass` | Stop — do not re-examine |
+
+The rating is mechanical: `rating = f(MoS / NAV-MoS, kill-flags, hard-ceilings, buy_eligible)`. The
+7-dimension scorecard is a diagnostic `/35` summary (no hidden weights), not the rating driver; hard
+ceiling rules override narrative quality. Full rubric: `reference/judgment-rubric.md`.
+
+A theme run finalizes into deterministic per-ticker reports plus a `RANKING.md` with funnel
+counts, kill-flag eliminations, and coverage gaps.
+
+### Architecture
 
 ```
 bundled data layer (deterministic Python — never makes investment judgments)
@@ -260,7 +305,9 @@ boundary); the signals firewall was grep-verified each iteration.
 
 ---
 
-## Dependencies
+## Limitations
+
+**Dependencies.** No proprietary dependencies; no API keys required for the core data layer.
 
 | Package | License | Purpose |
 |---|---|---|
@@ -269,63 +316,43 @@ boundary); the signals firewall was grep-verified each iteration.
 | pandas | BSD | Data processing |
 | requests | Apache 2.0 | HTTP with EDGAR rate discipline |
 
-No proprietary dependencies. No API keys required for the core data layer.
-
 **market-intel (optional read-only reuse):** When the `market-intel` skill is installed, the
 judgment layer reads its source catalog to route qualitative research (X sentiment, industry
 news, competitor web presence) to the best available MCP tool. The market-intel skill is never
 invoked as a skill at runtime — the catalog is read as documentation. Full anti-recursion
 design: `reference/data-sources.md §market-intel`.
 
----
-
-## Public-Ready Notes
-
 **openinsider fragility:** The default `insider_source` config uses `openinsider.com` for
 Form 4 direction parsing. This is a third-party service with no explicit automated-access
 terms. The tool automatically falls back to direct EDGAR Form 4 parsing when openinsider is
-unavailable. Reports label the source accordingly.
-
-To default to EDGAR Form 4 from the start (no openinsider dependency):
-
-```json
-"insider_source": "edgar"
-```
-
-The `edgar` mode is a **roadmap stub — not yet implemented** (returns `available: false`).
-The tested default is `openinsider`. See `reference/data-sources.md` for the fallback
-behaviour when openinsider is unavailable.
+unavailable. Reports label the source accordingly. To default to EDGAR Form 4 from the start,
+set `"insider_source": "edgar"` — but note that mode is a **roadmap stub, not yet implemented**
+(returns `available: false`); the tested default is `openinsider`. See
+`reference/data-sources.md` for the fallback behaviour.
 
 **workflow .js files are optional:** `workflows/theme-fit-gate.js` and
 `workflows/deepdive-fanout.js` accelerate fan-out steps when Claude Code's Workflow tool is
 available in the session. They are not required — the natural-language orchestration in
-`SKILL.md` is the primary path and works in any Claude Code session. The `.js` files are
-convenience wrappers, not dependencies.
+`SKILL.md` is the primary path and works in any Claude Code session.
 
 **X sentiment routing:** When X/Twitter sentiment is requested for a ticker, the skill routes
-to twitterapi.io (resale API, route ②) if the key is configured via the market-intel companion
+to twitterapi.io (resale API) if the key is configured via the market-intel companion
 config. If unavailable, it falls back to search-engine-indexed X posts. The user's personal
-X/Twitter account is never used (route ③ is permanently excluded — account suspension risk).
+X/Twitter account is never used (account suspension risk).
 
 ---
 
-## Scorecard Quick Reference
+## Languages
 
-| Score | Meaning | Action |
-|---|---|---|
-| 4–5 | Survived all gates, real theme exposure, no structural red flags | Merits full human diligence |
-| 3 | Borderline — one weak dimension | Read dimension detail before deciding |
-| 1–2 | Hard-rule ceiling applied | Named structural problem; do not invest without resolving it |
-| Eliminated | Kill-flag fired at `cheap_pass` | Stop — do not re-examine |
-
-The rating is mechanical: `rating = f(MoS / NAV-MoS, kill-flags, hard-ceilings, buy_eligible)`. The
-7-dimension scorecard is a diagnostic `/35` summary (no hidden weights), not the rating driver; hard
-ceiling rules override narrative quality. Full rubric: `reference/judgment-rubric.md`.
+English (`README.md`, authoritative) · 中文 ([`README_CN.md`](README_CN.md))
 
 ---
 
-## Contributing
+## Roadmap · Contributing · License
 
-See the design spec at `docs/` for architectural invariants. The core invariant: the data
-layer (`tools/*.py`) never produces investment judgment; the judgment layer never computes
-financials. Changes that blur this boundary require explicit justification in `PHILOSOPHY.md`.
+See [ROADMAP.md](ROADMAP.md) · [PHILOSOPHY.md](PHILOSOPHY.md) · [CHANGELOG.md](CHANGELOG.md) · [LICENSE](LICENSE) (MIT).
+
+Contributing: see the design spec in `docs/` for architectural invariants. The core invariant
+is the data/judgment boundary: the data layer (`tools/*.py`) never produces investment judgment;
+the judgment layer never computes financials. Changes that blur this boundary require explicit
+justification in [PHILOSOPHY.md](PHILOSOPHY.md).
