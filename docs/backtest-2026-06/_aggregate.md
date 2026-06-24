@@ -71,6 +71,29 @@ screen whose **forward-return edge is unproven (BUY) and inverted (AVOID) on thi
 return prediction; the demonstrated value is mechanical discipline and avoiding data-artifact BUYs,
 not alpha.
 
+## 7. Formal significance test (stratified within-cell label permutation, B=20000)
+
+`significance_test.py` (reproducible, seed=42). The honest null shuffles bucket labels *within each
+cell* (respects IWM/regime clustering; treating all 959 names as independent — as Kruskal-Wallis
+does — is anti-conservative).
+
+| test | result | reading |
+|---|---|---|
+| **omnibus** — any bucket structure beyond random? | **p = 0.122** | NOT significant — the 4-bucket scheme *as a whole* is statistically **indistinguishable from random labeling** |
+| buy_eligible underperforms WATCH | **p = 0.61** | NOT significant — the BUY signal is noise / no-edge (CI [−0.23, +0.04] includes 0) |
+| AVOID outperforms WATCH (the inversion) | **p = 0.006** | **significant** (survives Bonferroni ×3); AVOID CI [+0.005, +0.32] excludes 0 — the inversion is REAL |
+
+Cluster-bootstrap 95% CIs of median excess: **only AVOID excludes 0** (+0.005..+0.324);
+buy_eligible / WATCH / abstain all include 0. Clustering-naive references (anti-conservative):
+Kruskal-Wallis p=0.024, Mann-Whitney AVOID>WATCH p=0.0017.
+
+**Conclusion:** the BUY signal and the overall bucketing are statistically **indistinguishable from
+random**. The *only* effect that survives a proper clustering-aware test is the **AVOID inversion**
+(p=0.006) — significant and in the WRONG direction: AVOID-labeled names reliably *outperformed*. The
+SVB save (PNBK→AVOID) is a real tail case, but on average AVOID over-flags healthy names. Net: as a
+return/risk signal the rubric is random-or-backwards; its demonstrated value is mechanical discipline
+(refuse to overpay, no artifact BUYs, rare genuine crisis flags), not statistical edge.
+
 ## 6. Caveats
 regbank/oilsvc universes capped at 100 (not full); single 12-mo horizon + one 06-30 entry/year (no
 path robustness); AVOID/abstain n are small (63/42 pooled) → noisy; yfinance delisted prices
