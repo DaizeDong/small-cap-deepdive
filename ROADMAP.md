@@ -1,5 +1,7 @@
 # Roadmap
 
+Current: **v0.3.2**
+
 ## v0.3.0 — Optimization campaign (2026-06-20) ✓ SHIPPED
 
 A 5-iteration, subagent-driven, test-driven campaign (reflect → design → implement → test →
