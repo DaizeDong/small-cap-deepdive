@@ -1,0 +1,19 @@
+{
+  "name": "small-cap-deepdive",
+  "version": "0.3.2",
+  "description": "Use when researching neglected SMALL-CAP US equities for a given investment THEME or a single TICKER: enumerate the theme's small-cap universe from SEC filings (EDGAR full-text search UNIONed with a SIC reverse-recall floor), apply hard mechanical kill-flags (going-concern, death-spiral convertibles, ICFR material weakness, customer/government-program concentration) before any qualitative judgment, pull XBRL financials + Form 4 insider trades + shelf/dilution history, run a mechanical buy_eligible valuation gate (reverse-DCF / EV-EBITDA / NAV with V-shape value-trap vetoes), then run falsifiable deep-dive due diligence with forced disconfirmation and base-rate priors, and rank surviving candidates. A de-risk landmine-scanner, not a buy list; zero buys is a valid output. NOT for large-cap/sell-side coverage, factor/quant screening, trading signals, or execution.",
+  "author": { "name": "DaizeDong" },
+  "homepage": "https://github.com/DaizeDong/small-cap-deepdive",
+  "license": "MIT",
+  "keywords": [
+    "investing",
+    "equity-research",
+    "stock-analysis",
+    "small-cap",
+    "finance",
+    "due-diligence",
+    "sec-filings",
+    "value-investing",
+    "skill"
+  ]
+}
