@@ -7,3 +7,5 @@ __pycache__/
 .idea/
 .DS_Store
 NUL
+docs/backtest-2026-06/distress_features.json
+docs/backtest-2026-06/_*.log
