@@ -7,7 +7,7 @@
 [![避雷扫描器](https://img.shields.io/badge/%E9%81%BF%E9%9B%B7-%E6%89%AB%E6%8F%8F%E5%99%A8-green?style=flat)](#-先读这里--设计哲学)
 [![依赖](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
 [![语言](https://img.shields.io/badge/%E8%AF%AD%E8%A8%80-EN%20%2F%20CN-blue?style=flat)](#语言)
-[![Roadmap](https://img.shields.io/badge/Roadmap-v0.3.2-purple?style=flat)](ROADMAP.md)
+[![Roadmap](https://img.shields.io/badge/Roadmap-v0.3.3-purple?style=flat)](ROADMAP.md)
 
 [English](README.md) | [中文版](README_CN.md)
 
@@ -64,6 +64,19 @@
 - 实时行情——所有数据来自 SEC 申报，典型延迟 1–4 天。
 - 大盘/卖方覆盖——工具针对无或极少分析师覆盖的小盘/微盘股校准。
 - 自动买入建议——每份输出以"值得人工尽调"结尾，不以"买入"结尾。
+
+### 留出集验证（2026-06）
+
+一个 25 格、无幸存者偏差的 point-in-time 回测（5 主题 × 5 个 as-of 日期 2020–2024，12 个月持有期）
+在留出数据上检验了 skill 的主张。诚实结论——详见
+[`docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md`](docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md)：
+
+- **无持久 alpha。** 便宜度（安全边际 MoS）在样本内跑赢市场，但那是 2020–21 后疫情反弹的 regime 假象，
+  在留出集上消失（holdout permutation p=0.72）。**工具无法选出跑赢者，也不声称能**——这正是它从不发出"买入"的原因。
+- **真实的避崩盘 edge**（它的本职）。经 OOS 验证的 **CORE-4 困境 kill-flag**（经营现金流为负、经营亏损、
+  累计赤字、Altman Z″ < 1.1）把困境股打入 AVOID：top-quintile 崩盘 **lift 2.56×**、recall 62%，
+  ticker 聚类 bootstrap 对 lift 的 95% CI = **[1.73, 3.00]**（P(lift≤1)=0）。0-BUY 的扫描结果依然有效——
+  价值在于你**没有**踩到的雷。
 
 ---
 
