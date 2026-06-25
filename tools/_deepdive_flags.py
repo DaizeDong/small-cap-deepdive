@@ -777,3 +777,65 @@ def _normalization_masks_current_loss(
         or (latest_fcf is not None and latest_fcf < 0)
         or (contamination_ratio is not None and contamination_ratio < 0)
     )
+
+
+def distress_core4(
+    latest_ocf: float | None,
+    latest_ebit: float | None,
+    latest_retained_earnings: float | None,
+    latest_equity: float | None,
+    latest_assets: float | None,
+    latest_current_assets: float | None,
+    latest_current_liabilities: float | None,
+    latest_liabilities: float | None,
+) -> dict:
+    """CORE-4 point-in-time fundamental DISTRESS rank — the de-risk layer's blowup predictor.
+
+    Out-of-sample-validated (docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md): over a 25-cell
+    survivorship-safe PIT panel (non-financial operating companies, n=412, 55 forward-12mo blowups
+    <-40%), the count of these four mechanism-grounded distress flags concentrates blowups far above
+    base rate — at the kill cutoff (score>=3): precision 35.4% vs 13.3% base (lift 2.65x), recall 62%;
+    ticker-cluster bootstrap 95% CI on the top-quintile lift = [1.73, 3.00], P(lift<=1)=0 over 5000
+    resamples. The cliff is sharp: score 0-2 ~5-9% blowup, score 3 = 25%, score 4 = 41.7%.
+
+    Each flag is from PIT fundamentals ONLY (no forward / price info), grounded in distress theory:
+      * neg_ocf       — operating cash flow < 0
+      * neg_margin    — operating income (EBIT) < 0
+      * accum_deficit — retained earnings < 0
+      * low_altman    — Altman Z'' (emerging-market / non-manufacturer variant) < 1.1:
+                          Z'' = 6.56*WC/TA + 3.26*RE/TA + 6.72*EBIT/TA + 1.05*Equity/Liab
+                        (computed only when all components are present and TA, Liab > 0).
+
+    Scope: operating companies. Banks/insurers are NOT in scope (their distress is NIM/NPL/
+    deposit-flight, a different model) and already route to financial_sic / abstain upstream.
+
+    Returns {distress_score (0-4), distress_flags (list[str]), distress_kill (score>=3),
+             distress_altman_z (float|None)}. distress_kill is ANDed into the kill-flag count, so a
+    high-distress name buckets to AVOID (the bucket a de-risk scanner is graded on) regardless of
+    cheapness — a distressed name blows up whether or not it screens cheap.
+    """
+    flags: list[str] = []
+    if latest_ocf is not None and latest_ocf < 0:
+        flags.append("neg_ocf")
+    if latest_ebit is not None and latest_ebit < 0:
+        flags.append("neg_margin")
+    if latest_retained_earnings is not None and latest_retained_earnings < 0:
+        flags.append("accum_deficit")
+    z = None
+    if (None not in (latest_current_assets, latest_current_liabilities, latest_assets,
+                     latest_retained_earnings, latest_ebit, latest_equity, latest_liabilities)
+            and latest_assets > 0 and latest_liabilities > 0):
+        x1 = (latest_current_assets - latest_current_liabilities) / latest_assets
+        x2 = latest_retained_earnings / latest_assets
+        x3 = latest_ebit / latest_assets
+        x4 = latest_equity / latest_liabilities
+        z = 6.56 * x1 + 3.26 * x2 + 6.72 * x3 + 1.05 * x4
+    if z is not None and z < 1.1:
+        flags.append("low_altman")
+    score = len(flags)
+    return {
+        "distress_score": score,
+        "distress_flags": flags,
+        "distress_kill": score >= 3,
+        "distress_altman_z": z,
+    }

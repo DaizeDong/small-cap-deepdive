@@ -75,7 +75,9 @@ def _fmt_pct_ratio(v, nd: int = 1) -> str:
 
 def _killflag_count(deep: dict) -> int:
     """Mechanical kill-flag count: prefer explicit killflag_count, else sum the tenk booleans
-    PLUS a concentration 'kill' (P3 concentration_flag is BUY-blocking)."""
+    PLUS a concentration 'kill' (P3 concentration_flag is BUY-blocking) PLUS the OOS-validated
+    CORE-4 distress kill (derived.distress_kill, score>=3 — the one predictive de-risk signal;
+    routes a distressed name to AVOID regardless of cheapness)."""
     kfc = deep.get("killflag_count")
     if kfc is not None:
         try:
@@ -88,6 +90,10 @@ def _killflag_count(deep: dict) -> int:
               1 if tk.get("has_material_weakness") else 0,
               1 if tk.get("has_death_spiral") else 0])
     if der.get("concentration_flag") == "kill":
+        kf += 1
+    # de-risk: CORE-4 distress (score>=3) is a kill-flag. OOS-validated blowup predictor
+    # (lift 2.65x, recall 62%, cluster CI [1.73,3.00]); see docs/backtest-2026-06/.
+    if der.get("distress_kill"):
         kf += 1
     return kf
 
