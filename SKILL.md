@@ -1,12 +1,6 @@
 ---
 name: small-cap-deepdive
-description: >-
-  Use when researching neglected SMALL-CAP US equities for a given investment THEME or a single
-  TICKER — enumerate the theme's small-cap universe from SEC filings, mechanically de-risk
-  (going-concern / death-spiral / material-weakness), then run disciplined, falsifiable
-  deep-dive due diligence with forced disconfirmation and base-rate priors, and rank. Triggers
-  on small-cap/microcap value research, thematic stock screening, single-company deep DD.
-  NOT for large-cap/sell-side coverage, factor/quant screening, trading signals, or execution.
+description: "Use to research neglected small-cap/microcap US equities by THEME or TICKER: SEC-filing universe, de-risk, falsifiable deep-dive DD, rank. NOT large-cap/quant/trading."
 allowed-tools: Read, Glob, Grep, Bash, Agent, Skill, WebSearch, WebFetch
 ---
 
