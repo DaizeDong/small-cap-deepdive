@@ -1,6 +1,6 @@
 # Roadmap
 
-Current: **v0.3.2**
+Current: **v0.3.3**
 
 ## v0.3.0 — Optimization campaign (2026-06-20) ✓ SHIPPED
 

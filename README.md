@@ -7,7 +7,7 @@ Mechanically de-risk the SEC small-cap universe for a theme or ticker — kill t
 [![De-risk Scanner](https://img.shields.io/badge/De--risk-Scanner-green?style=flat)](#-read-this-first--the-design-philosophy)
 [![Depends](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
 [![Languages](https://img.shields.io/badge/Languages-EN%20%2F%20CN-blue?style=flat)](#languages)
-[![Roadmap](https://img.shields.io/badge/Roadmap-v0.3.2-purple?style=flat)](ROADMAP.md)
+[![Roadmap](https://img.shields.io/badge/Roadmap-v0.3.3-purple?style=flat)](ROADMAP.md)
 
 [English](README.md) | [中文版](README_CN.md)
 
@@ -115,6 +115,21 @@ disconfirmation, and ranks surviving candidates. What it does, step by step:
 - Large-cap or sell-side coverage — the tool is calibrated for micro/small-cap names with
   no or minimal analyst coverage.
 - Automated buy recommendations — every output ends with "merits human diligence," not "buy."
+
+### Validated out-of-sample (2026-06)
+
+A 25-cell survivorship-safe point-in-time backtest (5 themes × 5 as-of dates 2020–2024, 12mo
+horizon) tested the skill's claims on held-out data. Honest result — write-up in
+[`docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md`](docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md):
+
+- **No durable alpha.** Cheapness (Margin-of-Safety) beats the market in-sample but it is a
+  2020–21 recovery-regime artifact and vanishes out-of-sample (holdout permutation p=0.72). The
+  tool **cannot pick market-beaters and does not claim to** — this is *why* it never issues a "buy."
+- **A real downside-avoidance edge** (its actual mission). The OOS-validated **CORE-4 distress
+  kill-flag** (operating-cash-flow loss, operating loss, accumulated deficit, Altman Z″ < 1.1)
+  routes distressed names to AVOID with top-quintile blowup **lift 2.56×**, recall 62%, and a
+  ticker-cluster bootstrap 95% CI on the lift of **[1.73, 3.00]** (P(lift≤1)=0). A 0-BUY scan is
+  still valid; the value is in the landmines you *don't* step on.
 
 ---
 

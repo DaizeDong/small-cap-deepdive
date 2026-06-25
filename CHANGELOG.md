@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
+## v0.3.3 — 2026-06-24
+
+A 25-cell survivorship-safe point-in-time backtest study (5 themes × 5 as-of dates 2020–2024,
+12mo horizon) put the skill's claims to an out-of-sample test. Full write-up:
+`docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md`.
+
+### Found
+- **No durable alpha.** The cheapness (Margin-of-Safety) signal beats IWM in-sample but is a
+  2020–21 post-COVID-recovery regime artifact — it vanishes on the 2023–24 holdout (permutation
+  p=0.72) and on a drop-2020 re-test (p=0.35). The skill does not pick market-beaters and no longer
+  implies it can. Per-year edge: +10.5pt (2020) … −1.1pt (2024).
+- **Two `buy_eligible` gates are anti-predictive noise.** `cross_source_mismatch` (fires 66%,
+  blowup lift 0.86×) and `debt_truncation_suspected` (fires 48%, lift 0.67×) carry no downside
+  signal and shrink eligibility on healthy names. (Demotion to advisory: tracked for v0.3.4.)
+- **A real, OOS, cluster-robust de-risk edge** (the tool's actual mission — downside avoidance).
+
+### Added
+- **CORE-4 PIT distress kill-flag** (`_deepdive_flags.distress_core4`): `distress_score` =
+  count of `neg_ocf`, `neg_margin`, `accum_deficit`, `low_altman` (Altman Z″ < 1.1).
+  `distress_kill = score ≥ 3` is counted in `_killflag_count`, so a distressed name routes to
+  **AVOID** in both the live rating and the backtest grader, regardless of cheapness. OOS-validated:
+  top-quintile blowup lift 2.56×, recall 62%, ticker-cluster bootstrap 95% CI [1.73, 3.00],
+  P(lift≤1)=0; sharp cliff (score 0–2 ≈5–9% blowup, 3 = 25%, 4 = 41.7%). Banks/insurers out of
+  scope. `deepdive_data` now also pulls retained earnings + current assets/liabilities.
+- Reproducible study artifacts under `docs/backtest-2026-06/` (PIT feature pullers, cluster-robust
+  validator), adversarially reviewed by a second model (codex); caveats honored in the write-up.
+
 ## v0.3.2 — 2026-06-20
 
 ### Docs
