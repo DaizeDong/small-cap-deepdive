@@ -66,6 +66,7 @@ from _deepdive_flags import (
     _extract_concentration, _concentration_flag,
     _annual_vals, _trajectory_fields, _NORM_YEARS,
     _normalized_fcf_proxy, _normalization_masks_current_loss,
+    distress_core4,
 )
 
 # Non-open-market transaction codes to exclude (RSU grants, option exercises, gifts, etc.)
@@ -556,6 +557,13 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     if not assets:
         assets = concept_series(cik, "LiabilitiesAndStockholdersEquity", asof=as_of); time.sleep(0.2)
 
+    # de-risk: CORE-4 distress inputs (retained earnings + current assets/liabilities) — the
+    # remaining Altman Z'' / accum-deficit components not already pulled above. OOS-validated
+    # blowup predictor; see _deepdive_flags.distress_core4 + docs/backtest-2026-06/.
+    retained_earnings = concept_series(cik, "RetainedEarningsAccumulatedDeficit", asof=as_of); time.sleep(0.2)
+    current_assets = concept_series(cik, "AssetsCurrent", asof=as_of); time.sleep(0.2)
+    current_liabilities = concept_series(cik, "LiabilitiesCurrent", asof=as_of); time.sleep(0.2)
+
     # C1: pull SIC from EDGAR company metadata for financial-sector guard (C2). SIC is structural
     # entity metadata (an entity's SIC classification is not a between-filings disclosure), so the
     # submissions endpoint is read directly even under as_of — this is the same SIC an investor at
@@ -784,6 +792,21 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         _candidates = [x for x in (_concept_max_filed, _tenk_filed) if x]
         _asof_max_filing_date = max(_candidates) if _candidates else None
 
+    # de-risk: CORE-4 PIT distress rank (OOS-validated blowup predictor). distress_kill (score>=3)
+    # is ANDed into the kill-flag count (make_report._killflag_count) so a distressed name buckets
+    # to AVOID regardless of cheapness. Scope = operating companies; banks/insurers route to
+    # financial_sic/abstain upstream and are not graded by this layer.
+    _distress = distress_core4(
+        latest_ocf_val,
+        ebit[-1]["val"] if ebit else None,
+        retained_earnings[-1]["val"] if retained_earnings else None,
+        equity[-1]["val"] if equity else None,
+        assets[-1]["val"] if assets else None,
+        current_assets[-1]["val"] if current_assets else None,
+        current_liabilities[-1]["val"] if current_liabilities else None,
+        liabilities[-1]["val"] if liabilities else None,
+    )
+
     d["derived"] = {
         "revenue_growth_pct": pct_growth(rev),
         "shares_growth_pct": pct_growth(shares),  # 正=稀释
@@ -871,6 +894,16 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         "cross_source_checked": _cs_checked,
         "cross_source_mismatch": _cs_mismatch,
         "cross_source_detail": _cs_detail,
+        # de-risk: CORE-4 PIT distress rank (OOS-validated; _deepdive_flags.distress_core4).
+        # distress_kill (score>=3) is counted as a kill-flag -> AVOID. The single validated
+        # predictive de-risk signal in the skill (top-quintile blowup lift 2.56x, cluster CI [1.73,3.00]).
+        "distress_score": _distress["distress_score"],
+        "distress_flags": _distress["distress_flags"],
+        "distress_kill": _distress["distress_kill"],
+        "distress_altman_z": _distress["distress_altman_z"],
+        "latest_retained_earnings": retained_earnings[-1]["val"] if retained_earnings else None,
+        "latest_current_assets": current_assets[-1]["val"] if current_assets else None,
+        "latest_current_liabilities": current_liabilities[-1]["val"] if current_liabilities else None,
     }
     # FIX 1 — emit asof_max_filing_date ONLY under as_of (the look-ahead audit reads it; harness
     # asserts <= as_of). Added AFTER the dict literal + gated on as_of so the live (as_of=None)
