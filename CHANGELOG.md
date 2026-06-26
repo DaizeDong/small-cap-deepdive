@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
-## v0.3.3 — 2026-06-24
+## [0.3.3] - 2026-06-24
 
 A 25-cell survivorship-safe point-in-time backtest study (5 themes × 5 as-of dates 2020–2024,
 12mo horizon) put the skill's claims to an out-of-sample test. Full write-up:
@@ -29,7 +29,7 @@ A 25-cell survivorship-safe point-in-time backtest study (5 themes × 5 as-of da
 - Reproducible study artifacts under `docs/backtest-2026-06/` (PIT feature pullers, cluster-robust
   validator), adversarially reviewed by a second model (codex); caveats honored in the write-up.
 
-## v0.3.2 — 2026-06-20
+## [0.3.2] - 2026-06-20
 
 ### Docs
 - Unify repo structure (Skill Repo Spec v1) — philosophy-first README section order, standardized top block (tagline + badges + bilingual switch), 1:1 EN/CN sections, added `.claude-plugin/plugin.json`, single-sourced version across plugin.json / README badges / ROADMAP / CHANGELOG.
@@ -48,7 +48,7 @@ Coverage-test backlog cleanup (the MEDIUM items deferred from v0.3.1):
 
 All 9 tool selftests + both workflows pass; regression (TUSK/SIGA/INVA) unchanged.
 
-## v0.3.1 — 2026-06-20
+## [0.3.1] - 2026-06-20
 
 Remediation round driven by the v0.3.0 full-coverage test (53 themes across all GICS sectors +
 niche; report in `docs/coverage-test-2026-06-20/`). The test confirmed **0 false BUYs leaked**
@@ -78,7 +78,7 @@ on real data.
 All 9 tool selftests + both workflows pass; regression (SIGA double-blocked, NRP peak veto, INVA
 clean) unchanged. Still a de-risk scanner — 0-BUY remains the common, correct output.
 
-## v0.3.0 — 2026-06-20
+## [0.3.0] - 2026-06-20
 
 A 5-iteration, subagent-driven, test-driven optimization campaign (10-lens reflection →
 design → implement → test on real data → iterate). It transformed the engine **from a
@@ -153,7 +153,7 @@ identical, so every mechanical BUY priced *decline* by construction, and the sta
   callable from Python). This operationalizes the thesis as a measurement without letting it originate
   or up-weight a BUY.
 
-## v0.2.1 — 2026-06-19
+## [0.2.1] - 2026-06-19
 
 Remediation round driven by the full real-data validation campaign (21 subagents:
 8 themes + 3 trigger-diagnostics + 3 event-driven + 4 robustness + 2 precision +
@@ -187,7 +187,7 @@ Verdict: v0.2.0 produced real mechanical signal and was honest about 0-BUY, but 
 robustness could not be trusted before these guards. Still a de-risk scanner, not a
 stock picker.
 
-## v0.2.0 — 2026-06-19
+## [0.2.0] - 2026-06-19
 
 Phase 2–7 buildout on top of the v0.1.0 architecture. Remains a de-risk scanner:
 0 BUY is a valid and correct output.
@@ -269,7 +269,7 @@ committed; none mature until 2027-06 — correct state is "calibration unknown."
 
 ---
 
-## v0.1.0 — 2026-06-18
+## [0.1.0] - 2026-06-18
 
 Initial release.
 
