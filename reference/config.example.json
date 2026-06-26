@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "sec_user_agent": "small-cap-deepdive research your-email@example.com",
   "output_dir": "./reports/smallcap",
   "market_cap_max": 2000000000,
