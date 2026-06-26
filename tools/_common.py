@@ -9,10 +9,44 @@ _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent
 _REF = _REPO / "reference"
 
+# Config-dir discovery env vars (config-spec E2). See CONFIG.md for the full contract.
+_CONFIG_DIR_ENV_VARS = ("SMALL_CAP_DEEPDIVE_CONFIG_DIR", "SMALL_CAP_DEEPDIVE_CONFIG")
+
+
+def resolve_config_json() -> Path:
+    """Locate the user's config.json via the documented discovery order (config-spec E2).
+
+    First existing wins:
+      1. $SMALL_CAP_DEEPDIVE_CONFIG_DIR (or alias $SMALL_CAP_DEEPDIVE_CONFIG) -> <dir>/config.json
+      2. ~/.small-cap-deepdive-config/config.json          (dotfile fallback)
+      3. ~/.config/small-cap-deepdive-config/config.json   (XDG fallback)
+      4. reference/config.json                             (in-repo legacy/default)
+
+    Returns the in-repo path as the final fallback even when it does not exist
+    (load_config tolerates a missing overlay -> example defaults only). An
+    out-of-repo config dir lets the config (incl. the sec_user_agent PII) live
+    OUTSIDE the public skill repo (Mode B separation) and lets you hot-swap
+    configs by repointing the env var (E5) — env unset reproduces legacy behaviour.
+    """
+    for var in _CONFIG_DIR_ENV_VARS:
+        d = os.environ.get(var)
+        if d:
+            p = Path(os.path.expanduser(d)) / "config.json"
+            if p.exists():
+                return p
+    for d in (Path(os.path.expanduser("~/.small-cap-deepdive-config")),
+              Path(os.path.expanduser("~/.config/small-cap-deepdive-config"))):
+        p = d / "config.json"
+        if p.exists():
+            return p
+    return _REF / "config.json"
+
+
 def load_config() -> dict:
-    # precedence: config.json (gitignored) > config.example.json defaults; env SMALLCAP_* overrides scalars
+    # precedence: resolved config.json (gitignored / out-of-repo) > config.example.json defaults;
+    # env SMALLCAP_* overrides scalars. config.json discovery order: see resolve_config_json / CONFIG.md.
     cfg = json.loads((_REF / "config.example.json").read_text(encoding="utf-8"))
-    real = _REF / "config.json"
+    real = resolve_config_json()
     if real.exists():
         cfg.update(json.loads(real.read_text(encoding="utf-8")))
     for k in list(cfg):
