@@ -20,3 +20,4 @@ __pycache__/
 NUL
 docs/backtest-2026-06/distress_features.json
 docs/backtest-2026-06/_*.log
+docs/backtest-2026-06/_*.json
