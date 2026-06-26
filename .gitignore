@@ -1,6 +1,17 @@
+# Secrets / PII gate (config-spec E6 / Mode B) — real values never enter git.
 config.json
 *.env
-secrets/
+!*.env.template
+secrets/*
+!secrets/README.md
+!secrets/.gitkeep
+claude.json
+.claude.json
+*credentials*.json
+*.key
+*.pem
+!*.key.template
+!*.pem.template
 reports/
 __pycache__/
 *.pyc

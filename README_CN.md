@@ -120,6 +120,28 @@ ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 
 ---
 
+## 配置
+
+`small-cap-deepdive` 是**带 config 的 skill** —— 每个工具从一份 JSON 配置读取调参和唯一必填的 EDGAR
+身份（`sec_user_agent`）。逐字段完整规范见 [CONFIG.md](CONFIG.md)。
+
+- **挂载（发现顺序）：** `$SMALL_CAP_DEEPDIVE_CONFIG_DIR/config.json` → `$SMALL_CAP_DEEPDIVE_CONFIG/config.json`
+  → `~/.small-cap-deepdive-config/config.json` → `~/.config/small-cap-deepdive-config/config.json` →
+  仓内 `reference/config.json`（零配置默认）。命中第一个即用；有效配置 = `config.example.json` 默认值
+  ◁ 你的 `config.json` ◁ `SMALLCAP_*` 环境变量覆盖。
+- **首次配置：**
+  ```bash
+  python scripts/init_config.py      # 从示例模板生成 config.json（确定性）
+  # 编辑 config.json：把 "sec_user_agent" 设为你的真实姓名+邮箱（唯一硬性必填）
+  python scripts/verify_config.py    # doctor：逐字段 PASS/FAIL，明确报缺什么
+  ```
+- **切换 config（即插即用）：** 把环境变量指向另一个 config 目录即可 —— config 自包含（`output_dir`
+  仓内相对路径、无硬编码绝对路径）：`export SMALL_CAP_DEEPDIVE_CONFIG_DIR=~/configs/A` ↔ `~/configs/B`。
+- **密钥 / PII：** Mode B —— `config.json`、`*.env`、`secrets/*` 均已 gitignore，永不入库。把
+  `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` 指向**仓库之外**的目录即可实现 config 仓与 skill 仓完全分离。
+
+---
+
 ## 快速开始
 
 > **每种模式先开运行批次**：`export SMALLCAP_RUN=$(python tools/new_run.py --label <名称>)` 把所有产物路由到 `reports/smallcap/<日期>_<名称>/`,附 `_run.json`(skill commit + config),保证可复现、可跨版本对比。未设则平铺(向后兼容)。

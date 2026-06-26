@@ -174,6 +174,29 @@ ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 
 ---
 
+## Config
+
+`small-cap-deepdive` is **config-bearing** — every tool reads its tuning parameters and the one
+required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-field contract:
+[CONFIG.md](CONFIG.md).
+
+- **Mount (discovery order):** `$SMALL_CAP_DEEPDIVE_CONFIG_DIR/config.json` → `$SMALL_CAP_DEEPDIVE_CONFIG/config.json`
+  → `~/.small-cap-deepdive-config/config.json` → `~/.config/small-cap-deepdive-config/config.json` →
+  in-repo `reference/config.json` (zero-config default). First that exists wins; effective config =
+  `config.example.json` defaults ◁ your `config.json` ◁ `SMALLCAP_*` env overrides.
+- **First time:**
+  ```bash
+  python scripts/init_config.py      # stamp config.json from the example template (deterministic)
+  # edit config.json: set "sec_user_agent" to your real name + email (the only hard requirement)
+  python scripts/verify_config.py    # doctor: PASS/FAIL per field, names what is missing
+  ```
+- **Switch configs (hot-swap):** point the env var at another config dir — configs are self-contained
+  (repo-relative `output_dir`, no hardcoded paths): `export SMALL_CAP_DEEPDIVE_CONFIG_DIR=~/configs/A` ↔ `~/configs/B`.
+- **Secrets / PII:** Mode B — `config.json`, `*.env`, and `secrets/*` are gitignored and never enter
+  git. Point `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` at a dir **outside** this repo for full repo separation.
+
+---
+
 ## Quick start
 
 > **Open a run batch first** (any mode): `export SMALLCAP_RUN=$(python tools/new_run.py --label <name>)`
