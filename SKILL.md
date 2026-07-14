@@ -327,13 +327,16 @@ Before running any tool, complete setup once:
 # 1. Install Python dependencies
 pip install -r tools/requirements.txt
 
-# 2. Configure the tool
-# A fresh clone has NO config.json — copy the example and fill in your details:
-cp reference/config.example.json reference/config.json
-# Edit config.json: set "sec_user_agent" to your real name and email address.
-# EDGAR requires a valid User-Agent header on every request (format: "Name email@domain.com").
-# Omission causes 403 errors. This is the only required config field.
-# config.json is gitignored — it stays local and is never committed to the repo.
+# 2. Configure the tool — OUTSIDE the repo.
+# Your SEC User-Agent is your real name + email. It is yours, so it lives in the private config
+# dir, never in the working tree. A "just fill in reference/config.json" step is how a real
+# contact address once got committed here; the config now resolves from outside by design.
+mkdir -p ~/.small-cap-deepdive-config
+cp reference/config.example.json ~/.small-cap-deepdive-config/config.json
+# Edit ~/.small-cap-deepdive-config/config.json: set "sec_user_agent" to "Your Name you@example.com".
+# EDGAR requires a valid User-Agent on every request (format: "Name email"); omission causes 403.
+# (Override the location with $SMALL_CAP_DEEPDIVE_CONFIG_DIR. In-repo reference/config.json is a
+#  deprecated legacy fallback — do not create it; a real identity in the tree is a leak waiting.)
 ```
 
 The `sec_user_agent` field is the only hard requirement. All other config keys have defaults

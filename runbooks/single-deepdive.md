@@ -15,11 +15,13 @@ Complete this once before any run:
 
 ```bash
 pip install -r tools/requirements.txt
+mkdir -p ~/.small-cap-deepdive-config
 cp reference/config.example.json \
-   reference/config.json
+   ~/.small-cap-deepdive-config/config.json
 ```
 
-Set `"sec_user_agent"` in `config.json` to your real name and email.
+Set `"sec_user_agent"` to `"Your Name you@example.com"` in that file (the private config dir,
+never the repo — your identity is yours, and an in-tree copy is a leak waiting to be committed).
 EDGAR blocks requests with a missing or obviously fake User-Agent.
 
 Then open a run batch (start of every run) so outputs stay grouped and version-comparable:
@@ -249,7 +251,7 @@ If the latest 10-K has no going-concern language, the flag will not appear.
 
 ## Troubleshooting
 
-**EDGAR 403:** Set `sec_user_agent` to `"Name email@domain.com"` in `config.json`.
+**EDGAR 403:** Set `sec_user_agent` to `"Name you@example.com"` in `~/.small-cap-deepdive-config/config.json` (the private config dir, never the repo).
 
 **CIK not found:** Try `python tools/discover.py --theme <ticker>` to confirm the ticker maps
 to a known CIK. Micro-caps occasionally file under a parent CIK rather than the ticker symbol.
