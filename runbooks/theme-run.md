@@ -11,14 +11,16 @@ Complete this once before any run:
 
 ```bash
 pip install -r tools/requirements.txt
+mkdir -p ~/.small-cap-deepdive-config
 cp reference/config.example.json \
-   reference/config.json
+   ~/.small-cap-deepdive-config/config.json
 ```
 
-Open `config.json` and set `"sec_user_agent"` to your real name and email:
+Open `~/.small-cap-deepdive-config/config.json` (the private config dir, never the repo) and set
+`"sec_user_agent"` to your real name and email:
 
 ```json
-"sec_user_agent": "Jane Smith jane@example.com"
+"sec_user_agent": "Jane Smith user1@example.com"
 ```
 
 EDGAR requires a valid `User-Agent` header on every request. Omission causes 403 errors.
@@ -274,7 +276,7 @@ and filing length. Large themes (500+ raw candidates) scale linearly with Gate 2
 
 ## Troubleshooting
 
-**EDGAR 403 error:** `sec_user_agent` in `config.json` is missing or malformed. Must be
+**EDGAR 403 error:** `sec_user_agent` in `~/.small-cap-deepdive-config/config.json` (private config dir) is missing or malformed. Must be
 `"Name email@domain.com"` format.
 
 **Zero FTS hits:** Keyword too specific. Try the single most distinctive word of the theme.

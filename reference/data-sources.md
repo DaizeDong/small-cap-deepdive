@@ -212,7 +212,7 @@ This is the pattern for accessing qualitative research sources (X sentiment, Red
 **Core design:** The skill does not call `market-intel` as a skill at runtime. Instead, it reads `market-intel`'s reference catalog to learn which MCP tools or search queries to use for a given information need — then directly calls those tools.
 
 **What to read:**
-- `the market-intel sources catalog` — master index of sources by category
+- your `market-intel` skill install's `reference/sources-index.md` — master index of sources by category
 - Relevant shards: `x-twitter.md`, `reddit.md`, `web-scraping.md`, `finance-markets.md`
 
 **How to use:**
@@ -229,7 +229,7 @@ This is the pattern for accessing qualitative research sources (X sentiment, Red
 **Why this is structurally not recursive:** The market-intel catalog provides routing knowledge (which tool to use for which query), not runtime execution. The tools themselves (MCP servers) are session-level and available directly. Reading a catalog file to decide which tool to call is equivalent to reading documentation — it does not create a runtime dependency.
 
 **Graceful degradation (market-intel not installed):**
-If `~/.claude/skills/market-intel/` does not exist:
+If a `market-intel` skill install is not present:
 - Use EDGAR as the primary source for all financial data (already covered above)
 - Use WebSearch for X sentiment, news, and web presence (acceptable quality for most use cases)
 - Use `openinsider` for insider trades (already covered above)
@@ -247,7 +247,7 @@ When X/Twitter sentiment is needed for a ticker:
 
 This is a resale API that uses the provider's own account pool and proxy infrastructure. The user's personal X/Twitter account is never involved. This eliminates account suspension risk entirely.
 
-**Availability:** The API key for `twitterapi.io` is stored in `market-intel`'s configuration (`the market-intel secrets env` — not in this repo). The hosted MCP for this key is registered in `~/.claude.json`. Access is via the market-intel catalog read pattern above.
+**Availability:** The `twitterapi.io` key lives in your `market-intel` install's private secrets directory (path per that skill's own config), and its hosted MCP is registered in your local Claude config. This repo neither stores nor duplicates it, and does not depend on a fixed location for it.
 
 **Pricing:** Approximately $0.15 per 1,000 tweets retrieved. Suitable for targeted ticker searches (expect 50–500 tweets per ticker, cost < $0.10 per company).
 
