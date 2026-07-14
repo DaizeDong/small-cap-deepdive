@@ -75,3 +75,43 @@ def data_path(skill, relpath, create=False):
     if create:
         p.parent.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def _cli(argv=None):
+    """`python tools/datadir.py --path <skill> [relpath]` -> print the resolved path, or fail.
+
+    Runbooks and shell steps need the path too, and the alternative is that someone hardcodes
+    `metrics/foo.jsonl` into a doc because it was the only thing they could type -- which is how
+    the docs ended up instructing agents to write real-run output into the public repo in the
+    first place. Exit 3 (not 1) when uninitialized, so a script can tell "no data yet" apart from
+    a real error.
+    """
+    import argparse
+    import sys
+
+    ap = argparse.ArgumentParser(description="Resolve a skill's private data path.")
+    ap.add_argument("--path", action="store_true", help="print the resolved path")
+    ap.add_argument("--create", action="store_true", help="create the directory if absent")
+    ap.add_argument("skill")
+    ap.add_argument("relpath", nargs="?", default="")
+    a = ap.parse_args(argv)
+
+    try:
+        p = data_path(a.skill, a.relpath, create=a.create) if a.relpath \
+            else (resolve_data_dir(a.skill, create=a.create) or _raise(a.skill))
+    except DataDirNotInitialized as e:
+        print(str(e), file=sys.stderr)
+        return 3
+    print(p)
+    return 0
+
+
+def _raise(skill):
+    raise DataDirNotInitialized(
+        "%s has no private data directory.\n    mkdir -p ~/.%s-config/data\n    (or set %s)"
+        % (skill, skill, _env_var(skill)))
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(_cli())
