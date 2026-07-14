@@ -75,10 +75,70 @@ from _recall import (
     _truthy_csv, _recall_set_from_candidate_files, _recall_set_from_universe_files,
 )
 
+# Real-run output lives OUTSIDE this repo. `metrics/verdicts.jsonl` used to be a git-tracked file
+# here, so every run appended the operator's actual positions (ticker, entry date, entry price) to a
+# public repo -- hundreds of them, before the 2026-07 audit. No content scanner catches that; there is no
+# email or phone in it, just a life, correctly formatted. So the path resolves to the private store
+# and there is deliberately NO in-repo fallback: a fallback is not a convenience, it IS the leak.
+from datadir import resolve_data_dir, DataDirNotInitialized  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
-METRICS_DIR = REPO / "metrics"
-VERDICTS_FILE = METRICS_DIR / "verdicts.jsonl"
-SCORECARD_FILE = METRICS_DIR / "scorecard.md"
+SKILL = "small-cap-deepdive"
+
+
+def _metrics_dir() -> Path:
+    d = resolve_data_dir(SKILL)
+    if d is None:
+        raise DataDirNotInitialized(
+            "small-cap-deepdive has no private data directory, so forward-tracking has nowhere to\n"
+            "record verdicts. A freshly cloned public skill is SUPPOSED to look like this -- it\n"
+            "ships uninitialized. Point it at your own store:\n"
+            "    mkdir -p ~/.small-cap-deepdive-config/data/metrics\n"
+            "    (or set SMALL_CAP_DEEPDIVE_DATA_DIR)\n"
+            "The shape you are expected to produce is in metrics/verdicts.jsonl.example."
+        )
+    return d / "metrics"
+
+
+def _verdicts_file() -> Path:
+    return _metrics_dir() / "verdicts.jsonl"
+
+
+def _scorecard_file() -> Path:
+    return _metrics_dir() / "scorecard.md"
+
+
+class _LazyPath:
+    """A Path that resolves at USE time, not import time.
+
+    Every existing consumer reads `track_forward.VERDICTS_FILE` as a plain Path, and there is no
+    path at all until a private data dir exists -- so resolving at import would make merely
+    importing this module explode on a fresh clone. Defer it: importing stays free, and the
+    DataDirNotInitialized (with instructions) fires only when something actually reaches for a file.
+    """
+
+    def __init__(self, fn):
+        self._fn = fn
+
+    def __fspath__(self):
+        return os.fspath(self._fn())
+
+    def __getattr__(self, name):
+        return getattr(self._fn(), name)
+
+    def __truediv__(self, other):
+        return self._fn() / other
+
+    def __str__(self):
+        return str(self._fn())
+
+    def __repr__(self):
+        return "_LazyPath(%s)" % self._fn()
+
+
+METRICS_DIR = _LazyPath(_metrics_dir)
+VERDICTS_FILE = _LazyPath(_verdicts_file)
+SCORECARD_FILE = _LazyPath(_scorecard_file)
 
 DEFAULT_HORIZON_MONTHS = 12
 DEFAULT_BENCHMARK = "IWM"  # Russell 2000 small-cap ETF — correct universe comparison

@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "Every path in a public skill repo belongs to exactly one class (Skill Repo Spec v1 s9).",
+    "TOOL    = code, SKILL.md, docs. Public, hand-written, contains no data.",
+    "FIXTURE = tests and examples. Public, but SYNTHETIC and produced by tools/make_fixtures.py.",
+    "DATA    = anything a real run produced. NEVER git-tracked; lives in the private companion",
+    "          config, resolved at runtime by tools/datadir.py. The repo ships only the schema.",
+    "Enforced by tools/data_boundary.py, in .githooks and in CI."
+  ],
+  "data": [
+    "metrics/verdicts.jsonl",
+    "metrics/scorecard.md",
+    "reference/config.json",
+    "reports/"
+  ],
+  "fixture": [],
+  "_data_home": "~/.small-cap-deepdive-config/data/   (override with $SMALL_CAP_DEEPDIVE_DATA_DIR)"
+}

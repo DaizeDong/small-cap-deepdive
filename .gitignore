@@ -21,3 +21,11 @@ NUL
 docs/backtest-2026-06/distress_features.json
 docs/backtest-2026-06/_*.log
 docs/backtest-2026-06/_*.json
+
+# --- Data boundary (Skill Repo Spec v1 s9) ---
+# A public skill repo is an UNINITIALIZED TOOL. Real-run output (verdicts, scorecard) is DATA:
+# it lives in ~/.small-cap-deepdive-config/data/, resolved by tools/datadir.py. The repo carries
+# only the schema. metrics/verdicts.jsonl held real-run verdict rows before the 2026-07 audit --
+# not pasted there by anyone, but APPENDED BY THE SKILL, on every run.
+metrics/*
+!metrics/*.example
