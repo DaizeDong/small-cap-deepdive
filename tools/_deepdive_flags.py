@@ -30,7 +30,7 @@ from _deepdive_concepts import (
     _get_sec_tickers,
 )
 
-# P3 — concentration extraction. Magnitude-based, sourced from concentration-footnote numerics
+# P3, concentration extraction. Magnitude-based, sourced from concentration-footnote numerics
 # in the filing text (companyconcept XBRL does NOT expose dimensional segment members, so the
 # segment-member breakdown is only recoverable from the footnote text). Replaces the old
 # substring detector ("customers accounted for") which SIGA's filing never used.
@@ -57,7 +57,7 @@ _CONC_PCT = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*%")
 # How far (chars) a percentage may sit from its qualifying context phrase.
 _CONC_WINDOW = 180
 
-# v0.3.1 #7 — SEGMENT-disclosure guard. DSGR's "100% of [Canada Branch Division] revenue" is a
+# v0.3.1 #7, SEGMENT-disclosure guard. DSGR's "100% of [Canada Branch Division] revenue" is a
 # segment/geography breakdown, NOT customer concentration, yet it mis-set top_customer_pct=100 and
 # killed a real $1.32B distributor pre-deep-dive. When the percent is followed (within a short
 # window) by "of [<segment/division/branch/region/subsidiary/geography ...>] revenue", it is a
@@ -69,7 +69,7 @@ _CONC_WINDOW = 180
 # token-run and the segment->"revenue" tail char-classes include the curly apostrophe ’ (U+2019)
 # and a literal ASCII apostrophe so "branch division’s revenue" bridges to "revenue". Without this
 # the guard silently no-ops on the very DSGR string it exists to catch (the selftest had passed
-# for the wrong reason — no customer phrase near the pct — masking the regex break).
+# for the wrong reason, no customer phrase near the pct, masking the regex break).
 _CONC_SEGMENT_CTX = re.compile(
     r"%?\s*of\s*\[?\s*(?:(?:the|our|its|total)\s+)?"
     r"(?:[a-z][\w&./’'-]+\s*){0,4}?"
@@ -78,7 +78,7 @@ _CONC_SEGMENT_CTX = re.compile(
     r"[\w\s&./’'\]\[-]{0,40}?revenue",
     re.IGNORECASE,
 )
-# v0.3.1 #7 (cont.) — POSSESSIVE proper-noun segment guard. The real DSGR filing also says
+# v0.3.1 #7 (cont.), POSSESSIVE proper-noun segment guard. The real DSGR filing also says
 # "approximately 92% of Lawson’s revenue" (Lawson Products is a DSGR operating segment). That has
 # NO generic segment keyword, so _CONC_SEGMENT_CTX misses it, and an UNRELATED "our largest
 # customer accounted for <5%" sentence elsewhere in the 180-char window bound the 92% to the
@@ -92,14 +92,14 @@ _CONC_SEGMENT_CTX = re.compile(
 _CONC_SEGMENT_POSSESSIVE = re.compile(
     r"%\s*of\s*"
     r"(?!(?:the\s+)?(?:total|consolidated|net|company|group|combined|its|our|all)\b)"
-    # ProperNoun (1-4 Capitalized tokens), then a possessive apostrophe — trailing "s" OPTIONAL so
-    # PLURAL possessives ("Gexpro Services’ revenue") match too — then up to ~20 chars of qualifier
+    # ProperNoun (1-4 Capitalized tokens), then a possessive apostrophe, trailing "s" OPTIONAL so
+    # PLURAL possessives ("Gexpro Services’ revenue") match too, then up to ~20 chars of qualifier
     # (a fiscal year, "total", "consolidated") before "revenue" ("Services’ 2025 total revenue").
     r"[A-Z][\w&.'-]+(?:\s+[A-Z][\w&.'-]+){0,3}\s*[’'](?:s)?\s+[\w\s]{0,20}?revenue",
 )
-# v0.3.1 #7 (cont.) — DIVERSIFICATION guard. "the top 20 customers represented approximately 83%"
+# v0.3.1 #7 (cont.), DIVERSIFICATION guard. "the top 20 customers represented approximately 83%"
 # / "our 15 largest customers" is a DIVERSIFIED base (plural N customers), the OPPOSITE of single-
-# counterparty concentration — it must never produce a kill. Real DSGR states exactly this for the
+# counterparty concentration, it must never produce a kill. Real DSGR states exactly this for the
 # Gexpro Services segment. Distinct from the singular _CONC_SINGLE_CUSTOMER ("our largest customer").
 _CONC_DIVERSIFIED_CUSTOMERS = re.compile(
     r"top\s+\d+\s+customers|\d+\s+largest\s+customers|our\s+\d+\s+largest\b",
@@ -224,7 +224,7 @@ def _insurance_concepts_present(
         try:
             if _dc._one_concept(cik, concept):
                 present.append(concept)
-                # Insurance SIC + any single concept is already conclusive — stop probing early.
+                # Insurance SIC + any single concept is already conclusive, stop probing early.
                 if sic_is_insurance:
                     return True, concept
                 # Otherwise we need a SECOND distinct concept; stop as soon as we have two.
@@ -528,26 +528,26 @@ def _extract_concentration(tenk_text: str) -> tuple[float | None, float | None, 
         window = low[lo:hi]
         if not _CONC_REVENUE_TERM.search(window):
             continue
-        # v0.3.1 #7 — SEGMENT-disclosure guard. If THIS percentage is "X% of [<segment/division/
+        # v0.3.1 #7, SEGMENT-disclosure guard. If THIS percentage is "X% of [<segment/division/
         # branch/region/subsidiary> ...] revenue" (a segment/geography breakdown), it is NOT
-        # customer/program concentration — skip it entirely so DSGR's "100% of [Canada Branch
+        # customer/program concentration, skip it entirely so DSGR's "100% of [Canada Branch
         # Division] revenue" never mis-sets top_customer_pct. Anchor the segment match to the text
         # starting AT the percent (the "% of ... revenue" tail) so a nearby unrelated segment word
         # elsewhere in the window does not suppress a genuine customer percentage.
         tail = low[m.start():hi]
         if _CONC_SEGMENT_CTX.search(tail):
             continue
-        # v0.3.1 #7 (cont.) — POSSESSIVE proper-noun segment guard, on ORIGINAL-CASE tail (capitalization
+        # v0.3.1 #7 (cont.), POSSESSIVE proper-noun segment guard, on ORIGINAL-CASE tail (capitalization
         # is the discriminator). "X% of Lawson’s revenue" / "X% of [Segment]’s revenue" is a segment
-        # breakdown, not customer concentration — skip so an unrelated "largest customer" sentence in
+        # breakdown, not customer concentration, skip so an unrelated "largest customer" sentence in
         # the window can't bind this segment percentage to the customer class (the DSGR 92% re-kill).
         orig_tail = tenk_text[m.start():hi]
         if _CONC_SEGMENT_POSSESSIVE.search(orig_tail):
             continue
-        # v0.3.1 #7 (cont.) — DIVERSIFICATION guard. "the top 20 customers represented ~83%" is a
+        # v0.3.1 #7 (cont.), DIVERSIFICATION guard. "the top 20 customers represented ~83%" is a
         # diversified base (the opposite of single-counterparty risk). If a plural "top N customers"
         # phrase sits in the window AND it is NEARER the percent than any single-customer phrase,
-        # this percentage is a diversification disclosure, not a kill — skip it. (Nearness so a
+        # this percentage is a diversification disclosure, not a kill, skip it. (Nearness so a
         # genuine single-customer percentage elsewhere is not suppressed by an unrelated diverse one.)
         _div_d = _nearest_dist(_CONC_DIVERSIFIED_CUSTOMERS, window, m.start() - lo)
         if _div_d is not None:
@@ -560,7 +560,7 @@ def _extract_concentration(tenk_text: str) -> tuple[float | None, float | None, 
         if cust_d is None and prog_d is None:
             continue
         # Bind the percentage to whichever qualifying phrase is NEAREST. Ties (and customer-only)
-        # resolve to customer — named-counterparty dependence is the harder kill-flag.
+        # resolve to customer, named-counterparty dependence is the harder kill-flag.
         if prog_d is not None and (cust_d is None or prog_d < cust_d):
             cls = "program"
         else:
@@ -694,7 +694,7 @@ def _trajectory_fields(rev_series: list, norm_base_series: list, ni_series: list
     cr = out["contamination_ratio"]
     # A1: degenerate-base guard. The contamination test "latest base well below a POSITIVE 5yr
     # avg" is only meaningful for a POSITIVE normalization base. A NEGATIVE contamination_ratio
-    # arises when the 5yr-avg base is negative (negative FCF/OCF normalization base) — then
+    # arises when the 5yr-avg base is negative (negative FCF/OCF normalization base), then
     # cr<1.0 / cr<0.8 pass TRIVIALLY for any negative number and the veto fires on garbage
     # (BWIN fired at cr=-2.4618). Require 0 < cr on BOTH flags so a negative/degenerate base can
     # never trip the veto. (cr==0 is likewise excluded: a zero latest base is not a meaningful
@@ -705,12 +705,12 @@ def _trajectory_fields(rev_series: list, norm_base_series: list, ni_series: list
         and out["latest_below_avg"]
     )
 
-    # P-A: peak_contamination_flag — independent of rev_slope_sign. Catches the V-shape value
+    # P-A: peak_contamination_flag, independent of rev_slope_sign. Catches the V-shape value
     # trap (trough->peak->rollover) where the all-window slope is +1 so fundamental_decline_flag
     # never fires, yet the normalization base is past-peak-contaminated (<0.8) AND the company is
     # currently loss-making. NRP: cr=0.7445, latest_below_avg=True, NI=-84.8M -> True while its
     # rev_slope_sign=+1 keeps fundamental_decline_flag=False.
-    # A1: same 0 < cr lower bound as fundamental_decline_flag — a negative cr must not trip it.
+    # A1: same 0 < cr lower bound as fundamental_decline_flag, a negative cr must not trip it.
     latest_ni = None
     if ni_series:
         for s in reversed(ni_series):
@@ -725,7 +725,7 @@ def _trajectory_fields(rev_series: list, norm_base_series: list, ni_series: list
     return out
 
 
-# v0.3.1 #1 — normalization window (years) for the producer-side normalized-FCF proxy. Mirrors
+# v0.3.1 #1, normalization window (years) for the producer-side normalized-FCF proxy. Mirrors
 # valuation's normalize_years default (5) so normalization_masks_current_loss tracks the same
 # trailing average the consumer capitalizes on.
 _NORM_YEARS = 5

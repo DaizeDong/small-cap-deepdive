@@ -69,7 +69,7 @@ def main() -> None:
     )
 
     # v0.3.2 #10: park run-state under THIS run's batch dir (per-SMALLCAP_RUN), never a
-    # single shared /tmp/smallcap_run.txt — so concurrent agents on different themes do
+    # single shared /tmp/smallcap_run.txt, so concurrent agents on different themes do
     # not clobber each other. run_state_path(run=run_name) resolves to <run_dir>/_run_state.txt.
     state_path = run_state_path(run=run_name)
     state_path.write_text(run_name + "\n", encoding="utf-8")

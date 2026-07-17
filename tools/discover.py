@@ -150,7 +150,7 @@ def enrich_marketcap(df: pd.DataFrame) -> pd.DataFrame:
         yf_mktcap = None
         # P12: split .info and .history into INDEPENDENT try blocks. yfinance's
         # .info call is the fragile leg (SJW/HI/MRC: it raises or returns {} for
-        # real names), and the old single try aborted BOTH legs together — losing
+        # real names), and the old single try aborted BOTH legs together, losing
         # price/volume too, which then (a) starved resolve_mktcap of a price for the
         # SEC shares x price reconstruction and (b) tripped flag_illiquid. Isolating
         # them means an .info failure no longer silently drops a real small-cap.
@@ -166,7 +166,7 @@ def enrich_marketcap(df: pd.DataFrame) -> pd.DataFrame:
             h = yf.Ticker(t).history(period="1mo")
             if not h.empty:
                 rec["avg_dollar_vol"] = float((h["Close"] * h["Volume"]).mean())
-                # P12: derive a price from the history close when .info gave none —
+                # P12: derive a price from the history close when .info gave none ,
                 # this is the price that lets resolve_mktcap reconstruct mktcap from
                 # SEC shares for a yfinance-NaN name BEFORE any size-exclusion.
                 if rec["price"] is None or not (rec["price"] > 0):
@@ -225,7 +225,7 @@ def apply_filters(df: pd.DataFrame, max_mcap: float, min_dollar_vol: float,
     # Band via shared SSOT (null/zero -> "unknown"; >=watch_band_max -> "large").
     df["band"] = df["mktcap"].apply(lambda mc: band_for(mc, max_mcap, watch_band_max))
     # smallcap_candidate: NOT too big (deep/watch/unknown), not SPAC, not illiquid.
-    # P5: unknown-band (null mktcap) rows are kept — flow through instead of drop.
+    # P5: unknown-band (null mktcap) rows are kept, flow through instead of drop.
     # The illiquidity gate still applies; a no-price row with no volume is illiquid
     # and falls out there, not via a blanket mktcap drop.
     df["smallcap_candidate"] = (
@@ -254,15 +254,15 @@ def _selftest() -> None:
         # large / out of scope
         {"name": "Big Co", "ticker": "BIG", "cik": "3", "sic": "2810",
          "mktcap": 9e9, "price": 50.0, "avg_dollar_vol": 5e6},
-        # null mktcap but liquid + has price — the P5 case that used to be DROPPED
+        # null mktcap but liquid + has price, the P5 case that used to be DROPPED
         {"name": "Unknown Co", "ticker": "UNK", "cik": "4", "sic": "2810",
          "mktcap": None, "price": 12.0, "avg_dollar_vol": 5e6},
-        # null mktcap AND no price/volume — still flows as 'unknown' band, but is illiquid
+        # null mktcap AND no price/volume, still flows as 'unknown' band, but is illiquid
         {"name": "Dark Co", "ticker": "DARK", "cik": "5", "sic": "2810",
          "mktcap": None, "price": None, "avg_dollar_vol": 0.0},
         # P12: yfinance returned NaN, but enrich_marketcap reconstructed mktcap via SEC
         # shares x price (mktcap_source='sec_shares_x_price'). The resolved in-band cap must
-        # land 'deep' and stay a candidate — NOT be size-excluded for being yfinance-NaN.
+        # land 'deep' and stay a candidate, NOT be size-excluded for being yfinance-NaN.
         # This is the SJW/HI/MRC case: real name, fragile yfinance, recoverable via SEC.
         {"name": "SJW-like", "ticker": "SJWX", "cik": "6", "sic": "4941",
          "mktcap": 1.5e9, "price": 50.0, "avg_dollar_vol": 5e6,
@@ -293,7 +293,7 @@ def _selftest() -> None:
     assert cand["DARK"] == False, "DARK is illiquid -> not a candidate (via liquidity gate, not mktcap)"
 
     # P12: a SEC-shares x price reconstructed in-band mktcap must band 'deep' and stay a
-    # candidate — the yfinance-NaN name (SJW/HI/MRC) is recovered, NOT size-excluded.
+    # candidate, the yfinance-NaN name (SJW/HI/MRC) is recovered, NOT size-excluded.
     assert bands["SJWX"] == "deep", (
         f"P12: SEC-reconstructed $1.5B mktcap must band 'deep', got {bands['SJWX']}")
     assert cand["SJWX"] == True, (

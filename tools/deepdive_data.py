@@ -31,15 +31,15 @@ from edgar import Company
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import init_edgar, UA, REPORTS, today, CFG, http_get
 
-# v0.3.3 refactor — the mechanical concept-pull layer and the derived-flag computations were
+# v0.3.3 refactor, the mechanical concept-pull layer and the derived-flag computations were
 # extracted into sibling modules to shrink this orchestrator. They are re-exported below so the
 # PUBLIC API (deepdive_data.<symbol>) is UNCHANGED for every consumer (valuation imports pull;
 # cheap_pass imports _extract_concentration / _concentration_flag; etc.). NO behavior change.
-#   _deepdive_concepts.py — XBRL companyconcept fetchers + concept-cascade constants + IFRS merge.
-#   _deepdive_flags.py    — derived-flag computations (concentration / trajectory / debt guards / ...).
+#   _deepdive_concepts.py, XBRL companyconcept fetchers + concept-cascade constants + IFRS merge.
+#   _deepdive_flags.py, derived-flag computations (concentration / trajectory / debt guards / ...).
 # Both import ONLY from _common (+ each other, flags->concepts); never back from this module, so
 # there is no circular import. The selftest monkeypatches _deepdive_concepts._one_concept (via the
-# _dc alias) — the single fetcher every concept/flag helper resolves through.
+# _dc alias), the single fetcher every concept/flag helper resolves through.
 import _deepdive_concepts as _dc
 from _deepdive_concepts import (
     FACTS, DEI_FACTS, IFRS_FACTS, SEC_COMPANY_TICKERS_URL,
@@ -295,18 +295,18 @@ def tenk_sections(ticker: str, cik: str = "", as_of: str | None = None) -> dict:
             c = Company(ticker)
         f = None
         form_used = None
-        # Primary: 10-K (amendments=False — 10-K/A 修正件常缺 going-concern 全文)
+        # Primary: 10-K (amendments=False, 10-K/A 修正件常缺 going-concern 全文)
         fl = c.get_filings(form="10-K", amendments=False)
         f = _latest_filing_asof(fl, as_of)
         if f is not None:
             form_used = "10-K"
-        # Fallback 1: 20-F (foreign-domiciled filers — Phase 4)
+        # Fallback 1: 20-F (foreign-domiciled filers, Phase 4)
         if f is None:
             fl20 = c.get_filings(form="20-F", amendments=False)
             f = _latest_filing_asof(fl20, as_of)
             if f is not None:
                 form_used = "20-F"
-        # Fallback 2: 40-F (Canadian filers — Phase 4)
+        # Fallback 2: 40-F (Canadian filers, Phase 4)
         if f is None:
             fl40 = c.get_filings(form="40-F", amendments=False)
             f = _latest_filing_asof(fl40, as_of)
@@ -324,7 +324,7 @@ def tenk_sections(ticker: str, cik: str = "", as_of: str | None = None) -> dict:
         out["has_going_concern"] = "going concern" in low and "substantial doubt" in low
         # material_weakness: require affirmative ICFR finding, not bare boilerplate phrase.
         # Risk-factor language ("our failure to maintain effective controls...") often
-        # contains "material weakness" without an actual finding — caused 4/4 FP in audit.
+        # contains "material weakness" without an actual finding, caused 4/4 FP in audit.
         # Require co-occurrence with an affirmative phrase within the same document.
         _mw_affirmative = (
             "identified a material weakness" in low
@@ -334,7 +334,7 @@ def tenk_sections(ticker: str, cik: str = "", as_of: str | None = None) -> dict:
         )
         out["has_material_weakness"] = "material weakness" in low and _mw_affirmative
         out["has_death_spiral"] = "variable conversion" in low
-        # P3 — magnitude-based concentration from the full filing text (the only mechanical
+        # P3, magnitude-based concentration from the full filing text (the only mechanical
         # source for the segment-member magnitude; companyconcept XBRL has no dimensional
         # members). Replaces the old "customers accounted for" substring, which SIGA's
         # ~90%-BARDA-dependent filing never used. Done here because txt (full body) is in scope.
@@ -360,9 +360,9 @@ def tenk_sections(ticker: str, cik: str = "", as_of: str | None = None) -> dict:
 # P7: second-source sanity band (cross-validate SEC XBRL against yfinance)
 # ---------------------------------------------------------------------------
 # Reflection diagnosis #4 (DATA_ROBUSTNESS F5): every financial datum is SEC XBRL and every
-# guard (C1a/C1b/C1c) is INTERNAL-CONSISTENCY on the SAME corrupted feed — when XBRL is wrong
+# guard (C1a/C1b/C1c) is INTERNAL-CONSISTENCY on the SAME corrupted feed, when XBRL is wrong
 # (HRI debt truncation 11M, HCI/AL wrong-entity revenue) there is no independent number to
-# falsify it. P7 fetches ONE second, INDEPENDENT source (yfinance — already a dependency, used
+# falsify it. P7 fetches ONE second, INDEPENDENT source (yfinance, already a dependency, used
 # only for mktcap until now) for total_debt / revenue / shares and compares it to the
 # SEC-XBRL-derived latest values. A GROSS disagreement (max/min > 2.5x) means the single SEC
 # value cannot be trusted; valuation gates buy_eligible on the resulting cross_source_mismatch.
@@ -391,7 +391,7 @@ def _yf_second_source(ticker: str) -> dict | None:
         t = yf.Ticker(ticker)
     except Exception:
         return None
-    # 1) .info — the cheap path (totalDebt / totalRevenue / sharesOutstanding)
+    # 1) .info, the cheap path (totalDebt / totalRevenue / sharesOutstanding)
     try:
         info = t.info or {}
         for src, dst in (("totalDebt", "total_debt"),
@@ -432,7 +432,7 @@ def _yf_second_source(ticker: str) -> dict | None:
                     out["shares_outstanding"] = float(v.iloc[-1])
         except Exception:
             pass
-    # All-None second source is no better than absent — surface as unavailable.
+    # All-None second source is no better than absent, surface as unavailable.
     if all(out[k] is None for k in out):
         return None
     return out
@@ -508,10 +508,10 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
          "pulled_at": today()}
     if as_of is not None:
         d["as_of"] = as_of
-        # FIX 1 — reset the as-of filed-date accumulator before the point-in-time cascade. Every
+        # FIX 1, reset the as-of filed-date accumulator before the point-in-time cascade. Every
         # as-of _one_concept call below records the max "filed" date of the facts it kept; we read it
         # back after all pulls (combined with the as-of tenk filing date) to emit
-        # derived.asof_max_filing_date — the look-ahead audit evidence (asserted <= as_of). Reset is
+        # derived.asof_max_filing_date, the look-ahead audit evidence (asserted <= as_of). Reset is
         # gated on as_of so the live (as_of=None) path never touches the accumulator.
         reset_asof_filed_tracker()
     print(f"  拉财务序列...", file=sys.stderr)
@@ -557,7 +557,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     if not assets:
         assets = concept_series(cik, "LiabilitiesAndStockholdersEquity", asof=as_of); time.sleep(0.2)
 
-    # de-risk: CORE-4 distress inputs (retained earnings + current assets/liabilities) — the
+    # de-risk: CORE-4 distress inputs (retained earnings + current assets/liabilities), the
     # remaining Altman Z'' / accum-deficit components not already pulled above. OOS-validated
     # blowup predictor; see _deepdive_flags.distress_core4 + docs/backtest-2026-06/.
     retained_earnings = concept_series(cik, "RetainedEarningsAccumulatedDeficit", asof=as_of); time.sleep(0.2)
@@ -566,7 +566,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
 
     # C1: pull SIC from EDGAR company metadata for financial-sector guard (C2). SIC is structural
     # entity metadata (an entity's SIC classification is not a between-filings disclosure), so the
-    # submissions endpoint is read directly even under as_of — this is the same SIC an investor at
+    # submissions endpoint is read directly even under as_of, this is the same SIC an investor at
     # `as_of` would have classified the filer under.
     sic_code: str | None = None
     try:
@@ -621,7 +621,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         # C1: liabilities series for debt-truncation cross-check
         "liabilities": liabilities,
     }
-    # M5 — data-quality anomaly detection: flag implausible net_income (XBRL unit anomaly).
+    # M5, data-quality anomaly detection: flag implausible net_income (XBRL unit anomaly).
     # If |net_income| > revenue * 50 (e.g. $32B net income vs $32M revenue), the XBRL
     # value is almost certainly a unit mis-tag (millions reported in units of 1).
     # We do NOT alter the value; valuation uses OCF, so this is display-only.
@@ -654,7 +654,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         ticker, cik, rev, shares, ni
     )
 
-    # P-B / A4: low_revenue_loss_ratio — early/pre-revenue resource pattern (present-but-tiny
+    # P-B / A4: low_revenue_loss_ratio, early/pre-revenue resource pattern (present-but-tiny
     # revenue + large genuine loss). Advisory label; the >20x EXTREME tier gates buy_eligible.
     _low_rev_loss, _low_rev_loss_extreme, _low_rev_loss_detail = _low_revenue_loss_ratio(rev, ni)
 
@@ -663,7 +663,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     # v0.3.1 #4: pass sic_code so the precision rule (insurance SIC 63/64 OR >=2 distinct concepts)
     # can suppress single-stray-tag false positives on non-insurers (SPB/ASTE/SKIL/ALLR/TOPP).
     # NOTE (PIT scope): _insurance_concepts_present lives in the sibling _deepdive_flags module and
-    # is a structural SIC-routing presence flag (insurer status is time-invariant — a name that ever
+    # is a structural SIC-routing presence flag (insurer status is time-invariant, a name that ever
     # tagged insurance concepts was an insurer at `as_of` too). It is left on the latest path under
     # as_of; the routing it feeds is conservative (financial-SIC -> nav/abstain), never a +BUY.
     print(f"  探测保险 XBRL 概念(A3)...", file=sys.stderr)
@@ -720,16 +720,16 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     )
 
     # P3: magnitude-based concentration. tenk_sections extracts the magnitudes from the full
-    # filing body (the only mechanical source — companyconcept XBRL has no dimensional members);
+    # filing body (the only mechanical source, companyconcept XBRL has no dimensional members);
     # here we read them back and compose the kill/watch flag per the data contract.
     _top_customer_pct = d["tenk"].get("top_customer_pct")
     _top_program_pct = d["tenk"].get("top_program_pct")
     _conc_detail = d["tenk"].get("concentration_detail")
     _conc_flag = _concentration_flag(_top_customer_pct, _top_program_pct)
 
-    # A2: concentration_unquantified — the text-vs-XBRL concentration seam. When the 10-K text
+    # A2: concentration_unquantified, the text-vs-XBRL concentration seam. When the 10-K text
     # flags customer concentration (customer_concentration_flag) but NO magnitude was extractable
-    # (concentration_flag is None — text-only or pre-/early-XBRL filer, the SWMR/LFCR SIGA-class
+    # (concentration_flag is None, text-only or pre-/early-XBRL filer, the SWMR/LFCR SIGA-class
     # cohort), surface an ADVISORY. Advisory only: it goes in data_quality and does NOT gate.
     _text_conc = bool(d["tenk"].get("customer_concentration_flag"))
     _concentration_unquantified = _text_conc and (_conc_flag is None)
@@ -739,7 +739,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     # P-A: ni passed so peak_contamination_flag can test latest_net_income<0 (V-shape catch).
     _traj = _trajectory_fields(rev, ocf, ni)
 
-    # v0.3.1 #1: normalization_masks_current_loss — the degenerate-base / divested-stub catch (TUSK
+    # v0.3.1 #1: normalization_masks_current_loss, the degenerate-base / divested-stub catch (TUSK
     # hole). When contamination_ratio<0 (or the latest base is negative) the A1 (0<cr) guard
     # silences BOTH cyclical vetoes, yet the trailing-avg FCF is still POSITIVE -> phantom +MoS.
     # Compute the producer-side trailing-5yr FCF proxy (matches valuation's normalized_fcf) and flag
@@ -749,7 +749,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         _norm_fcf_proxy, latest_ocf_val, latest_fcf, _traj["contamination_ratio"]
     )
 
-    # P7: second-source sanity band (survivors-only — this runs at the deepdive level, so it
+    # P7: second-source sanity band (survivors-only, this runs at the deepdive level, so it
     # respects rate limits). Fetch ONE independent source (yfinance via the injected yf_fn) for
     # total_debt / revenue / shares and cross-check against the SEC-XBRL latest values. The fetch
     # is fully guarded (yf_fn returns None on ANY failure); a None second source leaves
@@ -778,10 +778,10 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         _sec_debt_lease_adj, _latest_rev, _sec_shares_latest, _second
     )
 
-    # FIX 1 — compose derived.asof_max_filing_date (emitted ONLY when as_of is set). Combine the max
+    # FIX 1, compose derived.asof_max_filing_date (emitted ONLY when as_of is set). Combine the max
     # "filed" date recorded across ALL as-of concept pulls (revenue/ni/ocf/cash/shares/assets/equity/
     # debt/ebit/da/capex/goodwill/intangibles/liabilities/lease-income/PP&E-fleet/operating-lease/
-    # IFRS — every cascade routes through _one_concept, which records into the accumulator) with the
+    # IFRS, every cascade routes through _one_concept, which records into the accumulator) with the
     # as-of 10-K/20-F/40-F filing date (tenk). This is the newest filing date that fed ANY value in
     # the point-in-time reconstruction; the look-ahead audit asserts it is <= as_of. None when truly
     # nothing was datable. as_of=None path leaves the field ABSENT (byte-identical live default).
@@ -819,7 +819,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         "runway_periods": (round(cash[-1]["val"] / abs(ocf[-1]["val"]), 1)
                            if (cash and ocf and ocf[-1]["val"] < 0) else None),
         # Phase 2 additions
-        # v0.3.1 #2: latest_total_debt is the EV debt figure — the summed standard debt concepts,
+        # v0.3.1 #2: latest_total_debt is the EV debt figure, the summed standard debt concepts,
         # or the implied (liab-equity) figure when the sum still under-read the balance sheet.
         # valuation reads this for EV (ev = market_cap + latest_total_debt - cash).
         "latest_total_debt": _ev_debt,
@@ -852,12 +852,12 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         # routes these like financial_sic (nav/abstain) and gates buy_eligible off it.
         "insurance_concepts_present": _insurance_present,
         "insurance_concept_matched": _insurance_concept,
-        # v0.3.2 #8: lessor_asset_heavy — asset-heavy leasing/rental business (railcar/equipment/
+        # v0.3.2 #8: lessor_asset_heavy, asset-heavy leasing/rental business (railcar/equipment/
         # auto lessor). valuation forces fcf_cap_model_unsuitable=True (route to lease-fleet NAV)
         # EVEN when debt/assets<0.62, closing the GBX (0.41)/RAIL (0.35) mis-valuation hole.
         "lessor_asset_heavy": _lessor_asset_heavy_flag,
         "lessor_asset_heavy_detail": _lessor_detail,
-        # v0.3.2 #11: foreign_filer_unvaluable — a 20-F/40-F filer whose financials are STILL empty
+        # v0.3.2 #11: foreign_filer_unvaluable, a 20-F/40-F filer whose financials are STILL empty
         # after the us-gaap+ifrs-full cascade. Labels the abstain explicitly (not a silent null).
         "foreign_filer_unvaluable": _foreign_filer_unvaluable_flag,
         "foreign_filer_unvaluable_detail": _foreign_filer_detail,
@@ -880,7 +880,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         "fundamental_decline_flag": _traj["fundamental_decline_flag"],
         # P-A: V-shape value-trap catch (independent of rev_slope_sign)
         "peak_contamination_flag": _traj["peak_contamination_flag"],
-        # v0.3.1 #1: normalization_masks_current_loss — trailing-avg normalized FCF>0 while current
+        # v0.3.1 #1: normalization_masks_current_loss, trailing-avg normalized FCF>0 while current
         # OCF/FCF is negative or the contamination base is degenerate (contamination_ratio<0). The
         # TUSK hole: the A1 guard silences both cyclical vetoes on a negative base yet trailing-avg
         # still emits +normalized_fcf -> phantom +MoS. valuation ANDs (not this) into buy_eligible
@@ -905,7 +905,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         "latest_current_assets": current_assets[-1]["val"] if current_assets else None,
         "latest_current_liabilities": current_liabilities[-1]["val"] if current_liabilities else None,
     }
-    # FIX 1 — emit asof_max_filing_date ONLY under as_of (the look-ahead audit reads it; harness
+    # FIX 1, emit asof_max_filing_date ONLY under as_of (the look-ahead audit reads it; harness
     # asserts <= as_of). Added AFTER the dict literal + gated on as_of so the live (as_of=None)
     # derived block is byte-identical to the pre-FIX output (the key is simply absent).
     if as_of is not None:
@@ -924,8 +924,8 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     else:
         d["insider"] = {"available": False, "note": "no_ticker_pre_listing"}
 
-    # iter4 P15/P16/P17 — DIAGNOSTIC-ONLY between-filings side-channel (firewall, design §5 Q2).
-    # The "signals" namespace is a TOP-LEVEL SIBLING of "derived" — NEVER nested inside derived —
+    # iter4 P15/P16/P17, DIAGNOSTIC-ONLY between-filings side-channel (firewall, design §5 Q2).
+    # The "signals" namespace is a TOP-LEVEL SIBLING of "derived", NEVER nested inside derived ,
     # so valuation.py / the buy_eligible composite / the BUY trigger can never read a signals.*
     # field. signals.py.compute_signals is designed never to raise (it returns a partial dict with
     # its own signals_error), but we still guard the import + call here so a missing/broken
@@ -943,7 +943,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         }
         return d
     try:
-        from signals import compute_signals  # lazy import — never gate the deepdive on it
+        from signals import compute_signals  # lazy import, never gate the deepdive on it
         d["signals"] = compute_signals(ticker, cik, d["derived"])
     except Exception as e:
         # Firewall: a signals failure must NEVER crash the deepdive. Attach a diagnostic-only
@@ -990,7 +990,7 @@ def _selftest():
     print(f"  WLFC: latest revenue=${latest_wlfc/1e6:.1f}M  OK")
 
     # --- Insider trades: open-market buy/sell values and counts (A1) ---
-    # Use AI (C3.ai) — a ticker known to have open-market insider activity over the
+    # Use AI (C3.ai), a ticker known to have open-market insider activity over the
     # last 730 days. Assert type correctness AND that at least one dollar-value side
     # is NONZERO (catches the silently-wrong-column failure where all values read as 0
     # even though available=True).
@@ -1010,7 +1010,7 @@ def _selftest():
     assert ins.get("net_signal") in ("net_buy", "net_sell", "neutral", None), (
         f"net_signal unexpected value: {ins.get('net_signal')!r}"
     )
-    # Hard-assert at least one side is nonzero — catches column-misread silently returning 0.
+    # Hard-assert at least one side is nonzero, catches column-misread silently returning 0.
     # C3.ai has documented insider purchases; if both sides are 0 the column parsing is broken.
     assert ins.get("available") and (ins.get("buy_value", 0) > 0 or ins.get("sell_value", 0) > 0), (
         f"AI insider: buy_value and sell_value are BOTH zero with available=True — "
@@ -1024,10 +1024,10 @@ def _selftest():
           f"sell_value=${ins.get('sell_value', 0):,.0f} "
           f"net={ins.get('net_signal')}  OK")
 
-    # --- M5: data_quality_warn unit — verify the flag is set when implausible ratio exists ---
+    # --- M5: data_quality_warn unit, verify the flag is set when implausible ratio exists ---
     # We synthesize a minimal scenario inline (no live EDGAR call needed for unit logic test).
     # Simulate a case where |net_income| > revenue * 50 and verify warn is emitted.
-    _test_ni = 32_000_000_000   # 32B (unit mis-tag — should be 32M)
+    _test_ni = 32_000_000_000   # 32B (unit mis-tag, should be 32M)
     _test_rev = 32_000_000      # 32M (correct)
     _warn = None
     if _test_ni is not None and _test_rev is not None and _test_rev != 0 and abs(_test_ni) > abs(_test_rev) * 50:
@@ -1104,7 +1104,7 @@ def _selftest():
     assert _concentration_flag(30.0, 30.0) is None, "P3: 30%/30% (below band) must be None"
     print(f"  P3 concentration_flag: kill/watch/None thresholds correct  OK")
 
-    # --- P9: EBIT cascade tagging (no live call — exercise the source labels) ---
+    # --- P9: EBIT cascade tagging (no live call, exercise the source labels) ---
     # Path 1: OperatingIncomeLoss present → tagged OperatingIncomeLoss (offline; pass op income).
     _op = [{"end": "2024-12-31", "val": 50_000_000}]
     _ebit1, _src1 = _ebit_with_source("0000000001", _op)
@@ -1224,10 +1224,10 @@ def _selftest():
     assert _short["peak_contamination_flag"] is False, "P-A: single-point must not fire peak flag"
     print(f"  P6 trajectory: short-series safe defaults  OK")
 
-    # --- P-A: peak_contamination_flag — V-shape value trap, independent of rev_slope_sign ---
+    # --- P-A: peak_contamination_flag, V-shape value trap, independent of rev_slope_sign ---
     # Regression crystal feeding NRP's REAL V-shape revenue series: trough 2020 ~120M -> peak
     # 2022 ~307M -> rolling over to 2024 ~232M. The whole-window linear fit is UPWARD so
-    # rev_slope_sign=+1 and fundamental_decline_flag stays False — peak_contamination_flag is the
+    # rev_slope_sign=+1 and fundamental_decline_flag stays False, peak_contamination_flag is the
     # independent catch. OCF normalization base is past-peak-contaminated (<0.8) and latest NI<0.
     _rev_nrp = [
         {"end": "2020-12-31", "val": 120_000_000},   # trough
@@ -1296,7 +1296,7 @@ def _selftest():
     assert _tg["peak_contamination_flag"] is False, "P-A: grower must not fire peak flag"
     print("  P-A peak_contamination: negatives (cr>=0.8 / NI>=0 / no-NI / grower) all False  OK")
 
-    # --- A1: degenerate-base guard — a NEGATIVE contamination_ratio must trip NEITHER flag. ---
+    # --- A1: degenerate-base guard, a NEGATIVE contamination_ratio must trip NEITHER flag. ---
     # BWIN fired at cr=-2.4618: the 5yr-avg OCF base was NEGATIVE, so latest/avg5 < 0. With the old
     # cr<0.8 / cr<1.0 tests that passed TRIVIALLY for any negative number. The 0< lower bound must
     # now keep BOTH flags False even though latest_below_avg=True AND latest_NI<0.
@@ -1328,7 +1328,7 @@ def _selftest():
     print(f"  A1 degenerate-base: cr={_t_neg['contamination_ratio']} (<0) + below_avg + NI<0 -> "
           f"BOTH flags False  OK")
 
-    # --- A2: concentration_unquantified — text-conc True AND magnitude null -> True (advisory). ---
+    # --- A2: concentration_unquantified, text-conc True AND magnitude null -> True (advisory). ---
     # SWMR/LFCR cohort: the 10-K text flags customer concentration but no machine-readable
     # magnitude exists (pre-/early-XBRL or narrative-only). The advisory must surface; it does NOT
     # gate. Reuse the contract: customer_concentration_flag=True, concentration_flag=None.
@@ -1344,7 +1344,7 @@ def _selftest():
     assert not (False and (None is None)), "A2: no text-conc must keep concentration_unquantified False"
     print("  A2 concentration_unquantified: text-conc True + magnitude null -> True (advisory)  OK")
 
-    # --- A3: insurance_concepts_present — an insurer-like concept set resolves to True. ---
+    # --- A3: insurance_concepts_present, an insurer-like concept set resolves to True. ---
     # _insurance_concepts_present probes the INSURANCE_CONCEPTS set via _one_concept; here we test
     # the membership/logic deterministically: an insurer exposing PremiumsEarnedNet matches, and a
     # concept set with none of the insurance concepts present does not. We stub _one_concept so the
@@ -1382,7 +1382,7 @@ def _selftest():
           f"wrong_entity=False  OK")
 
     # --- A4: wrong_entity_suspected fires ONLY on shares<1000 / ticker-absent / CIK-mismatch /
-    # revenue<$1000 — the |NI|/rev ratio trigger is REMOVED. ---
+    # revenue<$1000, the |NI|/rev ratio trigger is REMOVED. ---
     #  (A4-a) ratio=5 -> label-only, NO extreme, wrong_entity=False (NOT the wrong entity).
     _a4_rev5 = [{"end": "2024-12-31", "val": 20_000_000}]
     _a4_ni5 = [{"end": "2024-12-31", "val": -100_000_000}]  # ratio = 5.0
@@ -1439,7 +1439,7 @@ def _selftest():
         "P-B: low_revenue_loss_ratio must NOT fire when loss is small vs revenue"
     )
 
-    # --- P-B: debt_truncation refinement — plausible producer debt no longer relabeled ---
+    # --- P-B: debt_truncation refinement, plausible producer debt no longer relabeled ---
     # Real producer: reported debt $300M, implied (liab-equity) $700M -> ratio 0.43.
     # Old 0.5 threshold WOULD have flagged this; refined 0.1 threshold must NOT.
     _prod_debt = [{"end": "2024-12-31", "val": 300_000_000}]
@@ -1560,7 +1560,7 @@ def _selftest():
         pass
     print(f"  P-D error artifact: simulated crash -> auditable ERROR JSON written + parsed  OK")
 
-    # --- P7: second-source sanity band — cross_source_check crystals (network-free) ---
+    # --- P7: second-source sanity band, cross_source_check crystals (network-free) ---
     # The comparator is pure: SEC-XBRL latest values vs a second-source dict (yfinance-shaped).
     # All four crystals are offline (no yf_fn / no network) so they are deterministic.
     #  (i) HRI truncation class: SEC debt 11M vs yf 4B -> mismatch True, detail names debt + ratio.
@@ -1608,7 +1608,7 @@ def _selftest():
     assert "revenue" in _p7d_det, f"P7(iv): detail must name the revenue field, got {_p7d_det!r}"
     print(f"  P7(iv) revenue 331M vs 2.7B (HCI/AL class): mismatch=True, names revenue  OK")
 
-    #  (v) floor guard — a trivially-small field on either side must NOT manufacture a mismatch,
+    #  (v) floor guard, a trivially-small field on either side must NOT manufacture a mismatch,
     #      and a field present on only one side must NOT count toward checked.
     _p7e_chk, _p7e_mis, _p7e_det = _cross_source_check(
         500_000, 250_000_000, None,                                   # SEC debt 0.5M (<floor); shares None
@@ -1647,7 +1647,7 @@ def _selftest():
     )
     print(f"  P7(vii) pull-level: injected yf_fn mismatch surfaces; raising fn degrades to no-block  OK")
 
-    # --- v0.3.1 #1: normalization_masks_current_loss — the TUSK degenerate-base / divested-stub hole ---
+    # --- v0.3.1 #1: normalization_masks_current_loss, the TUSK degenerate-base / divested-stub hole ---
     # TUSK: latest_ocf=-18.6M, latest_fcf=-89.1M, contamination_ratio<0, but the trailing-avg
     # normalized_fcf is POSITIVE -> phantom +55.1% MoS. The flag MUST fire so valuation downgrades.
     _tusk_ocf = [
@@ -1661,7 +1661,7 @@ def _selftest():
     assert _tusk_norm is not None and _tusk_norm > 0, (
         f"#1: TUSK trailing-avg normalized_fcf must be POSITIVE (the masking), got {_tusk_norm}"
     )
-    # cr<0 path (the A1-silenced degenerate base) — flag must fire.
+    # cr<0 path (the A1-silenced degenerate base), flag must fire.
     assert _normalization_masks_current_loss(_tusk_norm, -18_600_000, -89_100_000, -2.4618) is True, (
         "#1: normalization_masks_current_loss must fire when normalized_fcf>0 AND contamination<0 "
         "(TUSK degenerate-base hole)"
@@ -1872,7 +1872,7 @@ def _selftest():
     )
     _dp_tc, _dp_tp, _dp_cd = _extract_concentration(_dsgr_poss)
     # The 92% segment figure must NOT be bound to a customer (that was the re-kill). A genuine,
-    # in-window "largest customer ... less than 5%" mention legitimately yields 5% — harmless,
+    # in-window "largest customer ... less than 5%" mention legitimately yields 5%, harmless,
     # well below the 40% kill band. The load-bearing requirement is that no KILL-grade customer
     # percentage (>40) is manufactured from the 92% segment figure.
     assert _dp_tc is None or _dp_tc < 40, (
@@ -1897,7 +1897,7 @@ def _selftest():
     )
     # LOAD-BEARING regression #3 (real DSGR 83% shape): "the top 20 customers represented ~83% of
     # Gexpro Services’ total revenue" is BOTH a diversified base (top N customers, not one) AND a
-    # possessive proper-noun segment — must NOT yield a single-customer kill.
+    # possessive proper-noun segment, must NOT yield a single-customer kill.
     _dsgr_div = (
         "In fiscal 2025 the top 20 customers represented approximately 83% of Gexpro "
         "Services’ 2025 total revenue, reflecting a broad and diversified customer base."
@@ -1920,7 +1920,7 @@ def _selftest():
         assert _seg_tc is None, (
             f"#7: '100% of {_seg_word} revenue' must NOT set top_customer_pct, got {_seg_tc}"
         )
-    # CRITICAL non-regression: a GENUINE single-customer concentration must STILL be captured —
+    # CRITICAL non-regression: a GENUINE single-customer concentration must STILL be captured ,
     # the guard must only suppress segment phrasing, not real customer dependence.
     _real_cust = (
         "Our largest customer accounted for 65% of total revenue in fiscal 2024; no other "
@@ -1943,7 +1943,7 @@ def _selftest():
         if ni_val is not None and rev_val is not None and rev_val != 0 and abs(ni_val) > abs(rev_val) * 50:
             return f"absurd NI flagged"
         return None
-    # JILL: $27,900M NI is implausible against a ~$600M apparel revenue (47x... use stronger case) —
+    # JILL: $27,900M NI is implausible against a ~$600M apparel revenue (47x... use stronger case) ,
     # the contract is |NI| > revenue*50. Use JILL's documented mistag (27,900M) vs a small revenue.
     assert _ni_warn(27_900_000_000, 500_000_000) is not None, (
         "#13(NI): JILL-like 27,900M NI vs 500M revenue (55.8x) must flag data_quality_warn"
@@ -1966,7 +1966,7 @@ def _selftest():
     )
     print("  #13(NI) data_quality_warn: JILL 27,900M / REAL 41,799M flagged; plausible & 50x boundary spared  OK")
 
-    # --- v0.3.2 #8: lessor_asset_heavy — railcar/equipment lessor routing (debt/assets<0.62) ---
+    # --- v0.3.2 #8: lessor_asset_heavy, railcar/equipment lessor routing (debt/assets<0.62) ---
     # Three independent routes must each fire True; a normal industrial must stay False.
     _assets_big = [{"end": "2024-12-31", "val": 5_000_000_000.0}]  # $5B total assets
     # Route (a): leasing/rental SIC (GBX/RAIL are railcar lessors; 4741 = rental of railroad cars).
@@ -1997,7 +1997,7 @@ def _selftest():
         f"#8 route(c): high PP&E/assets (0.70) + rental revenue must set lessor_asset_heavy True, "
         f"got {_la_c} ({_la_c_d})"
     )
-    # Crystal: GBX-shape — leasing-via-lease-income on a generic SIC, debt/assets<0.62 (0.41). The
+    # Crystal: GBX-shape, leasing-via-lease-income on a generic SIC, debt/assets<0.62 (0.41). The
     # debt/assets ratio is the valuation-side test; here we assert deepdive emits the flag that lets
     # valuation route to NAV DESPITE the sub-0.62 ratio. (debt 2.05B / assets 5.0B = 0.41.)
     _gbx_debt, _gbx_assets = 2_050_000_000.0, 5_000_000_000.0
@@ -2010,7 +2010,7 @@ def _selftest():
         "#8 crystal: a GBX-shape railcar lessor (lease income, debt/assets=0.41<0.62) must set "
         "lessor_asset_heavy True so valuation routes it to lease-fleet NAV"
     )
-    # Crystal: a NORMAL industrial — generic SIC, no lease income, modest PP&E (0.20), no rental
+    # Crystal: a NORMAL industrial, generic SIC, no lease income, modest PP&E (0.20), no rental
     # revenue -> must stay False (no false routing of ordinary manufacturers to NAV).
     _la_norm, _la_norm_d = _lessor_asset_heavy(
         "0000000001", "3559", _assets_big,
@@ -2021,7 +2021,7 @@ def _selftest():
         f"got {_la_norm} ({_la_norm_d})"
     )
     # Guard: high PP&E ratio WITHOUT rental revenue (a capital-intensive manufacturer/utility) must
-    # NOT fire route (c) — the ratio alone is not a leasing signal.
+    # NOT fire route (c), the ratio alone is not a leasing signal.
     _la_capint, _ = _lessor_asset_heavy(
         "0000000001", "3559", _assets_big,
         lease_income_present=False, ppe_fleet_val=4_000_000_000.0, rental_lease_revenue=False,
@@ -2058,7 +2058,7 @@ def _selftest():
             f"#11: a foreign filer's ifrs-full Revenue must recover via concept_series_with_ifrs, "
             f"got {_rev_ifrs}"
         )
-        # us-gaap WINS on a shared end-date — IFRS only fills gaps, never overwrites.
+        # us-gaap WINS on a shared end-date, IFRS only fills gaps, never overwrites.
         _dc._one_concept = _make_tax_stub(
             {"Revenues": 999.0}, {"Revenue": 1_234_000_000.0}
         )
@@ -2092,11 +2092,11 @@ def _selftest():
     print("  #11 IFRS recovery + foreign_filer_unvaluable: ifrs-full Revenue recovers (us-gaap "
           "wins ties); empty 20-F/40-F -> unvaluable True; recovered/domestic -> False  OK")
 
-    # --- PIT (backtest PIECE 1): concept_series_asof — filed<=asof, latest-filed-per-end-date ---
+    # --- PIT (backtest PIECE 1): concept_series_asof, filed<=asof, latest-filed-per-end-date ---
     # Synthetic companyconcept facts with DISTINCT "filed" dates exercise the as-of filter:
     #   * the asof variant drops facts filed AFTER asof (no look-ahead),
     #   * per period END it picks the LATEST-FILED fact <= asof (the disclosure an investor at asof
-    #     could have seen — a later restatement filed after asof is ignored),
+    #     could have seen, a later restatement filed after asof is ignored),
     #   * asof=None reproduces the LIVE default (all facts, last-in-API-order dedup).
     # We patch _dc.http_get to return the synthetic JSON so the REAL _one_concept asof logic runs
     # (patching _one_concept itself would bypass the very logic under test). Restored in finally.
@@ -2134,7 +2134,7 @@ def _selftest():
             f"(200), and DROP FY2024 (filed after asof), got {_by_end_a}"
         )
 
-        # (b) asof = 2023-06-30: FY2022 only the ORIGINAL (val=100) is visible — the restatement was
+        # (b) asof = 2023-06-30: FY2022 only the ORIGINAL (val=100) is visible, the restatement was
         #     filed 2024-03-01 (> asof). FY2023/FY2024 not yet filed. The latest-filed<=asof rule
         #     must therefore pick the ORIGINAL, not the (future) restated value.
         _asof_b = concept_series_asof("0000000001", "Revenues", "2023-06-30")
@@ -2157,7 +2157,7 @@ def _selftest():
             f"got {[(x['end'], x['val']) for x in _asof_d]}"
         )
 
-        # (e) EQUIVALENCE: asof=None must reproduce the LIVE default — all four facts visible,
+        # (e) EQUIVALENCE: asof=None must reproduce the LIVE default, all four facts visible,
         #     last-in-API-order dedup (FY2022 -> the SECOND/restated 110). This is the byte-identical
         #     invariant the live path must preserve under the additive PIT change.
         _live = concept_series("0000000001", "Revenues", asof=None)
@@ -2182,13 +2182,13 @@ def _selftest():
         ], "PIT(f): the same undated fact must be KEPT in the live default path (asof=None)"
 
         # (g) VALUE-CHANGING restatement no-leak (the real SIGA Assets 2014-12-31 shape: a later
-        #     filing carries a DIFFERENT value for the same period end — 166.4M originally, restated
+        #     filing carries a DIFFERENT value for the same period end, 166.4M originally, restated
         #     DOWN to 160.7M in a filing ~1y later). Here the original (1000) and restatement (900)
         #     differ, so the as-of boundary is load-bearing: asof BEFORE the restatement must return
         #     the ORIGINAL value and the restated (lower) value must NOT leak across the boundary;
         #     asof ON/AFTER it must adopt the restated value (latest-filed<=asof). This isolates the
         #     `filed >= prev["_filed"]` selection in a way case (a)'s 100->110 (whose 110 is also the
-        #     live result) cannot — a strict/inclusive off-by-one on the filed compare would fail it.
+        #     live result) cannot, a strict/inclusive off-by-one on the filed compare would fail it.
         _restate_payload = {"units": {"USD": [
             {"end": "2014-12-31", "val": 1000, "fy": 2014, "filed": "2015-03-06"},   # original
             {"end": "2014-12-31", "val": 900,  "fy": 2014, "filed": "2016-03-04"},   # restated DOWN
@@ -2211,7 +2211,7 @@ def _selftest():
     print("  PIT concept_series_asof: filed<=asof + latest-filed-per-end-date (drops look-ahead "
           "& future restatements); asof=None == live default byte-identical  OK")
 
-    # --- FIX 1: derived.asof_max_filing_date — max "filed" across as-of pulls (+ tenk) <= asof ---
+    # --- FIX 1: derived.asof_max_filing_date, max "filed" across as-of pulls (+ tenk) <= asof ---
     # The look-ahead audit is VACUOUS unless the as-of deepdive surfaces the filing dates it used.
     # _one_concept records the max "filed" of the facts it KEEPS (filed<=asof, latest-filed-per-end)
     # into a module accumulator; pull() resets it before the cascade and reads it back, combined with
@@ -2268,7 +2268,7 @@ def _selftest():
             f"FIX1(a): accumulator across both pulls must be the global max kept filed 2024-04-10, "
             f"got {get_asof_max_filed()}"
         )
-        # By construction the recorded max is <= asof — the look-ahead audit invariant.
+        # By construction the recorded max is <= asof, the look-ahead audit invariant.
         assert get_asof_max_filed() <= "2024-06-30", "FIX1(a): recorded max filed must be <= asof"
 
         # (b) the future-filed FY2024 fact (filed 2025-03-01 > asof) must NOT contaminate the max.
@@ -2285,7 +2285,7 @@ def _selftest():
             f"got series={_none} max={get_asof_max_filed()}"
         )
 
-        # (d) the LIVE default (asof=None) must NEVER record — the accumulator stays None so the
+        # (d) the LIVE default (asof=None) must NEVER record, the accumulator stays None so the
         #     emit-gate leaves derived.asof_max_filing_date absent (byte-identical live default).
         _dc.reset_asof_filed_tracker()
         _live = concept_series("0000000001", "Revenues", asof=None)
@@ -2422,7 +2422,7 @@ def main():
             cik = str(rec.get("cik", ""))
             band = rec.get("band", "")
 
-            # C3 — band disambiguation:
+            # C3, band disambiguation:
             #   "deep"    = mktcap < market_cap_max  → PROCESS
             #   "watch"   = market_cap_max..watch_band_max → SKIP (surfaced separately)
             #   "large"   = > watch_band_max → SKIP (out of scope)
@@ -2436,7 +2436,7 @@ def main():
                 )
                 continue
 
-            # A1 — CIK-first path: ticker-less pre-listing spinoffs
+            # A1, CIK-first path: ticker-less pre-listing spinoffs
             if not ticker and not cik:
                 print(
                     f"  [warn] skipping record {i}: both ticker and cik empty",

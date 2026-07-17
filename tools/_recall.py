@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
-# P8 — recall@gold: measure the recall FLOOR against hand-built true-member lists.
+# P8, recall@gold: measure the recall FLOOR against hand-built true-member lists.
 # ---------------------------------------------------------------------------
 # filter_by_sic owns the SIC reverse-recall (the dedicated-SIC floor) and discover
 # owns the FTS keyword recall; neither one MEASURES recall. P8's missing half is the
@@ -28,15 +28,15 @@ from pathlib import Path
 # filter_by_sic.theme_sics), so "deathcare", "funeral_deathcare_2026" all resolve.
 #
 # Deathcare gold cohort (assessment §P8): the canonical public deathcare names. SCI/CSV
-# are the pure operators (SIC 7200 — caught by the SIC floor); MATW (3360 castings),
+# are the pure operators (SIC 7200, caught by the SIC floor); MATW (3360 castings),
 # HI (Hillenbrand, 3559), STON (StoneMor, 6553 cemeteries), SNFCA (6199 finance) are
-# cross-SIC by design — they are the residual FTS-only gap the SIC floor cannot reach,
+# cross-SIC by design, they are the residual FTS-only gap the SIC floor cannot reach,
 # which is exactly what recall@gold quantifies.
 THEME_GOLD: dict[str, list[str]] = {
     "deathcare": ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"],
     "funeral": ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"],
     "cemetery": ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"],
-    # Coverage-test gold cohorts (2026-06-20) — hand-curated public small/mid-cap members.
+    # Coverage-test gold cohorts (2026-06-20), hand-curated public small/mid-cap members.
     "water-utilities": ["YORW", "ARTNA", "MSEX", "GWRS", "CWCO", "PCYO", "SJW", "CWT", "AWR"],
     "railcar-leasing": ["GATX", "TRN", "GBX", "RAIL"],
     "regional-gaming": ["BYD", "RRR", "MCRI", "GDEN", "CNTY", "FLL", "ACEL"],
@@ -50,14 +50,14 @@ THEME_GOLD: dict[str, list[str]] = {
 FTS_TOP_HITS_CAP = 1000
 
 # P8 loss-stage taxonomy: where a gold true-member fell out of the funnel. recall@gold is the
-# headline NUMBER; the stage breakdown is the DIAGNOSIS — it attributes each gold member to the
+# headline NUMBER; the stage breakdown is the DIAGNOSIS, it attributes each gold member to the
 # exact pipeline stage that lost it (or kept it), so a low recall floor is actionable rather than
 # a single opaque ratio. Stages, in pipeline order:
-#   recalled_final  — survived the whole funnel into the final candidate set (a TRUE recall hit)
-#   sic_recovered   — FTS missed it but the SIC reverse-recall floor caught it (the P8 win)
-#   dropped_mktcap  — recalled, then dropped by the market-cap band filter (out of size scope)
-#   gated_out       — survived to deep-dive, then gated out (buy_ineligible / kill-flag)
-#   fts_missed      — never recalled by ANY channel and not recovered by SIC (the true leak)
+#   recalled_final, survived the whole funnel into the final candidate set (a TRUE recall hit)
+#   sic_recovered, FTS missed it but the SIC reverse-recall floor caught it (the P8 win)
+#   dropped_mktcap, recalled, then dropped by the market-cap band filter (out of size scope)
+#   gated_out, survived to deep-dive, then gated out (buy_ineligible / kill-flag)
+#   fts_missed, never recalled by ANY channel and not recovered by SIC (the true leak)
 # A gold member lands in exactly one stage. recalled_final ∪ sic_recovered are the recall hits;
 # the rest are the recall floor's residual leak, each with a cause attached.
 RECALL_STAGES = (
@@ -263,11 +263,11 @@ def _recall_set_from_candidate_files(paths: list[Path]) -> tuple[set[str], int, 
 
 
 # ---------------------------------------------------------------------------
-# P8 / v0.3.1 #6 — recall@gold against the UNIVERSE (raw FTS ∪ SIC-reverse), not candidates.
+# P8 / v0.3.1 #6, recall@gold against the UNIVERSE (raw FTS ∪ SIC-reverse), not candidates.
 # ---------------------------------------------------------------------------
 # The candidate JSON is the POST band/burn/liquidity set, so a gold member that WAS recalled
 # (present in the universe) but then size-capped / burn-rejected / mktcap-fetch-failed is absent
-# from it and the breakdown mislabels it `fts_missed` — under-crediting the SIC floor and the FTS
+# from it and the breakdown mislabels it `fts_missed`, under-crediting the SIC floor and the FTS
 # recall both. The fix: read the UNIVERSE CSV that discover.py emits (the raw recall set, every
 # FTS ∪ SIC-reverse hit BEFORE any size/liquidity filtering) so a gold member's loss is attributed
 # to its TRUE stage. At universe level deathcare reads 5/6 recalled (only delisted STON genuinely

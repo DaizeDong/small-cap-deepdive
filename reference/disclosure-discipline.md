@@ -1,19 +1,19 @@
-# Disclosure Discipline — Invariant C (Disciplines)
+# Disclosure Discipline, Invariant C (Disciplines)
 
 > The judgment layer's job is not to build the best story from the available data.
 > Its job is to stay disciplined enough that the data can falsify the story.
 > Every rule here is a structural defense against the known failure modes of LLM-based equity analysis.
 >
-> Violating any of these disciplines does not produce a "lower quality" report — it produces an invalid one.
+> Violating any of these disciplines does not produce a "lower quality" report, it produces an invalid one.
 > See `judgment-rubric.md` for the scoring template these disciplines govern.
 
 ---
 
-## Discipline 1 — Base Rate First
+## Discipline 1, Base Rate First
 
 **Rule:** Before writing any claim about a specific company, state the reference class and its empirical base rates.
 
-**Why:** LLMs are optimized to generate coherent, plausible narratives. Given financial data about any company, an unconstrained LLM will construct a plausible growth story — even for companies that are overwhelmingly likely to fail. Base rates are the prior that must be updated by evidence, not replaced by story.
+**Why:** LLMs are optimized to generate coherent, plausible narratives. Given financial data about any company, an unconstrained LLM will construct a plausible growth story, even for companies that are overwhelmingly likely to fail. Base rates are the prior that must be updated by evidence, not replaced by story.
 
 **Implementation:**
 - Choose the most specific reference class that describes this company: "pre-revenue micro-cap with AI exposure," "cash-flow-positive small-cap industrial," "de-SPAC with net cash," etc.
@@ -21,13 +21,13 @@
 - From that prior, work toward the specific company using Tier-weighted evidence only
 - If evidence is insufficient to move the prior materially, default to the prior
 
-**Example anchor (acceptable):** "Reference class: pre-revenue micro-cap software company with AI positioning. Base rates: approximately 60–70% of companies in this class fail to achieve sustainable revenue within 5 years. This prior requires T1 evidence of customer traction before moving the rating above WATCH."
+**Example anchor (acceptable):** "Reference class: pre-revenue micro-cap software company with AI positioning. Base rates: approximately 60 to 70% of companies in this class fail to achieve sustainable revenue within 5 years. This prior requires T1 evidence of customer traction before moving the rating above WATCH."
 
 **Example anchor (unacceptable):** Starting the report with the growth narrative and later noting "risks include competition and execution." This is story-first, base-rate-never.
 
 ---
 
-## Discipline 2 — Forced Disconfirmation Search
+## Discipline 2, Forced Disconfirmation Search
 
 **Rule:** Before synthesizing a conclusion, run a dedicated adversarial search for negative evidence.
 
@@ -48,25 +48,25 @@
 
 **Not acceptable:** Omitting this section. Not acceptable: claiming the search was run without stating what query was used and what was returned.
 
-**Why:** LLMs exhibit confirmation bias — they tend to search for evidence consistent with an emerging thesis. The forced adversarial search structurally breaks this by requiring a dedicated contrary-evidence pass before synthesis begins.
+**Why:** LLMs exhibit confirmation bias, they tend to search for evidence consistent with an emerging thesis. The forced adversarial search structurally breaks this by requiring a dedicated contrary-evidence pass before synthesis begins.
 
 ---
 
-## Discipline 3 — Halo De-Bias (Management Dimension)
+## Discipline 3, Halo De-Bias (Management Dimension)
 
 **Rule:** Management quality assessment must use only evidence that is independent of the company's stock price performance.
 
-**The halo effect (Rosenzweig):** When a company performs well, all attributes of its leadership are retrospectively rated positively — "visionary," "execution-focused," "capital-disciplined." When it performs badly, the same leaders are "arrogant," "overextended," "distracted." The underlying leader did not change; only the observed outcome changed. LLMs trained on financial text have absorbed this pattern deeply — they will systematically reproduce halo bias when asked to assess management quality.
+**The halo effect (Rosenzweig):** When a company performs well, all attributes of its leadership are retrospectively rated positively, "visionary," "execution-focused," "capital-disciplined." When it performs badly, the same leaders are "arrogant," "overextended," "distracted." The underlying leader did not change; only the observed outcome changed. LLMs trained on financial text have absorbed this pattern deeply, they will systematically reproduce halo bias when asked to assess management quality.
 
 **Permitted evidence for management scoring:**
 - Form 4 insider trades: open-market purchases at market prices (strongest buy signal); cluster selling during secondary offerings (strong sell signal)
-- Historical guidance vs. actual results: last 4–6 quarters, using 10-K/10-Q filings to verify. Over-promising pattern = negative
+- Historical guidance vs. actual results: last 4 to 6 quarters, using 10-K/10-Q filings to verify. Over-promising pattern = negative
 - CEO/founder track record: what happened to the prior company they led? Search SEC EDGAR for their prior public company positions
 - Compensation structure (DEF 14A): base salary vs. company cash burn; performance criteria for equity awards
-- Capital allocation choices: buybacks, M&A, dividends — funded by cash flow or by dilutive offerings?
+- Capital allocation choices: buybacks, M&A, dividends, funded by cash flow or by dilutive offerings?
 
 **Prohibited evidence:**
-- "The CEO has a track record of building great companies" (circular — stock performance is the signal)
+- "The CEO has a track record of building great companies" (circular, stock performance is the signal)
 - Any quote from a press release, conference presentation, or media interview about the CEO's vision or strategy
 - LinkedIn recommendations or employee reviews
 - Any general impression of "strong management team" not traced to a specific measurable action
@@ -75,7 +75,7 @@
 
 ---
 
-## Discipline 4 — Evidence Tier Grading
+## Discipline 4, Evidence Tier Grading
 
 **Rule:** Every load-bearing claim must be tagged with its evidence tier. A claim without a tier tag is inadmissible as a scoring basis.
 
@@ -87,11 +87,11 @@
 
 **Hard rule from `judgment-rubric.md`:** A BUY rating cannot rest on T3 evidence. If the primary positive claim is "management says revenue will double" (T3), the rating must be WATCH or AVOID until T1/T2 corroboration exists.
 
-**T3 handling:** When T3 evidence is the only source for a claim, note it explicitly: "(T3 only — not load-bearing; requires corroboration)" rather than silently downweighting.
+**T3 handling:** When T3 evidence is the only source for a claim, note it explicitly: "(T3 only, not load-bearing; requires corroboration)" rather than silently downweighting.
 
 ---
 
-## Discipline 5 — Falsifiable Long and Short Arguments with Triggers
+## Discipline 5, Falsifiable Long and Short Arguments with Triggers
 
 **Rule:** Every bull and bear argument must be stated as a falsifiable proposition with an explicit trigger that would overturn it.
 
@@ -115,11 +115,11 @@ Falsification trigger: If OCF does not reach >$0 by Q3 2026 earnings, the bull c
 
 ---
 
-## Discipline 6 — Pre-Mortem
+## Discipline 6, Pre-Mortem
 
 **Rule:** Every report must include a section titled "Pre-mortem: most likely path to -80%."
 
-**Procedure:** Assume the position was taken, and 18 months later the stock is down 80%. Work backward: what happened? This is not a list of risks — it is a narrative of the most plausible specific failure sequence.
+**Procedure:** Assume the position was taken, and 18 months later the stock is down 80%. Work backward: what happened? This is not a list of risks, it is a narrative of the most plausible specific failure sequence.
 
 **Why it works (Gary Klein, decision research):** Pre-mortem forces the analyst to inhabit the failure scenario imaginatively before committing to the position. This breaks the commitment bias that builds during analysis. It also forces identification of the single most fragile assumption in the bull case.
 
@@ -128,11 +128,11 @@ Falsification trigger: If OCF does not reach >$0 by Q3 2026 earnings, the bull c
 - Traces from a plausible triggering event to the -80% outcome
 - Identifies which bull-case assumption was wrong and why it seemed credible at the time
 
-**Example (acceptable):** "Customer concentration was flagged as a risk. The single customer accounting for 38% of revenue did not renew in Q2 2026 — revenue dropped 35% in one quarter. The company drew on its credit facility to fund operations, which triggered a covenant breach. The bank demanded full repayment. Unable to refinance, the company announced a large dilutive offering at -60% to current price. Stock fell further as existing holders sold to avoid further dilution."
+**Example (acceptable):** "Customer concentration was flagged as a risk. The single customer accounting for 38% of revenue did not renew in Q2 2026, revenue dropped 35% in one quarter. The company drew on its credit facility to fund operations, which triggered a covenant breach. The bank demanded full repayment. Unable to refinance, the company announced a large dilutive offering at -60% to current price. Stock fell further as existing holders sold to avoid further dilution."
 
 ---
 
-## Discipline 7 — Kill-Flag Mechanical Count (No Narrative Override)
+## Discipline 7, Kill-Flag Mechanical Count (No Narrative Override)
 
 **Rule:** Kill-flag counts come from `cheap_pass.py` / `deepdive_data.py` output. The judgment layer counts them; it does not override them with qualitative reasoning.
 
@@ -151,7 +151,7 @@ Falsification trigger: If OCF does not reach >$0 by Q3 2026 earnings, the bull c
 
 ---
 
-## Discipline 8 — Machine Data May Be Stale — Verify with WebSearch
+## Discipline 8, Machine Data May Be Stale, Verify with WebSearch
 
 **Rule:** Mechanical data from `deepdive_data.py` has a retrieval date. Financial conditions can change rapidly. Before relying on any field for a hard rating decision, check whether material events have occurred since the data was pulled.
 
@@ -169,7 +169,7 @@ Falsification trigger: If OCF does not reach >$0 by Q3 2026 earnings, the bull c
 
 ---
 
-## Discipline 9 — Honest Data-Gap Acknowledgment
+## Discipline 9, Honest Data-Gap Acknowledgment
 
 **Rule:** Every report must explicitly list data that was sought but not obtained, distinguishing between "genuinely missing" and "means something positive."
 
@@ -177,10 +177,10 @@ Falsification trigger: If OCF does not reach >$0 by Q3 2026 earnings, the bull c
 
 | Field value | Meaning | What to write |
 |---|---|---|
-| `runway = null`, `runway_note = "ocf_positive"` | Company is cash-flow positive; no burn rate to compute | "Runway not computed — OCF is positive, which indicates the company is not burning cash. Verified via OCF trend." |
+| `runway = null`, `runway_note = "ocf_positive"` | Company is cash-flow positive; no burn rate to compute | "Runway not computed, OCF is positive, which indicates the company is not burning cash. Verified via OCF trend." |
 | `runway = null`, `runway_note = "insufficient_data"` | Data genuinely missing | "Runway could not be computed due to missing cash flow data. This is a genuine data gap." |
-| `insider_trades = None` | openinsider returned no Form 4 data | "Insider trade data not retrieved. Flagged as unverified — treat management dimension as data-limited." |
-| `revenue_growth_pct` from stale XBRL | May not reflect current trajectory | "Revenue growth computed from FY[X]–FY[Y] data. Verified against 10-K MD&A: [result]." |
+| `insider_trades = None` | openinsider returned no Form 4 data | "Insider trade data not retrieved. Flagged as unverified, treat management dimension as data-limited." |
+| `revenue_growth_pct` from stale XBRL | May not reflect current trajectory | "Revenue growth computed from FY[X],FY[Y] data. Verified against 10-K MD&A: [result]." |
 
 **The obligation:** Section 8 of the output template ("Known gaps and unverified items") must be populated. Writing "none" is acceptable only if all fields were verified against T1 sources.
 
@@ -188,7 +188,7 @@ Falsification trigger: If OCF does not reach >$0 by Q3 2026 earnings, the bull c
 
 ## Cross-references
 
-- `judgment-rubric.md` — the scorecard, output template, and hard-rules that these disciplines enforce
-- `cognitive-priors.md` — the base-rate prior table used in Discipline 1
-- `mechanical-checks.md` — the data-layer rules that govern what fields the judgment layer receives, and what `null` values mean
-- `data-sources.md` — WebSearch and other verification tools available for Disciplines 2, 8
+- `judgment-rubric.md`, the scorecard, output template, and hard-rules that these disciplines enforce
+- `cognitive-priors.md`, the base-rate prior table used in Discipline 1
+- `mechanical-checks.md`, the data-layer rules that govern what fields the judgment layer receives, and what `null` values mean
+- `data-sources.md`, WebSearch and other verification tools available for Disciplines 2, 8

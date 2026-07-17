@@ -59,7 +59,7 @@ from filter_by_sic import theme_sics, sic_reverse_recall
 
 # Periodic ("was a filer") forms that establish theme-filer status as-of T. A
 # company is a theme filer as-of T iff it filed one of these on/before T. Foreign
-# annual reports (20-F/40-F) count too — they are the foreign-filer analogue of the
+# annual reports (20-F/40-F) count too, they are the foreign-filer analogue of the
 # 10-K and a foreign theme member is still a member (it just carries abstain
 # downstream). Amendments (…/A) count as well (still a periodic disclosure event).
 PERIODIC_FORMS = ("10-K", "10-Q", "20-F", "40-F")
@@ -70,7 +70,7 @@ _SUBMISSIONS_SHARD = "https://data.sec.gov/submissions/{name}"
 # trading symbol an entity disclosed on its periodic filings. It is survivorship-
 # safe: a name that listed in 2019 and delisted in 2021 STILL carries its
 # 2019/2020 TradingSymbol fact in EDGAR (filings are immutable), so we can resolve
-# the symbol an investor at as-of T would have traded under — even for names that
+# the symbol an investor at as-of T would have traded under, even for names that
 # no longer exist today. This is exactly what `submissions.tickers` (the CURRENT
 # ticker list) cannot give us for delisted names (it goes empty after delisting).
 _DEI_CONCEPT = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik10}/dei/{concept}.json"
@@ -273,7 +273,7 @@ def cik_periodic_asof(cik: str | int, asof: str, fetch=None,
 
     # Older filings spill into "files" overflow shards (each a {form,filingDate,...}
     # block). For early as-of dates (e.g. 2020) the qualifying first 10-K may live
-    # ONLY in a shard, so we must read them — otherwise we'd wrongly exclude a
+    # ONLY in a shard, so we must read them, otherwise we'd wrongly exclude a
     # long-tenured filer. Best-effort: a shard fetch failure is skipped, not fatal.
     for shard in (filings.get("files") or []):
         sname = str(shard.get("name", "") or "")
@@ -544,7 +544,7 @@ def _selftest() -> None:
         return _Resp({}, status=404)
     assert cik_periodic_asof("0000666666", asof, fetch=_fetch_404) is None, "404 -> None"
 
-    # ----- FIX 2: _latest_string_fact_le_asof — PIT string-fact date logic ------
+    # ----- FIX 2: _latest_string_fact_le_asof, PIT string-fact date logic ------
     # dei:TradingSymbol facts live under an arbitrary unit key; iterate all lists.
     # Pick the LATEST-FILED fact with filed<=asof; ignore facts filed AFTER asof.
     units_ts = {
@@ -570,7 +570,7 @@ def _selftest() -> None:
     assert _latest_string_fact_le_asof({}, asof) is None, "empty units -> None"
     assert _latest_string_fact_le_asof("not a dict", asof) is None, "malformed units guard"
 
-    # ----- FIX 2: cik_trading_symbol_asof — PIT ticker resolution (mock fetch) --
+    # ----- FIX 2: cik_trading_symbol_asof, PIT ticker resolution (mock fetch) --
     # (G1) PRIMARY: a CIK with a dei:TradingSymbol fact filed<=asof resolves to that
     #      symbol (survivorship-safe; persists even for later-delisted names).
     ts_payload = {"units": {"USD": [

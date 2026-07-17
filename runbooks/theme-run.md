@@ -1,6 +1,6 @@
 # Runbook: Theme Run
 
-> Entry mode 1 — `theme <主题>`. Use when you have an investment theme and want a ranked
+> Entry mode 1, `theme <主题>`. Use when you have an investment theme and want a ranked
 > shortlist of small-cap pure-plays from the full SEC-filing universe.
 
 ---
@@ -24,7 +24,7 @@ Open `~/.small-cap-deepdive-config/config.json` (the private config dir, never t
 ```
 
 EDGAR requires a valid `User-Agent` header on every request. Omission causes 403 errors.
-This is the only required field — all other keys have defaults.
+This is the only required field, all other keys have defaults.
 
 ---
 
@@ -48,12 +48,12 @@ The easiest way to run the full mechanical pipeline (discover → cheap_pass →
 python tools/run_theme.py --theme "railcar,railcar leasing" --slug railcar
 ```
 
-This runs Steps 1–3 below automatically and prints the "Next steps" handoff.
+This runs Steps 1 to 3 below automatically and prints the "Next steps" handoff.
 Use `--micro` flag to apply the micro-cap ($500M) ceiling instead of the default small-cap ($2B).
 
 ---
 
-## Step 1 — Universe Enumeration
+## Step 1, Universe Enumeration
 
 ```bash
 python tools/discover.py --theme "railcar leasing" --out-slug railcar
@@ -76,17 +76,17 @@ Expected output:
 清单: reports/smallcap/universe_railcar_<date>.csv
 ```
 
-**What to expect:** Over-recall is intentional. 150–300 candidates for a niche theme;
+**What to expect:** Over-recall is intentional. 150 to 300 candidates for a niche theme;
 500+ for a broad theme like "AI infrastructure". The precision gate below clears the field.
 
-**Token magnitude:** Negligible — pure HTTP to `efts.sec.gov`, no LLM calls.
+**Token magnitude:** Negligible, pure HTTP to `efts.sec.gov`, no LLM calls.
 
 **If zero hits:** FTS keyword is too restrictive. Try shorter terms (`railcar` instead of
 `railcar leasing`), or two separate runs on each word, then union the results.
 
 ---
 
-## Step 2 — Gate 1: SIC Coarse Exclusion
+## Step 2, Gate 1: SIC Coarse Exclusion
 
 Gate 1 is applied automatically by `run_theme.py` (via `filter_by_sic.sic_ok`).
 `filter_by_sic.py` is a library module, not a standalone pipeline step.
@@ -98,13 +98,13 @@ python tools/filter_by_sic.py --selftest
 ```
 
 **What it does:** Drops companies whose SIC code definitively places them outside plausible
-theme membership. Companies with no SIC on file are kept, not dropped — do not over-exclude.
+theme membership. Companies with no SIC on file are kept, not dropped, do not over-exclude.
 
-**Token magnitude:** Negligible — deterministic lookup against SEC company data.
+**Token magnitude:** Negligible, deterministic lookup against SEC company data.
 
 ---
 
-## Step 3 — Mechanical De-Risk (cheap_pass)
+## Step 3, Mechanical De-Risk (cheap_pass)
 
 ```bash
 python tools/cheap_pass.py --universe reports/smallcap/universe_railcar_<date>.csv \
@@ -138,7 +138,7 @@ Expected output:
 
 ---
 
-## Step 4 — Gate 2: LLM Theme-Fit Classification
+## Step 4, Gate 2: LLM Theme-Fit Classification
 
 After `run_theme.py` writes `reports/smallcap/candidates_<slug>.json`, run the theme-fit gate.
 
@@ -174,8 +174,8 @@ Gate 2 complete: 34 evaluated
 Retained for deep-dive: 22 tickers
 ```
 
-**Token magnitude:** ~800–1 200 tokens per candidate (10-K business section read + classification).
-For 34 candidates expect ~30k–40k tokens of input, ~4k output. Budget ~$0.05 at Sonnet pricing.
+**Token magnitude:** ~800 to 1 200 tokens per candidate (10-K business section read + classification).
+For 34 candidates expect ~30k to 40k tokens of input, ~4k output. Budget ~$0.05 at Sonnet pricing.
 
 **Why this gate is mandatory:** The canonical failure: keyword `refractory` for a railcar insulation
 theme swept the entire oncology biotech sector (zero railcar companies among them). See
@@ -183,7 +183,7 @@ theme swept the entire oncology biotech sector (zero railcar companies among the
 
 ---
 
-## Step 5 — Deep-Dive Data Pull
+## Step 5, Deep-Dive Data Pull
 
 ```bash
 python tools/deepdive_data.py --candidates reports/smallcap/candidates_railcar.json
@@ -200,12 +200,12 @@ Output: `reports/smallcap/deepdive_<ticker>_<date>.json` (one file per ticker)
 **What it pulls:** Revenue/OCF/EV series (XBRL), Form 4 insider trades (12-month net
 buy/sell), S-3 / ATM shelf status, dilution history, 8-K material events.
 
-**Token magnitude:** Negligible — deterministic EDGAR + yfinance fetch, no LLM calls.
-Runtime 5–20 minutes for 22 tickers (EDGAR rate discipline: ~150ms between requests).
+**Token magnitude:** Negligible, deterministic EDGAR + yfinance fetch, no LLM calls.
+Runtime 5 to 20 minutes for 22 tickers (EDGAR rate discipline: ~150ms between requests).
 
 ---
 
-## Step 6 — Deep-Dive Judgment (per candidate)
+## Step 6, Deep-Dive Judgment (per candidate)
 
 In your Claude Code session:
 
@@ -226,12 +226,12 @@ Each Agent must:
 node workflows/deepdive-fanout.js candidates_railcar.json
 ```
 
-**Token magnitude:** ~8k–15k tokens per candidate (data read + rubric application +
-disconfirmation search). For 22 candidates: ~180k–330k tokens total. Budget ~$0.20–0.35.
+**Token magnitude:** ~8k to 15k tokens per candidate (data read + rubric application +
+disconfirmation search). For 22 candidates: ~180k to 330k tokens total. Budget ~$0.20 to 0.35.
 
 ---
 
-## Step 7 — Rank
+## Step 7, Rank
 
 ```bash
 python tools/rank.py --slug railcar
@@ -239,7 +239,7 @@ python tools/rank.py --slug railcar
 
 Expected output: `reports/smallcap/RANKING.md`
 
-**Token magnitude:** Negligible — deterministic sort + Markdown table generation.
+**Token magnitude:** Negligible, deterministic sort + Markdown table generation.
 
 ---
 
@@ -247,13 +247,13 @@ Expected output: `reports/smallcap/RANKING.md`
 
 | Phase | Time | Tokens | Cost (est.) |
 |---|---|---|---|
-| discover + SIC filter | 3–8 min | ~0 LLM | $0.00 |
-| theme-fit gate (Gate 2) | 15–40 min | ~40k | ~$0.05 |
-| cheap_pass (deterministic) | 8–25 min | ~0 LLM | $0.00 |
-| deepdive_data pull | 10–30 min | ~0 LLM | $0.00 |
-| deep-dive judgment | 20–60 min | ~200k | ~$0.20 |
+| discover + SIC filter | 3 to 8 min | ~0 LLM | $0.00 |
+| theme-fit gate (Gate 2) | 15 to 40 min | ~40k | ~$0.05 |
+| cheap_pass (deterministic) | 8 to 25 min | ~0 LLM | $0.00 |
+| deepdive_data pull | 10 to 30 min | ~0 LLM | $0.00 |
+| deep-dive judgment | 20 to 60 min | ~200k | ~$0.20 |
 | rank | <1 min | ~0 LLM | $0.00 |
-| **Total** | **~1–3 hr** | **~240k** | **~$0.25** |
+| **Total** | **~1 to 3 hr** | **~240k** | **~$0.25** |
 
 Costs shown at Claude Sonnet input-token pricing. Actual cost depends on candidate count
 and filing length. Large themes (500+ raw candidates) scale linearly with Gate 2 + judgment.
@@ -262,11 +262,11 @@ and filing length. Large themes (500+ raw candidates) scale linearly with Gate 2
 
 ## Interpreting the Output
 
-- **Score 4–5:** Survived all gates, real theme exposure, no structural red flags. Merits full
-  human diligence — this is the output the tool is designed to surface.
+- **Score 4 to 5:** Survived all gates, real theme exposure, no structural red flags. Merits full
+  human diligence, this is the output the tool is designed to surface.
 - **Score 3:** Borderline. Check dimension breakdown; often one weak dimension (e.g., insider
   selling) dragging an otherwise solid profile.
-- **Score 1–2:** Hard-rule ceiling applied (dilution, weakness, weak fundamentals). Do not buy
+- **Score 1 to 2:** Hard-rule ceiling applied (dilution, weakness, weak fundamentals). Do not buy
   without understanding and explicitly accepting the specific flag.
 - **0-buy is a feature, not a bug.** If a theme produces zero score-4+ candidates, the tool is
   telling you the theme's small-cap universe does not have clean industrial beneficiaries at this
