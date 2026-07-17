@@ -55,13 +55,13 @@ def read_text_utf8(path: str | Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# P-C — path-doubling guard. The uranium run wrote valuation_*.json to
+# P-C, path-doubling guard. The uranium run wrote valuation_*.json to
 # reports/smallcap/<run>/reports/smallcap/<run>/ because a run-relative --out/SMALLCAP_RUN
 # was prefixed twice across invocation styles. Two defenses:
-#   (1) collapse_run_path() — idempotent normalization of a run dir: if a path already ends
+#   (1) collapse_run_path(), idempotent normalization of a run dir: if a path already ends
 #       with the run-dir tail twice (.../reports/smallcap/<run>/reports/smallcap/<run>),
 #       collapse to a single occurrence so re-resolution never doubles.
-#   (2) repair_nested_run_tree() — if a finalized run dir contains a nested
+#   (2) repair_nested_run_tree(), if a finalized run dir contains a nested
 #       reports/smallcap/.../reports/smallcap/... subtree (the doubled artifacts), lift the
 #       leaf files up into the real run dir and prune the empty nested skeleton.
 # ---------------------------------------------------------------------------
@@ -511,7 +511,7 @@ def main() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Selftest — synthetic run dir -> reports complete + verdicts emitted + parse round-trips.
+# Selftest, synthetic run dir -> reports complete + verdicts emitted + parse round-trips.
 # ---------------------------------------------------------------------------
 
 def _selftest() -> None:
@@ -646,7 +646,7 @@ def _selftest() -> None:
         assert missing == {"MGPI"}, f"without gate2, MGPI is missing again: {missing}"
 
         # A5: the misrecall verdict is read under alternate field spellings + an explicit
-        # retained=False boolean — a synthetic gate2_results.json with retained vs gated rows
+        # retained=False boolean, a synthetic gate2_results.json with retained vs gated rows
         # asserting the gated name is NOT counted missing (kills the spurious "N missing" warning
         # and the manual re-band / --allow-missing step). SIGA retained, MGPI gated by each shape.
         for gated_row in (
@@ -668,7 +668,7 @@ def _selftest() -> None:
             # And a retained deep-band name without a report IS still missing (no over-resolution).
             assert "SIGA" not in gate2_misrecall_tickers(rd), \
                 f"A5: retained SIGA must not be mis-classified as gated (via '{spelling}')"
-        # A5: the spec's nominal shape — dict-wrapped {"results": [...]} with theme_fit misrecall.
+        # A5: the spec's nominal shape, dict-wrapped {"results": [...]} with theme_fit misrecall.
         (rd / "gate2_results.json").write_text(json.dumps(
             {"theme": "tst", "results": [
                 {"ticker": "SIGA", "theme_fit": "retained", "band": "deep"},
@@ -679,7 +679,7 @@ def _selftest() -> None:
         assert missing == set(), f"A5: dict-wrapped gated MGPI not missing: {missing}"
         (rd / "gate2_results.json").unlink()
 
-        # P-F representation #2: a candidates_gate2_survivors.json listing only the survivors —
+        # P-F representation #2: a candidates_gate2_survivors.json listing only the survivors ,
         # deep-band names NOT among survivors are gated-out misrecall (uranium run shape, which
         # never tagged theme_fit). SIGA survives; MGPI absent => gated, not missing.
         (rd / "candidates_gate2_survivors.json").write_text(json.dumps(

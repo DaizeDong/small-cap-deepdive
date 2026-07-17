@@ -37,9 +37,9 @@ from datetime import datetime, timezone, timedelta
 
 from _common import http_get
 
-# EDGAR full-text search (EFTS) — same endpoint discover_events.py uses for 10-12B.
+# EDGAR full-text search (EFTS), same endpoint discover_events.py uses for 10-12B.
 # Filtered by SUBJECT cik + forms=SC 13D,SC 13G enumerates ownership filings against the
-# company. (Overlaps P11's 13D catalyst category — same enumeration endpoint, by design.)
+# company. (Overlaps P11's 13D catalyst category, same enumeration endpoint, by design.)
 EFTS = "https://efts.sec.gov/LATEST/search-index"
 
 # FINRA equity short-interest CSV (bi-monthly, free, no key). Best-effort: if unreachable
@@ -49,7 +49,7 @@ _FINRA_SI = "https://cdn.finra.org/equity/regsho/daily"  # placeholder host; gua
 
 
 # ---------------------------------------------------------------------------
-# P16 — Fundamental-vs-Price divergence
+# P16, Fundamental-vs-Price divergence
 # ---------------------------------------------------------------------------
 
 def _price_returns(ticker: str, price_fn=None) -> dict:
@@ -188,7 +188,7 @@ def compute_price_divergence(deepdive_derived: dict, ticker: str, price_fn=None)
 
 
 # ---------------------------------------------------------------------------
-# P17 — Ownership / short-interest positioning
+# P17, Ownership / short-interest positioning
 # ---------------------------------------------------------------------------
 
 def _recent_13d_13g(cik, lookback_days: int = 540, http_fn=http_get) -> list[dict]:
@@ -393,7 +393,7 @@ def _selftest() -> None:
     # ---- P16: aligned (both up) ----
     label, _ = _divergence_label(1, 1.1, False, 0.30, 0.40)
     assert label == "aligned", f"P16: improving + up must => aligned, got {label}"
-    # ---- P16: aligned (both down) — the 4th contract case (declining + price down) ----
+    # ---- P16: aligned (both down), the 4th contract case (declining + price down) ----
     label_dd, _ = _divergence_label(-1, 0.8, True, -0.10, -0.20)
     assert label_dd == "aligned", f"P16: declining + price down must => aligned, got {label_dd}"
     # ---- P16: melting via rev_slope<0 ONLY (no decline_flag) + price up ----
@@ -403,7 +403,7 @@ def _selftest() -> None:
     # ---- P16: unclear when no price data ----
     label_u, _ = _divergence_label(1, 1.1, False, None, None)
     assert label_u == "unclear", f"P16: no price data must => unclear, got {label_u}"
-    # ---- P16: borderline — exactly +5% counts as up (>= threshold) ----
+    # ---- P16: borderline, exactly +5% counts as up (>= threshold) ----
     label_b, _ = _divergence_label(1, 1.1, False, 0.05, 0.04)
     assert label_b == "aligned", f"P16: +5% is up (>= threshold) => aligned, got {label_b}"
     print("  P16: aligned(both up/both down) / melting-via-slope / unclear / threshold branches  OK")

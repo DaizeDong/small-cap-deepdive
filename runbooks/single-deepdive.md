@@ -1,6 +1,6 @@
 # Runbook: Single-Ticker Deep-Dive
 
-> Entry mode 2 — `ticker <代码> [--theme X]`. Use when you have a specific company and want
+> Entry mode 2, `ticker <代码> [--theme X]`. Use when you have a specific company and want
 > a rigorous, falsifiable deep-dive report without running a full theme screen.
 
 This is the highest-frequency entry point. You know the ticker; you want to know if it is worth
@@ -21,7 +21,7 @@ cp reference/config.example.json \
 ```
 
 Set `"sec_user_agent"` to `"Your Name you@example.com"` in that file (the private config dir,
-never the repo — your identity is yours, and an in-tree copy is a leak waiting to be committed).
+never the repo, your identity is yours, and an in-tree copy is a leak waiting to be committed).
 EDGAR blocks requests with a missing or obviously fake User-Agent.
 
 Then open a run batch (start of every run) so outputs stay grouped and version-comparable:
@@ -34,10 +34,10 @@ export SMALLCAP_RUN=$(python tools/new_run.py --label <ticker>)   # e.g. --label
 
 ---
 
-## Step 1 — Mechanical De-Risk First
+## Step 1, Mechanical De-Risk First
 
 Always run `cheap_pass` before any qualitative work. If the company fails a hard kill-flag,
-stop — do not spend judgment budget on a structurally disqualified candidate.
+stop, do not spend judgment budget on a structurally disqualified candidate.
 
 ```bash
 python tools/cheap_pass.py --universe <any_universe_csv_containing_EGAN>
@@ -49,7 +49,7 @@ Or run the selftest to verify the tool works:
 python tools/cheap_pass.py --selftest
 ```
 
-Expected output — pass (no going-concern, no death spiral, no material weakness in latest 10-K):
+Expected output, pass (no going-concern, no death spiral, no material weakness in latest 10-K):
 
 ```
 [cheap_pass] EGAN (eGain Corp, CIK 1066194)
@@ -59,7 +59,7 @@ Expected output — pass (no going-concern, no death spiral, no material weaknes
 RESULT: PASS — proceed to deep-dive
 ```
 
-Expected output — eliminated:
+Expected output, eliminated:
 
 ```
 [cheap_pass] GATO
@@ -69,16 +69,16 @@ RESULT: ELIMINATED — do not deepdive
 ```
 
 **If eliminated:** Report the kill-flag and stop. The hard-rule is not an invitation to
-argue — it is a floor. A company with an auditor going-concern opinion has a >50% base-rate
+argue, it is a floor. A company with an auditor going-concern opinion has a >50% base-rate
 probability of either restructuring, being acquired at distressed valuation, or delisting
 within 24 months.
 
-**Token magnitude:** Negligible — deterministic EDGAR filing fetch and parse, no LLM calls.
-Runtime: 30–90 seconds.
+**Token magnitude:** Negligible, deterministic EDGAR filing fetch and parse, no LLM calls.
+Runtime: 30 to 90 seconds.
 
 ---
 
-## Step 2 — Data Pull
+## Step 2, Data Pull
 
 ```bash
 python tools/deepdive_data.py --ticker EGAN
@@ -111,12 +111,12 @@ Expected output:
 | Dilution history | Shares outstanding series from XBRL | |
 | 10-K text excerpt | edgartools (amendments=False) | risk_excerpt + kill-flag recheck |
 
-**Token magnitude:** Negligible — deterministic fetch, no LLM calls.
-Runtime: 2–8 minutes (EDGAR rate limit: ~150ms between requests).
+**Token magnitude:** Negligible, deterministic fetch, no LLM calls.
+Runtime: 2 to 8 minutes (EDGAR rate limit: ~150ms between requests).
 
 ---
 
-## Step 3 — Judgment Pass
+## Step 3, Judgment Pass
 
 In your Claude Code session, instruct the agent:
 
@@ -146,13 +146,13 @@ composite score, kill-flag detail, disconfirmation findings, and data gaps.
 node workflows/deepdive-fanout.js '[{"ticker":"EGAN","cik":"1066194","name":"eGain Corp","theme":"SaaS for regulated industries","horizon":"12-18M","theme_slug":"saas","mktcap":150000000,"health_score":75,"killflag_count":0}]'
 ```
 
-**Token magnitude:** ~8k–15k tokens per company.
+**Token magnitude:** ~8k to 15k tokens per company.
 
 Cost: <$0.02 per company at Sonnet pricing.
 
 ---
 
-## Step 4 — Reading the Output
+## Step 4, Reading the Output
 
 A well-formed single-company output follows the template from `reference/judgment-rubric.md`:
 
@@ -221,13 +221,13 @@ Assessment: credible — slight discount to peers
 
 ## Interpreting the Score
 
-**Score 4–5:** No structural red flags. Real business, real cash flow, insider alignment.
-This is what the tool exists to surface — a candidate worth actual human research time.
+**Score 4 to 5:** No structural red flags. Real business, real cash flow, insider alignment.
+This is what the tool exists to surface, a candidate worth actual human research time.
 
 **Score 3:** Borderline. One dimension is weak. Read the specific dimension note to decide
 if the weakness is temporary or structural. Do not infer "buy" from a 3.0 score.
 
-**Score 1–2:** Hard-rule ceiling in effect. A specific structural problem is capping the
+**Score 1 to 2:** Hard-rule ceiling in effect. A specific structural problem is capping the
 score. The report names it. Do not invest without independently resolving the named issue.
 
 **0 or eliminated:** The kill-flag fired in Step 1. Stop. Do not re-examine.

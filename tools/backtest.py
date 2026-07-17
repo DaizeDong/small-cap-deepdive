@@ -68,14 +68,14 @@ BUCKETS = (BUCKET_BUY, BUCKET_WATCH, BUCKET_AVOID, BUCKET_ABSTAIN)
 # names, so a wiped-out name (~ -100%) is firmly inside this set.
 BLOWUP_THRESHOLD = -0.40
 
-# Output location for per-cell JSON (spec §Architecture 4). Fixed under the repo root — deliberately
+# Output location for per-cell JSON (spec §Architecture 4). Fixed under the repo root, deliberately
 # NOT the active-run REPORTS dir, so a backtest cell never lands inside a live discovery run.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKTEST_DIR = _REPO_ROOT / "reports" / "smallcap" / "backtest"
 
 
 # ---------------------------------------------------------------------------
-# Bucketing — the BUY contract, expressed mechanically.
+# Bucketing, the BUY contract, expressed mechanically.
 # ---------------------------------------------------------------------------
 
 
@@ -154,7 +154,7 @@ def bucket_name(deep: dict, val: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Look-ahead audit — the validity guarantee (spec §Look-ahead controls).
+# Look-ahead audit, the validity guarantee (spec §Look-ahead controls).
 # ---------------------------------------------------------------------------
 
 
@@ -213,11 +213,11 @@ def look_ahead_audit(rows: list[dict], asof: str, benchmark: dict,
 
     n_observed = len(filing_dates)
     max_fd = max(filing_dates) if filing_dates else None
-    # THE look-ahead assertion. A filing observed after asof would be a leak — fail loud.
+    # THE look-ahead assertion. A filing observed after asof would be a leak, fail loud.
     assert max_fd is None or max_fd <= asof, (
         f"LOOK-AHEAD LEAK: max filing_date {max_fd} used in cell is AFTER asof {asof}")
     # NON-VACUITY assertion (bug B). A real cell that surfaced 0 filing dates proves nothing about
-    # look-ahead — the audit would pass vacuously. Demand at least one observed date.
+    # look-ahead, the audit would pass vacuously. Demand at least one observed date.
     if expect_dates:
         assert n_observed > 0, (
             "VACUOUS AUDIT: 0 filing dates observed across the cell — the look-ahead audit asserts "
@@ -321,7 +321,7 @@ def blowup_avoidance(rows: list[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# The harness — run one cell.
+# The harness, run one cell.
 # ---------------------------------------------------------------------------
 
 
@@ -344,7 +344,7 @@ def _process_name(entity: dict, asof: str, horizon: int,
         "filing_dates": [], "total_return": None, "forward_return": None,
     }
 
-    # 1. PIT deepdive pull (as_of=asof) — filings filed<=asof only.
+    # 1. PIT deepdive pull (as_of=asof), filings filed<=asof only.
     try:
         deep = pull_fn(ticker, cik, as_of=asof)
     except Exception as e:
@@ -468,7 +468,7 @@ def _write_cell(cell: dict) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Selftest — synthetic cell, fully injected (NO network).
+# Selftest, synthetic cell, fully injected (NO network).
 # ---------------------------------------------------------------------------
 
 
@@ -628,7 +628,7 @@ def _selftest() -> None:
 
     # ---- 4) look-ahead audit: NON-VACUOUS, reads derived.asof_max_filing_date (FIX 1) ----
     au = cell["look_ahead_audit"]
-    # Max comes from FORGN's asof_max_filing_date (2020-06-15), NOT its tenk date (2020-05-05) —
+    # Max comes from FORGN's asof_max_filing_date (2020-06-15), NOT its tenk date (2020-05-05) ,
     # proves the audit reads the FIX-1 field, the whole point of making the audit non-vacuous.
     assert au["max_filing_date"] == "2020-06-15", f"max filing date observed: {au['max_filing_date']}"
     assert au["max_filing_date"] <= asof and au["max_filing_date_le_asof"] is True, "audit passed"
@@ -691,7 +691,7 @@ def _selftest() -> None:
     # The shell still surfaces a filing date (filed<=asof) so the cell audit stays non-vacuous.
     DEEP3[""] = _deep("", "999", "2020-01-10")
     VAL3 = dict(VAL); VAL3[""] = _val("abstain", None, False, ["no_financials"])
-    RET3 = dict(RET)  # no entry for "" — but ticker-less names never call forward_fn.
+    RET3 = dict(RET)  # no entry for "", but ticker-less names never call forward_fn.
 
     def fake_universe3(theme, a):
         return universe3

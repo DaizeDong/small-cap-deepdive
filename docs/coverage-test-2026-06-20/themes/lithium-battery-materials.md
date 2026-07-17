@@ -1,4 +1,4 @@
-# Coverage Test — Lithium / Battery Materials (Materials)
+# Coverage Test, Lithium / Battery Materials (Materials)
 
 - **Run:** `2026-06-21_cov-lithium-battery-materials`
 - **Skill version:** v0.3.0 (commit `f12fef5`, dirty working tree)
@@ -6,7 +6,7 @@
 - **Sector:** Materials
 - **Keywords:** `lithium, battery materials, cathode anode`
 - **Code-path focus:** pre-revenue / `peak_contamination`
-- **Verdict (skeptical PM):** USABLE. Clean, defensible **0-BUY** outcome — the discipline layer behaved correctly on a cooling hot theme dominated by pre-revenue developers. No data-artifact BUYs to scrub.
+- **Verdict (skeptical PM):** USABLE. Clean, defensible **0-BUY** outcome, the discipline layer behaved correctly on a cooling hot theme dominated by pre-revenue developers. No data-artifact BUYs to scrub.
 
 ---
 
@@ -35,37 +35,37 @@ missing 0*. Zero silent skips, zero crashes.
 
 ## 2. LLM theme-fit gate (membership judged from blurbs)
 
-**KEEP (16)** — genuine lithium / battery-materials / cathode-anode membership:
+**KEEP (16)**, genuine lithium / battery-materials / cathode-anode membership:
 
 | Ticker | Name | Membership basis |
 |---|---|---|
-| CVV | CVD Equipment | partial — CVD tooling incl. battery/Si-anode materials |
-| ENVX | Enovix | pure_play — advanced Li-ion (silicon anode) batteries |
-| SLDP | Solid Power | pure_play — solid-state battery + sulfide electrolyte material |
-| WWR | Westwater Resources | pure_play — battery-grade natural graphite anode |
-| IONR | ioneer | pure_play — lithium-boron mine (Rhyolite Ridge) |
-| ELVA | Electrovaya | pure_play — Li-ion battery manufacturer |
-| NMG | Nouveau Monde Graphite | pure_play — battery anode graphite |
-| SLI | Standard Lithium | pure_play — lithium developer (Smackover brine) |
-| SGML | Sigma Lithium | pure_play — lithium concentrate producer |
-| ELVR | Elevra Lithium | pure_play — lithium developer |
-| NEOV | NeoVolta | partial — LiFePO4 residential/C&I energy-storage systems |
-| TTI | TETRA Technologies | partial — bromine/lithium from brine (+ oilfield) |
-| LAC | Lithium Americas | pure_play — lithium developer (Thacker Pass) |
-| FRSPF | First Phosphate | partial — apatite/phosphate for LFP cathode |
-| CSIQ | Canadian Solar | partial — battery-storage arm (core = solar) |
-| TMCR | Metals Royalty Co | partial — battery-metals royalty (blurb TOC-only; SIC 1040) |
+| CVV | CVD Equipment | partial, CVD tooling incl. battery/Si-anode materials |
+| ENVX | Enovix | pure_play, advanced Li-ion (silicon anode) batteries |
+| SLDP | Solid Power | pure_play, solid-state battery + sulfide electrolyte material |
+| WWR | Westwater Resources | pure_play, battery-grade natural graphite anode |
+| IONR | ioneer | pure_play, lithium-boron mine (Rhyolite Ridge) |
+| ELVA | Electrovaya | pure_play, Li-ion battery manufacturer |
+| NMG | Nouveau Monde Graphite | pure_play, battery anode graphite |
+| SLI | Standard Lithium | pure_play, lithium developer (Smackover brine) |
+| SGML | Sigma Lithium | pure_play, lithium concentrate producer |
+| ELVR | Elevra Lithium | pure_play, lithium developer |
+| NEOV | NeoVolta | partial, LiFePO4 residential/C&I energy-storage systems |
+| TTI | TETRA Technologies | partial, bromine/lithium from brine (+ oilfield) |
+| LAC | Lithium Americas | pure_play, lithium developer (Thacker Pass) |
+| FRSPF | First Phosphate | partial, apatite/phosphate for LFP cathode |
+| CSIQ | Canadian Solar | partial, battery-storage arm (core = solar) |
+| TMCR | Metals Royalty Co | partial, battery-metals royalty (blurb TOC-only; SIC 1040) |
 
-**MISRECALL (18, dropped — keyword co-occurrence, not industrial membership):**
+**MISRECALL (18, dropped, keyword co-occurrence, not industrial membership):**
 LVWR (e-motorcycle brand), NC (coal/aggregates), CLB (oilfield reservoir svcs), KODK (imaging/chems
 concept-player), GHM (vacuum/heat-transfer), NRP (coal/mineral royalties), NVCR (oncology device),
-STEM (energy-storage *software*), **EAF/GrafTech (graphite *electrodes for EAF steel* — not battery
+STEM (energy-storage *software*), **EAF/GrafTech (graphite *electrodes for EAF steel*, not battery
 anode)**, ASPI (isotope enrichment), NOA (mining/construction svcs), IPI (potash for ag), SCZM (silver
-mining), GSBD (Goldman Sachs BDC — financial), CHNR (Nevada shell), FURY (gold mining), OPTX
+mining), GSBD (Goldman Sachs BDC, financial), CHNR (Nevada shell), FURY (gold mining), OPTX
 (optics/photonics), CMP (salt + plant-nutrition; exited lithium).
 
 The most instructive drop is **EAF**: it is a real graphite/carbon industrial name and trips the FTS
-recall, but graphite *electrodes for electric-arc-furnace steelmaking* are not battery anode material —
+recall, but graphite *electrodes for electric-arc-furnace steelmaking* are not battery anode material ,
 a concept-adjacency the gate correctly rejected.
 
 ---
@@ -95,7 +95,7 @@ a concept-adjacency the gate correctly rejected.
 
 ---
 
-## 4. BUY rule — honest 0-BUY
+## 4. BUY rule, honest 0-BUY
 
 **Rule:** BUY ⇔ `mos_basis ∈ {fcf_cap, nav}` AND numeric `MoS ≥ 30` AND `buy_eligible == true`
 AND zero kill-flags. Applied to all 16:
@@ -111,41 +111,41 @@ AND zero kill-flags. Applied to all 16:
   (degenerate/extreme MoS the guard refuses to trust), CSIQ also `debt_truncation_suspected` +
   `cross_source_mismatch`; IONR & ELVR hit `cross_source_mismatch` (>2.5× SEC-vs-yfinance disagreement).
 - **Even the one profitable name fails.** TTI (norm-FCF +$19.5M, OCF +$100M) prices at fcf_cap MoS
-  **−1.0%** — fair value, no edge. Correct WATCH.
+  **−1.0%**, fair value, no edge. Correct WATCH.
 
-There is **nothing to adversarially defend** — 0 mechanical BUYs ⇒ `n_buy_clean = 0`.
+There is **nothing to adversarially defend**, 0 mechanical BUYs ⇒ `n_buy_clean = 0`.
 
 ### Adversarial check on the 0-BUY itself (false-negative audit)
 Is the discipline layer *suppressing a real opportunity*? No. I re-examined the five names closest to an
 edge (TTI, CSIQ, ENVX, SLDP, WWR). TTI sits at fair value on real cash flow; the rest are pre-revenue or
 above-book cash-burners. None is a wrongly-killed buy. The 0-BUY is the substantively correct read of a
-universe of cyclical-trough lithium developers after a price crash — not a model failure.
+universe of cyclical-trough lithium developers after a price crash, not a model failure.
 
 ---
 
 ## 5. Code paths exercised
 
 - **Discovery FTS + SIC gate** (no SIC reverse-recall floor: lithium/battery has no single dedicated SIC;
-  names spread across 1000/1040/1221/1311/1400/2800/2890/3559/3690/3674/3751/3827... — recall rests on FTS,
+  names spread across 1000/1040/1221/1311/1400/2800/2890/3559/3690/3674/3751/3827..., recall rests on FTS,
   a noted floor risk for this theme).
-- **mktcap-fallback banding** — deep(34)/watch(11)/large(excluded); null-mktcap flow-through path.
-- **cheap_pass kill-flag scan** — going_concern / substantial_doubt / material_weakness / death_spiral /
+- **mktcap-fallback banding**, deep(34)/watch(11)/large(excluded); null-mktcap flow-through path.
+- **cheap_pass kill-flag scan**, going_concern / substantial_doubt / material_weakness / death_spiral /
   reverse_split (going-concern text-hit on 7 dev-stage names; gc+mw pair on NEOV/FRSPF/TMCR → sunk to AVOID).
-- **valuation FCF-cap reverse-DCF → `fcf_model_unsuitable` / `normalized_fcf_nonpositive`** (dominant path — pre-rev).
+- **valuation FCF-cap reverse-DCF → `fcf_model_unsuitable` / `normalized_fcf_nonpositive`** (dominant path, pre-rev).
 - **NAV path** (5 names) when FCF unsuitable.
 - **`buy_eligible` composite guards that bit:** `extreme_mos_review_required` (WWR, CSIQ),
   `debt_truncation_suspected` (CSIQ), `cross_source_mismatch` / P7 second-source sanity band (IONR, ELVR, CSIQ).
 - **`peak_contamination_flag` (focus path): evaluated on all 16, fired on NONE.** Most names have $0
-  revenue (degenerate base — A1 lower-bound `0 < contamination_ratio` correctly rejects), and the revenue-bearing
+  revenue (degenerate base, A1 lower-bound `0 < contamination_ratio` correctly rejects), and the revenue-bearing
   names (ENVX contamination 1.08, others) are not in the V-shape 0<cr<0.8 + below-avg + NI<0 window. So the
-  V-shape veto was exercised and correctly stayed silent — no false positives, the A1 degenerate-base guard
+  V-shape veto was exercised and correctly stayed silent, no false positives, the A1 degenerate-base guard
   did its job on the zero-revenue cohort.
-- **`fundamental_decline_flag`** — false on all (gated on rev_slope<0; zero-rev names don't qualify).
-- **finalize_run gate2-misrecall resolution** — required writing `gate2_results.json` (explicit verdicts)
+- **`fundamental_decline_flag`**, false on all (gated on rev_slope<0; zero-rev names don't qualify).
+- **finalize_run gate2-misrecall resolution**, required writing `gate2_results.json` (explicit verdicts)
   + `candidates_gate2_survivors.json` **as list-of-dicts** (a bare string list yields an empty survivor
   set; see Data-quality issue #2).
-- **track_forward** — 14 verdicts recorded to `metrics/verdicts.jsonl` (2 dupes skipped); recall@gold n/a.
-- **signals side-channel** — emitted into each deepdive JSON `signals` namespace; firewalled (valuation
+- **track_forward**, 14 verdicts recorded to `metrics/verdicts.jsonl` (2 dupes skipped); recall@gold n/a.
+- **signals side-channel**, emitted into each deepdive JSON `signals` namespace; firewalled (valuation
   `buy_eligible` reads only T1 fields; confirmed it does not touch the `signals` namespace).
 
 ---
@@ -166,10 +166,10 @@ universe of cyclical-trough lithium developers after a price crash — not a mod
 3. **Empty / TOC-only business blurbs.** CVV, ELVA, NMG, SGML, NRP returned empty blurbs; ELVR, TMCR,
    CSIQ returned filing table-of-contents instead of a business description (foreign-filer 20-F/40-F
    parsing). Theme-fit for these relied on name + SIC + prior knowledge rather than the blurb.
-4. **cross_source_mismatch on 3 names** (IONR, ELVR, CSIQ) — genuine >2.5× SEC-vs-yfinance disagreement
+4. **cross_source_mismatch on 3 names** (IONR, ELVR, CSIQ), genuine >2.5× SEC-vs-yfinance disagreement
    on debt/shares/revenue; the P7 guard correctly gated them. For zero-revenue developers this is partly
    expected (yfinance trailing fields vs SEC dev-stage filings).
-5. **No SIC recall floor for this theme** — lithium/battery materials has no single dedicated SIC, so
+5. **No SIC recall floor for this theme**, lithium/battery materials has no single dedicated SIC, so
    discovery recall rests entirely on the FTS arm. Without a gold list (below), recall is unaudited;
    a capped FTS arm could silently miss true members.
 
@@ -177,19 +177,19 @@ universe of cyclical-trough lithium developers after a price crash — not a mod
 
 ## 7. recall@gold
 
-**n/a** — `lithium-battery-materials` has no hand-built gold list (only water-utilities, railcar-leasing,
+**n/a**, `lithium-battery-materials` has no hand-built gold list (only water-utilities, railcar-leasing,
 regional-gaming, deathcare carry one in `track_forward.py`). `track_forward.py --recall-gold` returns
 "no gold list for theme … not measurable." Discovery recall for this theme is therefore unaudited.
 
 ---
 
-## 8. Market-intel / Trends context (T2 — analyst color only, never drives buy_eligible)
+## 8. Market-intel / Trends context (T2, analyst color only, never drives buy_eligible)
 
 - **TrendsMCP, Google Search "lithium battery materials":** +125% YoY (2025-06 → 2026-06) but **−65% over
   the last 6 months** (rolling over from a Dec-2025 spike).
 - **TrendsMCP, Google News "lithium price":** news attention **−33% over the last 3 months**.
 
-Read: a theme that spiked and is now cooling — precisely the post-peak regime where SKILL.md World-View #2
+Read: a theme that spiked and is now cooling, precisely the post-peak regime where SKILL.md World-View #2
 ("hot themes are the casino") and value-trap / `peak_contamination` risk are elevated. The mechanical
 layer's refusal to issue any BUY into a cyclical-trough developer cohort is consistent with that prior.
 This context is explicitly **not** an input to any eligibility gate.
@@ -204,5 +204,5 @@ drop), and the 0-BUY outcome is *substantively* correct, not a coverage gap: the
 pre-revenue lithium developers and above-book battery cash-burners with no margin of safety, plus one
 fairly-valued profitable name (TTI). The focus paths (pre-revenue FCF-unsuitability, `peak_contamination`
 V-shape veto with A1 degenerate-base guard) both fired as designed. Main caveats for the PM: (a) discovery
-recall is unaudited (no gold list, no SIC floor — FTS-only), and (b) the deepdive-vs-cheap_pass kill-flag
+recall is unaudited (no gold list, no SIC floor, FTS-only), and (b) the deepdive-vs-cheap_pass kill-flag
 counter disagreement should be reconciled. Neither undermines the 0-BUY conclusion.

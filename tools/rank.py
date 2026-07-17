@@ -33,12 +33,12 @@ from _common import REPORTS, today
 RATING_MAP = {"买入": 3, "buy": 3, "观察": 2, "watch": 2, "hold": 2,
               "避开": 1, "avoid": 1, "sell": 1}
 
-# v0.3.1 #13 — a PER-TICKER deep-dive file is deepdive_<TICKER>_<YYYY-MM-DD>.json. The run dir
+# v0.3.1 #13, a PER-TICKER deep-dive file is deepdive_<TICKER>_<YYYY-MM-DD>.json. The run dir
 # also holds non-ticker sidecars (deepdive_verdicts.json / deepdive_queue.json /
 # deepdive_targets.json) that a naive glob("deepdive_*.json") counts as deep-dives, inflating the
 # funnel banner by one (semiconductors 20 vs 19, cybersecurity 26 vs 25, biotech 43 vs 42 all =
-# real N + deepdive_verdicts.json). Count only files matching this shape — the SAME per-ticker
-# pattern load_hard_data consumes — so the banner equals the names actually deep-dived.
+# real N + deepdive_verdicts.json). Count only files matching this shape, the SAME per-ticker
+# pattern load_hard_data consumes, so the banner equals the names actually deep-dived.
 _DEEPDIVE_TICKER_RE = re.compile(r"^deepdive_[A-Za-z0-9.\-]+_\d{4}-\d{2}-\d{2}\.json$")
 
 
@@ -256,7 +256,7 @@ def _selftest() -> None:
     out = rank_frame(df_nohard)
     assert bool(out.iloc[0]["sink"]) is False, "report-only row (no killflags col) survives, no crash"
 
-    # P-H: funnel narration is a monotonically-narrowing chain with TRUE labels — never the old
+    # P-H: funnel narration is a monotonically-narrowing chain with TRUE labels, never the old
     # garbled "9 召回 → 10 小盘候选" (recall < candidates). Reconstruct the uranium funnel.
     uranium = {"candidates": 68, "deep_band": 42, "deepdived": 9, "reports": 9}
     fl = funnel_line(uranium, survivors=9)

@@ -1,4 +1,4 @@
-# Coverage-test theme report — animal-health
+# Coverage-test theme report, animal-health
 
 - **Slug:** `animal-health`  (discover slug normalized to `animal_health`)
 - **Sector:** HealthCare
@@ -25,7 +25,7 @@
 | **Mechanical BUYs** | **0** | none clears MoS>=30 + buy_eligible + zero kill-flags |
 
 **SIC recall floor:** NONE. `animal-health` is not in `THEME_SIC`, so there is no dedicated-SIC
-reverse-recall — recall is FTS-only (no `recall_channel` column in the universe). This is the
+reverse-recall, recall is FTS-only (no `recall_channel` column in the universe). This is the
 expected **niche** code path: a theme whose true members are scattered across many SIC codes
 (2834 pharma, 2835/2836 biologics, 5990 retail, 6324 insurance, 3990 misc-mfg, 7372 software,
 0100 agriculture) with no single dedicated industry classification to floor against.
@@ -36,7 +36,7 @@ expected **niche** code path: a theme whose true members are scattered across ma
 
 ## 2. LLM theme-fit gate (my independent judgment)
 
-The FTS over-recalled massively: 48 of 56 deep-band candidates are **misrecalls** — companies
+The FTS over-recalled massively: 48 of 56 deep-band candidates are **misrecalls**, companies
 where "animal health", "veterinary", or "pet care" appears once in a risk factor, a TAM aside,
 or an unrelated context. Examples: oncology/biopharma (ATNM, ARVN, ZYME, NUVB, MNKD, PCRX, GERN,
 ABCL, EYPT, KLRS, PROK, VALN, COAG), restaurants (RRGB, PLAY, DIN, LOCO, CBRL, WEN, BRCB),
@@ -44,7 +44,7 @@ BDCs (SLRC, MSDL, MFIC), lithium (LAC), used-car finance (CRMT), diagnostics/pro
 QTRX, PSNL, OSUR), fresh produce (DOLE), beauty (OLPX, EOLS).
 
 My classification was **identical** to the recorded `gate2_results.json` (8/8 survivors match,
-zero diff) — corroboration, not circularity, since I judged from blurbs independently.
+zero diff), corroboration, not circularity, since I judged from blurbs independently.
 
 **8 theme-fit survivors deep-dived:**
 
@@ -76,7 +76,7 @@ zero diff) — corroboration, not circularity, since I judged from blurbs indepe
 
 Every survivor has a **negative** margin of safety (or a null band). Not one is within reach of
 the +30% BUY threshold. The cleanest names (ICCC, ODC, WFCF, ZOMDF clear buy_eligible) still
-fail purely on price — the true animal-health/pet members trade at premium multiples
+fail purely on price, the true animal-health/pet members trade at premium multiples
 (ICCC EV/EBITDA ~20x, ODC ~16x, WFCF ~29x, PAHC PE ~27x, WOOF PE ~82x, TRUP EV/EBITDA ~33x).
 
 This is exactly the PHILOSOPHY thesis #2 in action: **a recognizable, retail-loved theme
@@ -85,35 +85,35 @@ finds no mispriced small-cap long.
 
 ---
 
-## 4. BUY analysis — honest 0-BUY
+## 4. BUY analysis, honest 0-BUY
 
 No candidate satisfies the BUY rule (`mos_basis in {fcf_cap,nav}` AND numeric `MoS>=30` AND
 `buy_eligible==true` AND zero kill-flags). Per-name reason it is NOT a BUY:
 
-- **ICCC** — buy_eligible True, clean flags, but **MoS null** (`intrinsic_band_unavailable`:
+- **ICCC**, buy_eligible True, clean flags, but **MoS null** (`intrinsic_band_unavailable`:
   normalized 5-yr FCF is nonpositive -$2.5M, so the fcf_cap intrinsic band cannot be built). No
   numeric MoS -> fails MoS>=30. (Reverse-DCF also null for the same reason.)
-- **ODC** — buy_eligible True, clean flags, **MoS -94.3%** (fcf_cap). Far below 30. Data-quality:
+- **ODC**, buy_eligible True, clean flags, **MoS -94.3%** (fcf_cap). Far below 30. Data-quality:
   `lumpy_ocf_normalization_suspect` (peak OCF 80.2M > 2x median 31.7M) and debt is a
-  total-liabilities proxy — but even so it is grossly above intrinsic.
-- **PAHC** — **buy_eligible False** (`fcf_sustainability_uncertain`: capex unavailable, FCF uses
+  total-liabilities proxy, but even so it is grossly above intrinsic.
+- **PAHC**, **buy_eligible False** (`fcf_sustainability_uncertain`: capex unavailable, FCF uses
   OCF proxy), MoS -92.1%.
-- **WFCF** — buy_eligible True, clean flags, **MoS -92.9%** (nav basis; fcf_cap blocked by the
+- **WFCF**, buy_eligible True, clean flags, **MoS -92.9%** (nav basis; fcf_cap blocked by the
   C1 data-quality guard due to stale debt). Below 30.
-- **SPB** — **buy_eligible False** (`financial_sic_forced_unsuitable` + `insurance_concepts_present`),
+- **SPB**, **buy_eligible False** (`financial_sic_forced_unsuitable` + `insurance_concepts_present`),
   MoS -95.0%. See data-quality note: this is a guard **false-positive** (SPB is a consumer-products
   company, not an insurer) triggered by a `PremiumsEarnedNet` XBRL concept, but the NAV-basis MoS
   is deeply negative regardless, so the BUY outcome is unaffected.
-- **TRUP** — **buy_eligible False** (`financial_sic_forced_unsuitable`, SIC 6324 insurance +
+- **TRUP**, **buy_eligible False** (`financial_sic_forced_unsuitable`, SIC 6324 insurance +
   `insurance_concepts_present`), MoS -74.1%, plus a `material_weakness` kill-flag surfaced in the
-  verdict build. Correctly an AVOID — pet insurer, FCF model unsuitable.
-- **WOOF** — **buy_eligible False** (`extreme_mos_review_required`: MoS -184.5% exceeds the 100%
+  verdict build. Correctly an AVOID, pet insurer, FCF model unsuitable.
+- **WOOF**, **buy_eligible False** (`extreme_mos_review_required`: MoS -184.5% exceeds the 100%
   guard), PE 82x, levered retailer.
-- **ZOMDF** — buy_eligible True, clean flags, but **MoS -22.6%** (nav; still negative) and FCF
-  yield -24% — a cash-burning pre/early-revenue microcap (`low_revenue_loss_ratio` flag noted
+- **ZOMDF**, buy_eligible True, clean flags, but **MoS -22.6%** (nav; still negative) and FCF
+  yield -24%, a cash-burning pre/early-revenue microcap (`low_revenue_loss_ratio` flag noted
   the |NI|/rev = 2.6x early-stage pattern, correct entity). Below 30.
 
-**Adversarial verification:** not required — there are zero mechanical BUYs to stress-test.
+**Adversarial verification:** not required, there are zero mechanical BUYs to stress-test.
 `n_buy_clean = 0`.
 
 ---
@@ -126,7 +126,7 @@ No candidate satisfies the BUY rule (`mos_basis in {fcf_cap,nav}` AND numeric `M
 - inline SIC tri-state filter (`sic_classify`: keep=20 / review=55 / drop=0)
 - LLM theme-fit Gate 2 (8 survivors / 48 misrecall)
 - `deepdive_data.py` x8 (financials + 10-K flags + insider + **signals side-channel** embedded
-  in deepdive JSON under `signals.{price_divergence,ownership,signals_meta}` — diagnostic-only,
+  in deepdive JSON under `signals.{price_divergence,ownership,signals_meta}`, diagnostic-only,
   firewalled from buy_eligible)
 - `valuation.py` x8 with `--json --ticker` (deterministic fcf_cap / nav / abstain selection)
 - **BUY-guard paths fired:** `financial_sic_forced_unsuitable` (TRUP, SPB),
@@ -159,7 +159,7 @@ No candidate satisfies the BUY rule (`mos_basis in {fcf_cap,nav}` AND numeric `M
 6. **ZOMDF** is a foreign-listed (TSXV/OTC `ZOMDF`) cash-burn microcap; FCF yield -24%, NI -$82M
    on $32M revenue. Right entity, early-stage pattern correctly flagged.
 7. Log buffering on Windows: `run_theme.log` froze at "90/223" while the candidates JSON was
-   fully written — completion was confirmed by the artifact, not the log tail.
+   fully written, completion was confirmed by the artifact, not the log tail.
 
 ---
 
@@ -173,12 +173,12 @@ Gold lists exist only for water-utilities / railcar-leasing / regional-gaming / 
 
 ## 8. Market-intel / T2 analyst context (does NOT drive buy_eligible)
 
-TrendsMCP quota was exhausted for the day (5/5 daily, 100/100 monthly — consumed by parallel
+TrendsMCP quota was exhausted for the day (5/5 daily, 100/100 monthly, consumed by parallel
 coverage agents), so no fresh trend pull. Labeled-T2 domain context only:
 
 - The pet-care / "pet humanization" theme is a well-branded, ETF-covered consumer narrative
   (PAWZ exists). Per PHILOSOPHY #2, branded thematic attention historically erodes risk-adjusted
-  returns post-launch — consistent with the premium multiples seen here and the 0-BUY result.
+  returns post-launch, consistent with the premium multiples seen here and the 0-BUY result.
 - Structural sub-segments differ: pet **insurance** (TRUP) is a low-penetration secular grower but
   valued as such (EV/EBITDA 33x); pet **retail** (WOOF) is a margin-pressured, levered turnaround
   (PE 82x); **animal-health pharma/biologics** (ICCC, PAHC, ZOMDF) is the genuinely "neglected"
@@ -190,11 +190,11 @@ coverage agents), so no fresh trend pull. Labeled-T2 domain context only:
 
 ## 9. Skeptical-PM usable verdict
 
-**USABLE — as a landmine-scanner that returned an honest zero, which is the correct answer.**
+**USABLE, as a landmine-scanner that returned an honest zero, which is the correct answer.**
 
 The run did the one thing a web-search/LLM narrative pass cannot: it enumerated 417 FTS hits,
 mechanically killed 61 unhealthy names, separated 8 true theme members from 48 keyword
-misrecalls, and valued every survivor on a deterministic model — concluding that the pet/animal-
+misrecalls, and valued every survivor on a deterministic model, concluding that the pet/animal-
 health small-cap pocket offers no mispriced long today (every MoS negative). A PM gets a clean,
 defensible "nothing to do here, and here is exactly why" plus a watchlist of the 4 buy_eligible
 pure/partial-plays (ICCC, ODC, WFCF, ZOMDF) to revisit if prices fall materially. The SPB

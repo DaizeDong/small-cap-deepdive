@@ -1,4 +1,4 @@
-# Coverage Test — Regional Gaming (ConsDisc)
+# Coverage Test, Regional Gaming (ConsDisc)
 
 - **Slug:** `regional-gaming` (filesystem slug normalized to `regional_gaming`)
 - **Run batch:** `reports/smallcap/2026-06-21_cov-regional-gaming/`
@@ -9,7 +9,7 @@
 - **Date:** 2026-06-21 (run executed under coverage-test 2026-06-20 docs tree)
 
 > **This is research output, not investment advice.** The skill is a landmine-scanner.
-> A WATCH here means "survived mechanical kill-flags + is a genuine theme member" — it is NOT a buy.
+> A WATCH here means "survived mechanical kill-flags + is a genuine theme member", it is NOT a buy.
 
 ---
 
@@ -19,7 +19,7 @@
 |---|---|---|
 | Raw discovery (FTS ∪ SIC floor) → cheap_pass input | 63 candidates written | discover + SIC reverse-recall on 7990/7011 + mktcap fallback |
 | cheap_pass survivors (after hard kill-flag scan) | 63 (32 keep / 31 review SIC tier) | death-spiral / going-concern names already dropped pre-write (SEAT, FLNT, SKLZ, PLBY, RR, SBET… kill-flag 2) |
-| Band split | 38 deep / 25 watch | deep = mktcap < $2.0B; watch = $2.0–5.0B (skipped per band guard) |
+| Band split | 38 deep / 25 watch | deep = mktcap < $2.0B; watch = $2.0 to 5.0B (skipped per band guard) |
 | **LLM theme-fit gate (Gate 2)** on 38 deep-band | **10 retained** / 28 misrecall | I judged true membership from 10-K business blurbs |
 | Deep-dived (data + valuation) | **10 / 10** survivors | EVERY deep-band survivor, no sampling; 0 ERROR files |
 | Mechanical BUYs | **0** | none clears (mos_basis∈{fcf_cap,nav} AND MoS≥+30% AND buy_eligible AND 0 kill-flags) |
@@ -28,24 +28,24 @@
 **Funnel object:** `{ raw: 63, deepdived: 10, survivors: 10 }`
 (`survivors` = theme-fit survivors that completed deep-dive; all rated WATCH, none sunk.)
 
-### Theme-fit gate detail (Gate 2 — my judgment, recorded in `gate2_results.json`)
+### Theme-fit gate detail (Gate 2, my judgment, recorded in `gate2_results.json`)
 
 **Retained (10):**
 
 | Ticker | Class | Why a true member |
 |---|---|---|
-| FLL | pure_play | Full House Resorts — owns/operates 6 regional casinos (NV/CO/IL/IN/MS). **gold** |
-| CNTY | pure_play | Century Casinos — regional casino operator. **gold** |
-| ACEL | pure_play | Accel Entertainment — distributed gaming operator + brick-and-mortar casinos. **gold** |
-| BALY | pure_play | Bally's — global casino / interactive / lottery operator |
-| INSE | partial | Inspired Entertainment — B2B gaming technology (lottery/betting/gaming content) |
-| CDRO | partial | Codere Online — online gaming/betting operator (foreign filer) |
-| MYPS | partial | PLAYSTUDIOS — social-casino + casual mobile games (myVEGAS real-Vegas rewards) |
-| DDI | partial | DoubleDown Interactive — social-casino mobile games (Korea/US; ADR) |
-| PLTK | partial | Playtika — mobile games operator incl. social-casino (Slotomania) |
-| BUKS | partial | Butler National — aerospace + owns land/building + manages Boot Hill Casino, Kansas |
+| FLL | pure_play | Full House Resorts, owns/operates 6 regional casinos (NV/CO/IL/IN/MS). **gold** |
+| CNTY | pure_play | Century Casinos, regional casino operator. **gold** |
+| ACEL | pure_play | Accel Entertainment, distributed gaming operator + brick-and-mortar casinos. **gold** |
+| BALY | pure_play | Bally's, global casino / interactive / lottery operator |
+| INSE | partial | Inspired Entertainment, B2B gaming technology (lottery/betting/gaming content) |
+| CDRO | partial | Codere Online, online gaming/betting operator (foreign filer) |
+| MYPS | partial | PLAYSTUDIOS, social-casino + casual mobile games (myVEGAS real-Vegas rewards) |
+| DDI | partial | DoubleDown Interactive, social-casino mobile games (Korea/US; ADR) |
+| PLTK | partial | Playtika, mobile games operator incl. social-casino (Slotomania) |
+| BUKS | partial | Butler National, aerospace + owns land/building + manages Boot Hill Casino, Kansas |
 
-**Misrecall (28, dropped — keyword false-positives or off-theme):** IDN, FNWB, PLAY (arcade/dining, not casino), NATH, TRC, HZO, CBL, TACT, ATHS, **EPSM** (Macau alcohol supply-chain, not a gaming operator), SWAG, GMHS (generic mobile games), RICK (adult clubs), PSFE, FVRR, CNNE, MINE, ATLO, FNLC, PLBC, **WRN** (the "Casino Project" is a *gold-mining* property — classic keyword trap), VLRS, APC, TV, LGPS, FGBI, ASAIY, **SEG** (NYC/Vegas entertainment + real estate, no casino operations).
+**Misrecall (28, dropped, keyword false-positives or off-theme):** IDN, FNWB, PLAY (arcade/dining, not casino), NATH, TRC, HZO, CBL, TACT, ATHS, **EPSM** (Macau alcohol supply-chain, not a gaming operator), SWAG, GMHS (generic mobile games), RICK (adult clubs), PSFE, FVRR, CNNE, MINE, ATLO, FNLC, PLBC, **WRN** (the "Casino Project" is a *gold-mining* property, classic keyword trap), VLRS, APC, TV, LGPS, FGBI, ASAIY, **SEG** (NYC/Vegas entertainment + real estate, no casino operations).
 
 ---
 
@@ -65,16 +65,16 @@ Loss-stage breakdown:
 - `gated_out`: 0
 - `fts_missed`: 3 (BYD, GDEN, RRR)
 
-**Interpretation — this 57.1% is an honest cap artifact, not a recall bug.** The 3 missing names
+**Interpretation, this 57.1% is an honest cap artifact, not a recall bug.** The 3 missing names
 (Boyd Gaming, Golden Entertainment, Red Rock Resorts) are all mid/large-cap (>$2.0B). They were
 `fts_missed` because the small-cap discovery cap excludes them; they are correctly out of the
 deep-dive universe. MCRI *was* recalled but lands in the watch band ($2.32B) so the band guard
 correctly skips it from deep-dive. Of the 4 gold names that are genuinely in the small-cap deep
-band (ACEL, CNTY, FLL — and MCRI just over), **all 3 in-band were recalled AND deep-dived: 3/3 = 100% in-band recall.** No gold member was lost to a gate error or a mktcap-resolution failure.
+band (ACEL, CNTY, FLL, and MCRI just over), **all 3 in-band were recalled AND deep-dived: 3/3 = 100% in-band recall.** No gold member was lost to a gate error or a mktcap-resolution failure.
 
 ---
 
-## 3. Ranked shortlist (all WATCH — see `RANKING.md`)
+## 3. Ranked shortlist (all WATCH, see `RANKING.md`)
 
 | Rank | Ticker | Rating | Conf | Rev | NI | OCF | mos_basis | sel MoS | buy_eligible | kill-flag |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -93,7 +93,7 @@ band (ACEL, CNTY, FLL — and MCRI just over), **all 3 in-band were recalled AND
 
 ---
 
-## 4. BUYs — honest 0-BUY
+## 4. BUYs, honest 0-BUY
 
 **There are ZERO mechanical BUYs.** The BUY rule requires *all four* of:
 mos_basis ∈ {fcf_cap, nav} **AND** numeric selected-MoS ≥ +30% **AND** buy_eligible == true **AND** zero kill-flags.
@@ -105,7 +105,7 @@ No candidate satisfies the conjunction. The structural reason is a clean bifurca
   fcf_cap for BUKS/ACEL priced above their FCF cap; null for BALY/CDRO where the intrinsic band is
   unavailable). None reaches +30%.
 - The candidates with a **large positive MoS** (MYPS +265%, DDI +47%) are **buy_eligible == false**
-  — vetoed by the data-integrity / value-trap guards (see adversarial section). Their MoS is a
+, vetoed by the data-integrity / value-trap guards (see adversarial section). Their MoS is a
   data artifact, not a real margin.
 
 This is exactly the landmine-scanner working as designed: a hot, debt/lease-heavy cyclical sector
@@ -114,7 +114,7 @@ produced **no clean small-cap pure-play with a real margin of safety.** That is 
 
 ### Code-paths fired (focus: debt/lease-heavy / NAV)
 
-- **NAV asset-heavy path** fired for FLL, PLTK, INSE (mos_basis = nav) — fcf_cap declared unsuitable
+- **NAV asset-heavy path** fired for FLL, PLTK, INSE (mos_basis = nav), fcf_cap declared unsuitable
   (`fcf_cap_model_unsuitable_use_nav`), then NAV computed. In all 3 the NAV MoS is **-100%**:
   negative tangible equity. For FLL this is the genuine debt/lease-heavy casino balance sheet
   (development debt > assets net of debt); for PLTK/INSE it is acquisition-built goodwill swamping
@@ -136,15 +136,15 @@ No mechanical BUY exists, so there is nothing to confirm as a real opportunity. 
 adversarially checked the **highest-MoS rejected candidates** to confirm the gate's rejections are
 *correct* (i.e. no false negative that should have been a BUY):
 
-- **MYPS (+265% fcf_cap MoS, buy_eligible=false).** Verdict: **correctly rejected — data/model artifact.**
+- **MYPS (+265% fcf_cap MoS, buy_eligible=false).** Verdict: **correctly rejected, data/model artifact.**
   `cross_source_mismatch`: SEC total_debt $63.1M vs yfinance $6.9M (9.1× disagreement) → the EV that
   drives the +265% is built on an unreliable debt figure. Additionally `fundamental_decline_flag` +
   `peak_contamination_flag` (contamination 0.69) + `extreme_mos_review_required`. Reverse-DCF implied
   growth -26.7% (the market is pricing in decline, consistent with the V-shape veto). A +265% MoS on
   a $69M micro-cap social-casino game studio in monotone revenue decline (-19% YoY) is a textbook
   value trap, not a bargain.
-- **DDI (+47% fcf_cap MoS, buy_eligible=false).** Verdict: **correctly rejected — data artifact.**
-  `cross_source_mismatch` on shares_outstanding: SEC 2.5M vs yfinance 49.6M (20× — DDI is a Korean
+- **DDI (+47% fcf_cap MoS, buy_eligible=false).** Verdict: **correctly rejected, data artifact.**
+  `cross_source_mismatch` on shares_outstanding: SEC 2.5M vs yfinance 49.6M (20×, DDI is a Korean
   ADR; the SEC XBRL share count is the underlying entity, not the ADR ratio). The +47% MoS is
   computed against a market cap that is itself unreliable given the 20× share-count ambiguity. Blocking
   BUY here is the right call.
@@ -156,7 +156,7 @@ candidates whose headline number looked most attractive, precisely because the n
 
 ## 6. Data-quality issues
 
-1. **CDRO — foreign-filer XBRL gap:** revenue / NI / OCF / cash all pull as **$0M**. Codere Online is
+1. **CDRO, foreign-filer XBRL gap:** revenue / NI / OCF / cash all pull as **$0M**. Codere Online is
    a Luxembourg 20-F filer whose financials did not map into the US-GAAP XBRL concepts the deepdive
    reads. Its valuation is effectively un-anchored (intrinsic_band_unavailable). WATCH-on-data-quality,
    not a fundamentals judgment. Confidence set lowest (45%).
@@ -164,7 +164,7 @@ candidates whose headline number looked most attractive, precisely because the n
    These correctly block BUY but also signal the underlying second-source disagreement that any human
    analyst must resolve before trusting the cap/EV.
 3. **material_weakness flags (BALY, CNTY, INSE, CDRO)** come from a 10-K *text* scan
-   (`has_material_weakness=True`). This is keyword-grade detection — it may be a genuine ICFR finding
+   (`has_material_weakness=True`). This is keyword-grade detection, it may be a genuine ICFR finding
    or a boilerplate risk-factor mention. cheap_pass (which scans the most-recent period more strictly)
    did NOT eliminate them, so these are likely historical/risk-factor mentions rather than active
    adverse ICFR opinions. Flagged for human confirmation; does not change the 0-BUY outcome.
@@ -175,9 +175,9 @@ candidates whose headline number looked most attractive, precisely because the n
 
 ---
 
-## 7. Market-intel / Trends (T2 analyst context — does NOT drive buy_eligible)
+## 7. Market-intel / Trends (T2 analyst context, does NOT drive buy_eligible)
 
-- **TrendsMCP: unavailable this run** — daily + monthly request quota exhausted (5/5 daily, 100/100
+- **TrendsMCP: unavailable this run**, daily + monthly request quota exhausted (5/5 daily, 100/100
   monthly). No live search/sentiment series could be pulled. Recorded as a data limitation.
 - **Sector framing (analyst knowledge, T2):** regional/local US gaming is a mature, cyclical,
   debt-and-lease-heavy consumer-discretionary segment. The economics are dominated by (a) capex/lease
@@ -185,7 +185,7 @@ candidates whose headline number looked most attractive, precisely because the n
   and (c) the secular shift toward iGaming/online (BALY, CDRO, the social-casino names MYPS/DDI/PLTK).
   This T2 read is *consistent* with the mechanical output: the NAV path keeps surfacing negative
   tangible equity (leverage), and the FCF path keeps pricing names above their FCF cap (cyclical,
-  no margin) — i.e. the sector is fairly-to-fully priced for its risk in the small-cap band. None of
+  no margin), i.e. the sector is fairly-to-fully priced for its risk in the small-cap band. None of
   this enters `buy_eligible`; it is context for the human PM only.
 
 ---

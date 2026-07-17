@@ -20,9 +20,9 @@ from _common import http_get
 
 FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json"
 DEI_FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/dei/{concept}.json"
-# v0.3.2 #11 — ifrs-full taxonomy endpoint. Foreign 20-F/40-F filers tag financials under
+# v0.3.2 #11, ifrs-full taxonomy endpoint. Foreign 20-F/40-F filers tag financials under
 # ifrs-full instead of us-gaap; companyconcept exposes them on this taxonomy path. Extending the
-# concept cascade to probe these recovers SOME foreign filers (graceful — absent -> empty, no crash).
+# concept cascade to probe these recovers SOME foreign filers (graceful, absent -> empty, no crash).
 IFRS_FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/ifrs-full/{concept}.json"
 SEC_COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 
@@ -36,12 +36,12 @@ REVENUE_CONCEPTS = [
     "RevenueFromContractWithCustomerExcludingAssessedTax",
 ]
 
-# v0.3.2 #11 — IFRS (ifrs-full taxonomy) concept cascade for foreign 20-F/40-F filers. Whole
+# v0.3.2 #11, IFRS (ifrs-full taxonomy) concept cascade for foreign 20-F/40-F filers. Whole
 # 20-F/40-F cohorts (Canadian PM juniors, China VIEs, foreign industrials) returned EMPTY
 # financials because their XBRL is tagged under ifrs-full, not us-gaap. Probing the most common
 # IFRS tags recovers SOME of these filers (graceful: absent concepts -> empty, never a crash).
 # Each list is probed AFTER the us-gaap cascade and merged by end-date (us-gaap wins on a tie,
-# IFRS only fills genuine gaps) — see concept_series_with_ifrs.
+# IFRS only fills genuine gaps), see concept_series_with_ifrs.
 IFRS_REVENUE_CONCEPTS = [
     "Revenue",
     "RevenueFromContractsWithCustomers",
@@ -55,7 +55,7 @@ IFRS_OCF_CONCEPTS = [
     "CashFlowsFromUsedInOperatingActivitiesContinuingOperations",
 ]
 
-# v0.3.2 #8 — lessor / leasing-business detection. Asset-heavy lessors (railcar/equipment/auto
+# v0.3.2 #8, lessor / leasing-business detection. Asset-heavy lessors (railcar/equipment/auto
 # leasing) carry a huge lease fleet on the balance sheet but modest, deeply cyclical FCF, so they
 # belong on a lease-fleet NAV basis. They fell BELOW valuation's debt/assets>0.62
 # fcf_cap_model_unsuitable threshold (GBX 0.41, RAIL 0.35) and were mis-valued on trough FCF.
@@ -96,7 +96,7 @@ DEBT_CONCEPT_FALLBACK1B = "LongTermDebtAndCapitalLeaseObligations"
 DEBT_CONCEPT_FALLBACK1C = "DebtLongtermAndShorttermCombinedAmount"
 DEBT_CONCEPT_FALLBACK2 = "Liabilities"
 
-# v0.3.1 #2 — SUM the standard debt concepts at Level 1 instead of picking a single/partial tag.
+# v0.3.1 #2, SUM the standard debt concepts at Level 1 instead of picking a single/partial tag.
 # Picking one liability concept under-read debt and was the #1 driver of cross_source_mismatch.
 # Level 1 now SUMs (per end-date) the noncurrent + current long-term debt + short-term borrowings
 # + finance-lease components. Each summand is optional (absent concepts contribute 0); the level
@@ -109,7 +109,7 @@ DEBT_SUM_CONCEPTS = [
     "FinanceLeaseLiabilityCurrent",
 ]
 
-# v0.3.1 #3 — ASC842 operating-lease liability concepts. cross_source_mismatch over-fires on
+# v0.3.1 #3, ASC842 operating-lease liability concepts. cross_source_mismatch over-fires on
 # lease-heavy retail because SEC debt excludes operating leases while yfinance's totalDebt includes
 # capitalized leases. We ADD these (current + noncurrent) to the SEC debt side ONLY for the
 # cross-source comparison, so both sources are lease-comparable. NOT added to latest_total_debt
@@ -134,7 +134,7 @@ DA_CONCEPTS = [
 # CapEx: standard XBRL concept; present for WLFC and LNN.
 CAPEX_CONCEPT = "PaymentsToAcquirePropertyPlantAndEquipment"
 
-# P9 — EBIT concept cascade. ~47% of names had null EV/EBITDA because EBIT was a single
+# P9, EBIT concept cascade. ~47% of names had null EV/EBITDA because EBIT was a single
 # OperatingIncomeLoss pull (banks/insurers, IFRS filers, some industrials don't tag it).
 # Cascade order (earlier = higher priority): operating income first; if absent, fall back to
 # pretax income (continuing ops), optionally adding back interest expense to approximate EBIT.
@@ -152,7 +152,7 @@ EBIT_INTEREST_CONCEPTS = [
     "InterestExpenseDebt",
 ]
 
-# A3 — insurance XBRL concepts. Presence of ANY of these signals an insurance underwriter /
+# A3, insurance XBRL concepts. Presence of ANY of these signals an insurance underwriter /
 # insurance-subsidiary holdco even when the SIC is non-financial (e.g. Boston Omaha SIC-65 owns a
 # surety-insurance sub). valuation reads insurance_concepts_present and routes such names like a
 # financial_sic (nav/abstain) instead of fcf_cap, closing the BOC latent hole.
@@ -169,7 +169,7 @@ INSURANCE_CONCEPTS = [
 ]
 
 
-# PIT (backtest, FIX 1) — as-of filed-date accumulator. When a point-in-time pull runs (asof set),
+# PIT (backtest, FIX 1), as-of filed-date accumulator. When a point-in-time pull runs (asof set),
 # _one_concept records the max "filed" date of the facts it actually KEPT (filed<=asof, the latest-
 # filed-per-end-date disclosures an investor at `asof` could have seen) into this module-level
 # accumulator. deepdive_data.pull() resets it before its as-of cascade and reads it back after, so
@@ -177,7 +177,7 @@ INSURANCE_CONCEPTS = [
 # point-in-time reconstruction. This is what makes the look-ahead audit NON-vacuous (the harness
 # asserts asof_max_filing_date <= asof). The accumulator is process-global but ALWAYS reset by the
 # caller via reset_asof_filed_tracker() at the top of an as-of pull, so concurrent live (asof=None)
-# pulls — which NEVER touch it — cannot corrupt it. The asof=None path does not record anything, so
+# pulls, which NEVER touch it, cannot corrupt it. The asof=None path does not record anything, so
 # the live default stays byte-identical.
 _asof_max_filed: str | None = None
 
@@ -225,7 +225,7 @@ def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap", asof: str | 
     """
     if taxonomy == "us-gaap":
         url = FACTS.format(cik=str(cik).zfill(10), concept=concept)
-    elif taxonomy == "ifrs-full":  # v0.3.2 #11 — foreign-filer IFRS concept recovery
+    elif taxonomy == "ifrs-full":  # v0.3.2 #11, foreign-filer IFRS concept recovery
         url = IFRS_FACTS.format(cik=str(cik).zfill(10), concept=concept)
     else:
         url = DEI_FACTS.format(cik=str(cik).zfill(10), concept=concept)
@@ -258,10 +258,10 @@ def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap", asof: str | 
                             }
                     except Exception:
                         pass
-                elif "end" in v:  # instant (balance-sheet item — no start date)
+                elif "end" in v:  # instant (balance-sheet item, no start date)
                     seen_end[v["end"]] = {"end": v["end"], "val": v["val"], "fy": v.get("fy")}
             return list(seen_end.values())
-        # --- PIT (as-of) PATH — filed<=asof, latest-filed-per-end-date wins ---
+        # --- PIT (as-of) PATH, filed<=asof, latest-filed-per-end-date wins ---
         seen_pit: dict = {}  # end-date -> {entry, _filed} ; keep the latest-filed <= asof
         for v in vals:
             filed = v.get("filed")
@@ -284,7 +284,7 @@ def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap", asof: str | 
                     }
                 except Exception:
                     continue
-            elif "end" in v:  # instant (balance-sheet item — no start date)
+            elif "end" in v:  # instant (balance-sheet item, no start date)
                 entry = {"end": v["end"], "val": v["val"], "fy": v.get("fy")}
             else:
                 continue
@@ -292,7 +292,7 @@ def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap", asof: str | 
             # Latest-filed wins; tie on filed -> later API-order wins (mirrors live dedup).
             if prev is None or filed >= prev["_filed"]:
                 seen_pit[v["end"]] = {"_filed": filed, "entry": entry}
-        # FIX 1 — record the max "filed" date of the facts actually KEPT (the latest-filed-per-end
+        # FIX 1, record the max "filed" date of the facts actually KEPT (the latest-filed-per-end
         # disclosures that feed the returned values). This is the look-ahead-audit evidence: every
         # recorded date is, by construction, <= asof. Live (asof=None) path never reaches here.
         for x in seen_pit.values():
@@ -356,12 +356,12 @@ def concept_series_with_ifrs(cik: str, gaap_concepts, ifrs_concepts, n: int = 8,
     if isinstance(ifrs_concepts, str):
         ifrs_concepts = [ifrs_concepts]
     seen: dict = {}
-    # us-gaap first (preferred — domestic taxonomy).
+    # us-gaap first (preferred, domestic taxonomy).
     for concept in gaap_concepts:
         for a in _one_concept(cik, concept, taxonomy="us-gaap", asof=asof):
             seen[a["end"]] = a
         time.sleep(0.15)
-    # ifrs-full second — fill gaps only; do NOT overwrite a us-gaap value at the same end-date.
+    # ifrs-full second, fill gaps only; do NOT overwrite a us-gaap value at the same end-date.
     for concept in ifrs_concepts:
         for a in _one_concept(cik, concept, taxonomy="ifrs-full", asof=asof):
             if a["end"] not in seen:
@@ -408,7 +408,7 @@ def pct_growth(series: list) -> float | None:
     return round((vals[-1] / vals[-2] - 1) * 100, 1)
 
 
-# C1 — company_tickers.json cache (fetched once per process; keyed by ticker uppercase)
+# C1, company_tickers.json cache (fetched once per process; keyed by ticker uppercase)
 _sec_tickers_cache: dict | None = None
 
 

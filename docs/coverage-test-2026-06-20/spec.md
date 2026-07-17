@@ -1,16 +1,16 @@
-# v0.3.0 Full-Coverage Test — Spec (2026-06-20)
+# v0.3.0 Full-Coverage Test, Spec (2026-06-20)
 
 > Exhaustive, quality-first test of small-cap-deepdive **v0.3.0** (`764e554`) across every GICS
 > sector + niche/weird pockets (hot → cold). Dual lens: **robustness** (does every code path behave
 > correctly everywhere; zero false BUYs; correct routing; decision-ready reports) **and alpha** (any
-> clean BUY market-wide, adversarially verified). Full data — no sampling; retries not skips;
+> clean BUY market-wide, adversarially verified). Full data, no sampling; retries not skips;
 > synchronous theme completion (the iter2 fix). EDGAR rate-limit is the binding constraint, so themes
 > run in **throttled waves of ~5**, not all at once.
 
 ## Scale & cost (approved: tier C exhaustive)
 - ~48 new themes + 3 regression anchors + 3 newly-built `recall@gold` gold lists.
-- ~10–12M output tokens (±50%), ~14–20h wall-clock (EDGAR-bound), background + resumable.
-- Per theme ≈ 200–250k tokens, ~40–75 min; ~5 concurrent → ~10 waves.
+- ~10 to 12M output tokens (±50%), ~14 to 20h wall-clock (EDGAR-bound), background + resumable.
+- Per theme ≈ 200 to 250k tokens, ~40 to 75 min; ~5 concurrent → ~10 waves.
 
 ## Pre-step (controller, before launch): build 3 new gold lists
 Add to `tools/track_forward.py` `THEME_GOLD` + `tools/filter_by_sic.py` theme→SIC map, with selftest:
@@ -60,7 +60,7 @@ Tags: 🔥hot ⚪mid 🧊cold. Code-path = the v0.3.0 mechanism each is chosen t
 | healthcare-services | healthcare services, clinics, physician practice | 🧊 | leverage, roll-up debt |
 | animal-health | animal health, veterinary, pet care | ⚪ | niche, mid |
 
-### Financials (stress financial-SIC / BDC / NAV exclusion — expect mostly nav/abstain)
+### Financials (stress financial-SIC / BDC / NAV exclusion, expect mostly nav/abstain)
 | bdc | business development company, middle market lending | ⚪ | BDC fallback (no-SIC) routing |
 | mortgage-reit | mortgage REIT, MBS, real estate finance | ⚪ | financial-SIC nav, book≠liquidation |
 | insurance-brokers | insurance brokerage, benefits broker | ⚪ | financial-SIC, fee model |
@@ -103,10 +103,10 @@ Tags: 🔥hot ⚪mid 🧊cold. Code-path = the v0.3.0 mechanism each is chosen t
 ## Regression anchors (3, re-run under v0.3.0 for consistency)
 - **oilsvc** (cyclical, vs iter), **regbank** (financial-SIC + P5 recall), **deathcare** (recall@gold baseline 100%).
 
-## Per-theme execution (each agent, SYNCHRONOUS — the iter2 fix)
+## Per-theme execution (each agent, SYNCHRONOUS, the iter2 fix)
 1. `export SMALLCAP_RUN=$(python tools/new_run.py --label cov-<slug>)`.
 2. Full pipeline: `run_theme` (discover + SIC-reverse-recall + mktcap-fallback → cheap_pass → SIC gate) → LLM theme-fit → deep-dive **every** deep-band survivor (`deepdive_data` + `valuation`, both `--json` and `--ticker`/`--mktcap`) → `buy_eligible` BUY rule → `finalize_run` (reports + verdicts + RANKING + trust banner) → `rank`.
-3. `recall@gold` if a gold list exists; `signals` diagnostic is emitted (firewalled — never affects BUY).
+3. `recall@gold` if a gold list exists; `signals` diagnostic is emitted (firewalled, never affects BUY).
 4. Independent report → `docs/coverage-test-2026-06-20/themes/<slug>.md`.
 5. Structured return: `{sector, slug, hotness, code_paths_exercised[], funnel, mos_basis_dist, buys[{ticker,mos,buy_ineligible_reasons,adversarial_verdict}], data_quality_issues[], recall_at_gold, usable_verdict}`.
 
@@ -114,11 +114,11 @@ Tags: 🔥hot ⚪mid 🧊cold. Code-path = the v0.3.0 mechanism each is chosen t
 Full data (deep-dive every survivor, no sampling); retries on rate-limit, never silent skip (deepdive writes `*_ERROR.json` on crash); synchronous completion (no "still running" returns); finalize_run determinism.
 
 ## Aggregation (final synthesis agent → `docs/coverage-test-2026-06-20/_aggregate.md`)
-1. **Code-path coverage matrix** — each v0.3.0 path (financial-SIC/BDC, foreign-IFRS, pre-rev abstain, cyclical, concentration kill, V-shape/peak veto, REIT/NAV, cross-source, low-rev-loss, EBIT cascade, recall floor) × did it fire correctly, where, any misbehavior.
-2. **Clean-BUY list** — every market-wide BUY that survived adversarial verification (expected: very few; 0-BUY is the common honest output).
+1. **Code-path coverage matrix**, each v0.3.0 path (financial-SIC/BDC, foreign-IFRS, pre-rev abstain, cyclical, concentration kill, V-shape/peak veto, REIT/NAV, cross-source, low-rev-loss, EBIT cascade, recall floor) × did it fire correctly, where, any misbehavior.
+2. **Clean-BUY list**, every market-wide BUY that survived adversarial verification (expected: very few; 0-BUY is the common honest output).
 3. **recall@gold** results across the 4 gold-list themes.
 4. **Data-quality issues found** → prioritized **v0.3.1 backlog** (this is the test's main yield).
 5. **Overall verdict** on v0.3.0 cross-sector robustness.
 
 ## Execution mechanics
-One background workflow: ~48+3 themes chunked into waves of ~5 (sequential phases → ~5 EDGAR-concurrent), then the synthesis agent. Resumable via `resumeFromRunId` if interrupted. Throttling waves (not 14-wide) is deliberate — EDGAR, not agent count, is the limit.
+One background workflow: ~48+3 themes chunked into waves of ~5 (sequential phases → ~5 EDGAR-concurrent), then the synthesis agent. Resumable via `resumeFromRunId` if interrupted. Throttling waves (not 14-wide) is deliberate, EDGAR, not agent count, is the limit.

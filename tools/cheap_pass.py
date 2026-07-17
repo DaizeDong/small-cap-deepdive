@@ -29,12 +29,12 @@ from edgar import Company
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import (
     init_edgar, REPORTS, slug, today, CFG, http_get,
-    resolve_mktcap, band_for,  # P5 — mktcap fallback + band tagging (resolve ceiling here)
+    resolve_mktcap, band_for,  # P5, mktcap fallback + band tagging (resolve ceiling here)
 )
-# P3 — magnitude-based concentration (extractor + flag composer live in deepdive_data,
+# P3, magnitude-based concentration (extractor + flag composer live in deepdive_data,
 # the P3 owner). cheap_pass already reads the 10-K full text in killflag_scan, so we reuse
 # the same deterministic extractor on that text to surface the kill-flag BEFORE the expensive
-# deepdive — rather than duplicating the regex contract here.
+# deepdive, rather than duplicating the regex contract here.
 from deepdive_data import _extract_concentration, _concentration_flag
 
 FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json"
@@ -123,7 +123,7 @@ def _extract_business_blurb(txt: str, max_chars: int = 2000,
             candidate = txt[idx:idx + max_chars + 200].strip().lstrip("\r\n\t ")
             if not _looks_like_toc(candidate):
                 return candidate[:max_chars]
-            # TOC hit — advance past this match and try the next occurrence
+            # TOC hit, advance past this match and try the next occurrence
             start = idx
         # If we exhausted all occurrences for this pattern, try the next pattern.
     return ""
@@ -151,7 +151,7 @@ def killflag_scan(ticker: str) -> dict:
     out["kf_scanned"] = False
     out["business_blurb"] = ""
     out["filing_form"] = None
-    # P3 — concentration fields, surfaced at the cheap-pass stage from the same full text.
+    # P3, concentration fields, surfaced at the cheap-pass stage from the same full text.
     out["top_customer_pct"] = None
     out["top_program_pct"] = None
     out["concentration_flag"] = None
@@ -160,18 +160,18 @@ def killflag_scan(ticker: str) -> dict:
         c = Company(ticker)
         f = None
         form_used = None
-        # Primary: 10-K (amendments=False — 10-K/A 修正件常缺 going-concern 全文)
+        # Primary: 10-K (amendments=False, 10-K/A 修正件常缺 going-concern 全文)
         fl = c.get_filings(form="10-K", amendments=False)
         if fl is not None and len(fl):
             f = fl.latest(1)
             form_used = "10-K"
-        # Fallback 1: 20-F (foreign-domiciled filers — Phase 4)
+        # Fallback 1: 20-F (foreign-domiciled filers, Phase 4)
         if f is None:
             fl20 = c.get_filings(form="20-F", amendments=False)
             if fl20 is not None and len(fl20):
                 f = fl20.latest(1)
                 form_used = "20-F"
-        # Fallback 2: 40-F (Canadian filers — Phase 4)
+        # Fallback 2: 40-F (Canadian filers, Phase 4)
         if f is None:
             fl40 = c.get_filings(form="40-F", amendments=False)
             if fl40 is not None and len(fl40):
@@ -197,10 +197,10 @@ def killflag_scan(ticker: str) -> dict:
             else:
                 out[f"kf_{name}"] = 1 if phrase in low else 0
         out["kf_scanned"] = True
-        # Extract business blurb for theme-fit gate — form-aware (C fix):
+        # Extract business blurb for theme-fit gate, form-aware (C fix):
         # 20-F/40-F: Item 4 "Information on the Company"; 10-K: Item 1 "Business"
         out["business_blurb"] = _extract_business_blurb(txt, filing_form=form_used)
-        # P3 — magnitude-based concentration from the same full text. Reuses the P3 owner's
+        # P3, magnitude-based concentration from the same full text. Reuses the P3 owner's
         # deterministic extractor (deepdive_data) so cheap_pass and deepdive agree on the
         # contract; surfacing concentration_flag here lets score() reject a ">60% single-program
         # / >40% single-customer" kill BEFORE the expensive deepdive runs.
@@ -296,10 +296,10 @@ def score(df: pd.DataFrame) -> pd.DataFrame:
     # reject_burn = short runway AND negative operating cash flow (actual cash burn).
     df["reject_burn"] = df["runway_periods"].notna() & (df["runway_periods"] < 1.0) & \
                         (df["ocf_latest"].fillna(0) < 0)
-    # P3 — concentration kill-flag is a hard reject at the cheap-pass stage.
+    # P3, concentration kill-flag is a hard reject at the cheap-pass stage.
     # concentration_flag=="kill" (>60% single-program OR >40% single-customer) is a
     # BUY-blocking pathology (SIGA ~90% BARDA dependence); reject before deepdive.
-    # "watch" does NOT reject here — it flows through to the deepdive/rubric WATCH-cap.
+    # "watch" does NOT reject here, it flows through to the deepdive/rubric WATCH-cap.
     if "concentration_flag" in df.columns:
         df["reject_concentration"] = df["concentration_flag"].fillna("") == "kill"
     else:
@@ -335,7 +335,7 @@ def _selftest():
     )
     print(f"  IQST: going_concern={r['kf_going_concern']} substantial_doubt={r['kf_substantial_doubt']}  OK")
 
-    # Test 2: KOP amendment exclusion — latest filing must be 10-K, not 10-K/A
+    # Test 2: KOP amendment exclusion, latest filing must be 10-K, not 10-K/A
     kop_company = Company("KOP")
     fl = kop_company.get_filings(form="10-K", amendments=False)
     f = fl.latest(1) if fl is not None and len(fl) else None
@@ -385,7 +385,7 @@ def _selftest():
     )
     print(f"  KOP: kf_material_weakness={kop_r['kf_material_weakness']} (Guard 3b anchor OK)")
 
-    # Test 6: 20-F fallback — STNG (Scorpio Tankers) is a Marshall Islands domicile
+    # Test 6: 20-F fallback, STNG (Scorpio Tankers) is a Marshall Islands domicile
     # that files 20-F (not 10-K). killflag_scan must find the 20-F without crashing,
     # set kf_scanned=True, and filing_form must be exactly "20-F" (not 10-K or 40-F).
     # The business_blurb must be either real Item-4 prose OR empty (not the directors
@@ -423,7 +423,7 @@ def _selftest():
     else:
         print("  STNG blurb: empty (acceptable — theme-fit gate will fall back to WebSearch)")
 
-    # Test 7: I4 — reject_burn uses OCF not net_income (MATW-like scenario)
+    # Test 7: I4, reject_burn uses OCF not net_income (MATW-like scenario)
     # A company with positive OCF but negative GAAP net income must NOT be rejected by reject_burn.
     # runway_periods < 1.0 is a required condition; simulate it with low cash relative to OCF.
     # But with positive OCF, runway_periods would be None (OCF >= 0 → no burn).
@@ -486,7 +486,7 @@ def _selftest():
     )
     print("  I4 reject_burn (OCF negative): cash-burning company correctly rejected  OK")
 
-    # Test 8: P3 — concentration_flag composition contract (reused from deepdive_data P3 owner).
+    # Test 8: P3, concentration_flag composition contract (reused from deepdive_data P3 owner).
     # kill if top_program_pct>60 OR top_customer_pct>40; watch in 40-60; None otherwise.
     assert _concentration_flag(None, 75.0) == "kill", "top_program 75% must be kill"
     assert _concentration_flag(45.0, None) == "kill", "top_customer 45% must be kill"
@@ -496,7 +496,7 @@ def _selftest():
     assert _concentration_flag(None, None) is None, "no concentration data must be None"
     print("  P3 _concentration_flag contract (kill>60prog/>40cust, watch 40-60): OK")
 
-    # Test 9: P3 — score() rejects a concentration_flag=="kill" row at the cheap-pass stage,
+    # Test 9: P3, score() rejects a concentration_flag=="kill" row at the cheap-pass stage,
     # and does NOT reject "watch"/None/missing (those flow through to the deepdive WATCH-cap).
     # Build a row that is otherwise perfectly clean (no kill-flags, positive OCF) so the ONLY
     # difference is the concentration flag. This is the SIGA ~90%-BARDA scenario.
@@ -528,7 +528,7 @@ def _selftest():
         "P3: clean company with no concentration must survive cheap_pass")
     print("  P3 score() concentration kill-reject (kill rejected; watch/none survive): OK")
 
-    # Test 10: P3 — score() must not crash when the concentration_flag column is absent
+    # Test 10: P3, score() must not crash when the concentration_flag column is absent
     # (backward-compat with pre-P3 cheap_pass CSVs / event records lacking the field).
     _legacy_df = pd.DataFrame([{
         "ticker": "FAKE_LEGACY", "name": "Legacy", "mktcap": 5e8,
@@ -545,7 +545,7 @@ def _selftest():
         "P3: legacy clean row must survive when concentration_flag column is absent")
     print("  P3 score() legacy-record backward-compat (no concentration_flag column): OK")
 
-    # Test 11: P5 — resolve_ceiling resolves mktcap via the _common fallback, flows through
+    # Test 11: P5, resolve_ceiling resolves mktcap via the _common fallback, flows through
     # band='unknown' (null mktcap is NEVER a silent drop), and excludes only 'large'.
     # Use injected ciks/prices: yfinance-null rows are reconstructed from SEC shares x price
     # by resolve_mktcap (called inside resolve_ceiling). To keep the selftest network-free,
@@ -574,7 +574,7 @@ def _selftest():
     assert _kept.loc["WATCHC", "band"] == "watch", "P5: 3B must band 'watch' (kept, surfaced separately)"
     print("  P5 resolve_ceiling (large excluded; unknown flows through; deep/watch banded): OK")
 
-    # Test 12: P5 — the SEC-shares x price reconstruction leg (network-free, via resolve_mktcap
+    # Test 12: P5, the SEC-shares x price reconstruction leg (network-free, via resolve_mktcap
     # with an injected shares_fn) feeds the band. resolve_ceiling calls resolve_mktcap internally
     # for null-mktcap rows; here we verify the leg's contract directly so the in-scope-resolution
     # path is asserted deterministically: yfinance-null + price + SEC shares -> a real mktcap whose
@@ -586,7 +586,7 @@ def _selftest():
         "P5: a 0.5B reconstructed mktcap must band 'deep' (in-scope, flows to deepdive)")
     print("  P5 SEC-shares x price reconstruction leg (yfinance-null -> in-scope 'deep'): OK")
 
-    # Test 13: P12 — a row with yfinance mktcap=None but a RESOLVABLE SEC shares x price
+    # Test 13: P12, a row with yfinance mktcap=None but a RESOLVABLE SEC shares x price
     # must be reconstructed INSIDE resolve_ceiling, land in a real band, and NOT be
     # size-excluded. This is the SJW/HI/MRC bug: yfinance returns NaN for a real small-cap,
     # the row used to be discarded before reaching cheap_pass. resolve_ceiling must run the
@@ -616,7 +616,7 @@ def _selftest():
     assert _p12_kept.loc["SJWX", "band"] == "deep", (
         f"P12: reconstructed $1.5B must band 'deep' (in-scope, NOT 'unknown'), "
         f"got {_p12_kept.loc['SJWX','band']!r}")
-    # BIGX: the SEC reconstruction fires FIRST, THEN the >watch_max exclusion bites —
+    # BIGX: the SEC reconstruction fires FIRST, THEN the >watch_max exclusion bites ,
     # confirming resolution strictly precedes size-exclusion (not the reverse).
     assert "BIGX" not in _p12_kept.index, (
         "P12: a reconstructed mktcap that is genuinely 'large' is excluded AFTER resolution "
@@ -719,7 +719,7 @@ def main():
         if "price" not in uni.columns:
             uni["price"] = None
         # In event mode, all records are candidates (no smallcap_candidate filter needed).
-        # P5: resolve the ceiling here via the _common fallback — unknown mktcap flows through
+        # P5: resolve the ceiling here via the _common fallback, unknown mktcap flows through
         # (pre-listing spinoffs), only out-of-scope large caps are excluded.
         cand = resolve_ceiling(uni, args.max_mcap)
     else:

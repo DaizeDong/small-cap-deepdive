@@ -1,4 +1,4 @@
-# Root-cause of the "no edge vs random" result — and a cluster-robust de-risk edge
+# Root-cause of the "no edge vs random" result, and a cluster-robust de-risk edge
 
 *self-evolve run, 2026-06-24. Methodology: reflect → propose → evaluate → judge, with
 truth-isolation (out-of-sample holdout) and a deterministic code judge. LLM proposes; the
@@ -7,19 +7,19 @@ backtest + cluster-robust statistics decide. Adversarially reviewed by a second 
 ## TL;DR
 
 - **No durable alpha (winner-picking).** The engine's cheapness signal (Margin-of-Safety) is
-  monotone in-sample but it is a **2020–21 post-COVID-recovery regime artifact**: it vanishes
-  on the 2023–24 holdout (stratified within-cell permutation **p = 0.72**) and on a drop-2020
+  monotone in-sample but it is a **2020 to 21 post-COVID-recovery regime artifact**: it vanishes
+  on the 2023 to 24 holdout (stratified within-cell permutation **p = 0.72**) and on a drop-2020
   re-test (**p = 0.35**). The skill cannot pick market-beaters, and we do **not** claim it can.
-- **A real, out-of-sample, cluster-robust DE-RISK edge (blowup avoidance — the tool's actual
+- **A real, out-of-sample, cluster-robust DE-RISK edge (blowup avoidance, the tool's actual
   mission).** A point-in-time fundamental **distress rank** concentrates forward-12mo blowups
   (return < −40%) far above base rate: top-quintile **lift 2.56×**, recall 51%, **ticker-cluster
   bootstrap 95% CI on lift = [1.73, 3.00]**, P(lift ≤ 1) = 0.000 over 5,000 ticker resamples,
-  robust across leave-one-year-out folds. This is the "significantly better than random" result —
+  robust across leave-one-year-out folds. This is the "significantly better than random" result ,
   on the metric a de-risk scanner exists for.
 
 ## 1. Root cause: the engine computes a usable signal; the decision layer throws it away
 
-Over the 25-cell survivorship-safe PIT panel (5 themes × 5 as-of dates 2020–2024, 12mo horizon,
+Over the 25-cell survivorship-safe PIT panel (5 themes × 5 as-of dates 2020 to 2024, 12mo horizon,
 ~936 priceable names):
 
 - **0 BUY across all 25 cells.** The mechanical BUY needs `mos_basis == fcf_cap` AND MoS ≥ 30 AND
@@ -31,7 +31,7 @@ Over the 25-cell survivorship-safe PIT panel (5 themes × 5 as-of dates 2020–2
   `debt_truncation_suspected` (fires 48 %, blowup lift **0.67×**). They were ANDed into
   `buy_eligible`, so they kill eligibility on good names while carrying no downside signal.
 - Net: the prior verdict ("≈ random, danger calls below base rate") was correct **about the
-  decision layer** — but the underlying MoS signal and the genuine distress flags were being
+  decision layer**, but the underlying MoS signal and the genuine distress flags were being
   discarded, not absent.
 
 ## 2. No durable alpha (the honest negative)
@@ -41,31 +41,31 @@ monotonicity **does not generalize**:
 
 | split | rule beat-rate | base | perm p |
 |---|---|---|---|
-| TRAIN 2020–22 | 0.545 | 0.482 | **0.017** ✓ |
-| TEST 2023–24 | 0.570 | 0.579 | **0.72** ✗ |
+| TRAIN 2020 to 22 | 0.545 | 0.482 | **0.017** ✓ |
+| TEST 2023 to 24 | 0.570 | 0.579 | **0.72** ✗ |
 | drop-2020 | 0.556 | 0.539 | **0.35** ✗ |
 
 Per-year edge: +10.5 pt (2020), +7.3 pt (2021), +3.2 pt (2022), **−0.4 pt (2023), −1.1 pt (2024)**.
 The edge lives entirely in the COVID crash-and-recovery. **There is no winner-picking alpha to
-implement.** (This is exactly the failure self-evolve's holdout is designed to expose — and the
+implement.** (This is exactly the failure self-evolve's holdout is designed to expose, and the
 opposite of the de-risk result below, which *does* survive the same scrutiny.)
 
 ## 3. The de-risk edge: a PIT fundamental distress rank predicts blowups OOS
 
-**Scope:** non-financial operating companies with core fundamentals (banks excluded — bank
+**Scope:** non-financial operating companies with core fundamentals (banks excluded, bank
 distress is NIM/NPL/deposit-flight, a different model; they already route to abstain). n = 412
 name-years, 55 blowups, **93 unique tickers**, 36 unique blowup tickers.
 
-**Distress flags** (point-in-time only — XBRL facts filed ≤ as-of, annual, latest-filed-per-end;
+**Distress flags** (point-in-time only, XBRL facts filed ≤ as-of, annual, latest-filed-per-end;
 all mechanism-grounded in distress theory, none data-mined):
 
-- `neg_ocf` — operating cash flow < 0
-- `neg_margin` — operating income < 0
-- `accum_deficit` — retained earnings < 0
-- `low_altman` — Altman Z″ = 6.56·WC/TA + 3.26·RE/TA + 6.72·EBIT/TA + 1.05·Equity/Liab < 1.1
+- `neg_ocf`, operating cash flow < 0
+- `neg_margin`, operating income < 0
+- `accum_deficit`, retained earnings < 0
+- `low_altman`, Altman Z″ = 6.56·WC/TA + 3.26·RE/TA + 6.72·EBIT/TA + 1.05·Equity/Liab < 1.1
 
 **CORE-4 distress rank** = unweighted sum of the four. Monotone dose-response (blowup rate by
-score, pooled): score 0–2 ≈ 6–7 % (= base), score 4 = 21.6 %, score 5 = 45.5 %.
+score, pooled): score 0 to 2 ≈ 6 to 7 % (= base), score 4 = 21.6 %, score 5 = 45.5 %.
 
 **Out-of-sample, cluster-robust results** (per-year top-quintile, pooled across all 5 years):
 
@@ -77,7 +77,7 @@ score, pooled): score 0–2 ≈ 6–7 % (= base), score 4 = 21.6 %, score 5 = 45
 Leave-one-year-out CV (refit logistic per fold, pooled OOS): lift 2.19×, **pooled OOS AUC 0.680**.
 The unweighted CORE-4 rank ≈ the fitted logistic, so the result does not depend on fragile weights.
 
-## 4. Adversarial review (codex) — caveats honored, not hidden
+## 4. Adversarial review (codex), caveats honored, not hidden
 
 A second model was tasked solely with breaking the claim. Its valid caveats and our responses:
 
@@ -93,9 +93,9 @@ A second model was tasked solely with breaking the claim. Its valid caveats and 
    acknowledged; the OOS + cluster robustness + theory-grounding mitigate but do not eliminate it.
 4. **`high_lev` is directionally wrong** (negative logistic weight) → dropped; **CORE-4 is the
    honest signal** and is cleaner/stronger than the 8-flag composite.
-5. **Survivorship**: ~32 names dropped for no entry price; bounding shows lift stays ~2.08–2.11×
-   either way — does not invalidate the edge, but the estimand is "priceable names."
-6. **"Operating losers blow up more"** — yes, largely. That is a *feature*: a known, mechanism-grounded
+5. **Survivorship**: ~32 names dropped for no entry price; bounding shows lift stays ~2.08 to 2.11×
+   either way, does not invalidate the edge, but the estimand is "priceable names."
+6. **"Operating losers blow up more"**, yes, largely. That is a *feature*: a known, mechanism-grounded
    distress signal is more trustworthy than a data-mined one, and it is exactly what a de-risk
    kill-flag should encode.
 

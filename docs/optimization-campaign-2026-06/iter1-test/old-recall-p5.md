@@ -1,7 +1,7 @@
-# Iteration-1 Test — RECALL before/after (P5 mktcap fix)
+# Iteration-1 Test, RECALL before/after (P5 mktcap fix)
 
 **Run:** `2026-06-20_iter1-old-recall-p5` (skill commit `e0f0039`, clean tree)
-**Stage tested:** `discover.py` + `cheap_pass.py` recall path only (no theme-fit gate, no rank — this is a recall test).
+**Stage tested:** `discover.py` + `cheap_pass.py` recall path only (no theme-fit gate, no rank, this is a recall test).
 **Outputs:** `reports/smallcap/2026-06-20_iter1-old-recall-p5/`
 **Date:** 2026-06-20
 
@@ -16,22 +16,22 @@ candidates:
 | **regbank2** (`community bank,regional bank,deposits`) | **429** | **~0** (429/429 yfinance 429 → all dropped) | **271** | 231 |
 | **shipping2** (`drybulk,tanker,shipping`) | **410** | **~12** (398/410 dropped) | **219** | 172 |
 
-**Is the 100% / 97% silent-drop fixed? YES at the universe/band level** — null-mktcap rows are
+**Is the 100% / 97% silent-drop fixed? YES at the universe/band level**, null-mktcap rows are
 no longer deleted from the frame; they survive as `band="unknown"` and the SEC
 `shares x price` fallback now reconstructs a real mktcap for rows where yfinance gave only a
 null marketCap but a live price. **Candidates went from ~0 → 271 (regbank) and ~12 → 219
 (shipping).** The recall recovery is real and large.
 
 **One important nuance (not a regression, but a residual gap):** `band="unknown"` rows where
-yfinance returned **nothing at all** (no marketCap AND no price AND no volume — the pure
-rate-limit / quote-404 case) flow through as `band="unknown"` (good — they are visible, not
+yfinance returned **nothing at all** (no marketCap AND no price AND no volume, the pure
+rate-limit / quote-404 case) flow through as `band="unknown"` (good, they are visible, not
 silently dropped), but they get `smallcap_candidate=False` because the **illiquidity gate** (`avg_dollar_vol.fillna(0) < min_dollar_vol`) fires on their null volume. So the *band-drop* is
 fixed; a *liquidity-gate drop* now stands in front of the no-price subset. See "Where the
 remaining unknowns go" below.
 
 ---
 
-## 1. regbank2 — `community bank,regional bank,deposits`
+## 1. regbank2, `community bank,regional bank,deposits`
 
 Raw FTS hits (dedup by CIK): **429**
 
@@ -40,7 +40,7 @@ Band / mktcap-source breakdown after `discover.py`:
 | band | count | meaning |
 |---|---|---|
 | deep | 290 | mktcap < $2B → full deep-dive scope |
-| watch | 43 | $2B–$5B → surfaced, no deep-dive |
+| watch | 43 | $2B,$5B → surfaced, no deep-dive |
 | large | 50 | > $5B → out of scope (flagged, NOT dropped) |
 | unknown | 46 | mktcap unresolved → flows through as band, NOT dropped |
 
@@ -61,7 +61,7 @@ Band / mktcap-source breakdown after `discover.py`:
 `mktcap <= max_mcap` ceiling silently dropped all of them before any gate. **After (P5): 271
 candidates.** Silent-drop fixed.
 
-## 2. shipping2 — `drybulk,tanker,shipping`
+## 2. shipping2, `drybulk,tanker,shipping`
 
 Raw FTS hits (dedup by CIK): **410**
 
@@ -91,10 +91,10 @@ Raw FTS hits (dedup by CIK): **410**
 
 **Confirmed: band="unknown" names DO flow into the frame instead of being silently dropped.**
 Every one of the 46 (regbank) / 38 (shipping) unresolved rows is present in the output CSV with
-`band="unknown"` — none vanished. This is the core P5 behavior, and it holds.
+`band="unknown"`, none vanished. This is the core P5 behavior, and it holds.
 
 **Why those specific unknowns are still NOT in the candidate set:** in this run, yfinance was
-hard-down for them — they returned `marketCap=None`, `price=None`, AND `avg_dollar_vol=None`
+hard-down for them, they returned `marketCap=None`, `price=None`, AND `avg_dollar_vol=None`
 (spot-checked VBTX/BRKL/HONE directly: yfinance returns null marketCap and null price, BRKL even
 404s). Because price is null, the SEC `shares x price` fallback cannot fire (it needs a price), so
 mktcap stays unresolved → `band="unknown"`. Then the illiquidity gate
@@ -103,7 +103,7 @@ mktcap stays unresolved → `band="unknown"`. Then the illiquidity gate
 
 So for the no-data subset the disposition changed from **"deleted from the frame"** (v0.2.0
 silent mktcap drop) to **"present, banded unknown, excluded by the liquidity gate"** (P5). That
-is strictly better — the names are now visible/auditable and would re-enter the candidate set on a
+is strictly better, the names are now visible/auditable and would re-enter the candidate set on a
 re-run once yfinance serves a price (the SEC fallback would then reconstruct the cap). But it
 means the *full* recovery of the no-price subset depends on yfinance returning at least a price.
 
@@ -111,7 +111,7 @@ means the *full* recovery of the no-price subset depends on yfinance returning a
 - Silent **band-level** drop of null-mktcap rows: **FIXED** (rows flow through as `unknown`).
 - SEC `shares x price` mktcap reconstruction when yfinance gives a price: **WORKING** (8 + 6 rows recovered).
 - No-price / no-volume rows (pure yfinance outage): still excluded, but now by the **liquidity
-  gate**, not by a blanket mktcap drop — visible in the CSV with `band="unknown"`, not deleted.
+  gate**, not by a blanket mktcap drop, visible in the CSV with `band="unknown"`, not deleted.
   Residual hardening idea (not in scope here): give `resolve_mktcap` a price fallback (e.g. SEC
   last close or a second quote source) so the no-price subset can also reconstruct a cap and clear
   the liquidity gate.
@@ -121,7 +121,7 @@ those become **271 / 219 candidates**, so the headline regression is resolved.
 
 ---
 
-## 4. Spot-check — full deepdive + valuation on 3 recovered names
+## 4. Spot-check, full deepdive + valuation on 3 recovered names
 
 Names chosen as genuine theme-member small-cap operators that the P5 path now surfaces and can
 process end-to-end (under v0.2.0's regbank silent-drop, BAFN/MBBC would never have reached the
@@ -136,10 +136,10 @@ deepdive stage at all). Each ran `deepdive_data.py --ticker` then `valuation.py 
 Observations:
 - **All three correctly fail the new BUY rule.** A BUY needs `mos_basis ∈ {fcf_cap,nav}` AND
   MoS≥30 AND `buy_eligible==true` AND zero kill-flags. None clear `buy_eligible`, so none can be
-  a BUY — exactly as designed.
+  a BUY, exactly as designed.
 - **BAFN/MBBC**: the financial-SIC guard (`financial_sic_forced_unsuitable`, banks SIC 6022/6036)
   forces FCF-model-unsuitable → NAV basis; BAFN's +221% NAV MoS trips `extreme_mos_review_required`
-  (book-equity proxy used for tangible equity — exactly why the extreme-MoS guard exists for banks).
+  (book-equity proxy used for tangible equity, exactly why the extreme-MoS guard exists for banks).
   Both `buy_eligible=False`. Concentration/decline flags clean.
 - **ICON**: shipping microcap with a real **going-concern** flag in its latest filing plus
   `wrong_entity_suspected` (NI/revenue ratio absurd 2.5) and −68% share dilution → the kill path
@@ -155,18 +155,18 @@ Spot-check artifacts:
 
 ---
 
-## 5. Supplementary T2 market-intel context (analyst color only — NOT decisional)
+## 5. Supplementary T2 market-intel context (analyst color only, NOT decisional)
 
 > Labeled supplementary per the market-intel enrichment allowance. This did NOT and must NOT
 > drive any `buy_eligible`/BUY decision (those stay anchored to T1 filings above).
 
 - **Dry-bulk shipping** (TrendsMCP, Google search interest): 12M growth **+62.5%** (16 → 26,
-  volume 140 → 227) — demand interest up year-over-year; but 3M **−72.6%** (off a March spring
-  spike of 95). Read: cyclical theme, recently cooled from a peak — consistent with the "hot
+  volume 140 → 227), demand interest up year-over-year; but 3M **−72.6%** (off a March spring
+  spike of 95). Read: cyclical theme, recently cooled from a peak, consistent with the "hot
   theme = casino" world-view (the spring spike is the crowd; the names worth attention are the
   real operators, separable only by the T1 gate above).
 - **Community bank**: TrendsMCP returned `data_unavailable` for the keyword at run time; no T2
-  color recorded. (No decision impact — regbank verdicts are T1-anchored.)
+  color recorded. (No decision impact, regbank verdicts are T1-anchored.)
 
 ---
 

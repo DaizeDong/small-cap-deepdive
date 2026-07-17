@@ -28,7 +28,7 @@ _EXAMPLE = _REF / "config.example.json"
 _PLACEHOLDER_UA = "small-cap-deepdive research your-email@example.com"
 PASS, FAIL, WARN = "PASS", "FAIL", "WARN"
 
-# field -> (python type, required)  — mirrors config.example.json schema (config-spec E1).
+# field -> (python type, required), mirrors config.example.json schema (config-spec E1).
 _NUMERIC = {
     "market_cap_max": int, "watch_band_max": int, "micro_cap_max": int,
     "min_dollar_vol": int, "normalize_years": int,
@@ -92,7 +92,7 @@ def main():
     def check(name, ok, detail="", level=FAIL):
         results.append((name, ok, detail, level))
 
-    # --- schema_version: structural contract tag (config-spec E1). Soft — defaults supply it. ---
+    # --- schema_version: structural contract tag (config-spec E1). Soft, defaults supply it. ---
     sv = cfg.get("schema_version")
     check("schema_version present (== 1)", sv == 1, "got %r (expected 1)" % sv, WARN)
 
@@ -134,7 +134,7 @@ def main():
     sic = cfg.get("sic_hard_exclude")
     check("sic_hard_exclude is a list", isinstance(sic, list), "type %s" % type(sic).__name__)
 
-    # --- E6: secrets isolation — overlay file must be gitignored / out-of-tree ---
+    # --- E6: secrets isolation, overlay file must be gitignored / out-of-tree ---
     gi = _REPO / ".gitignore"
     gi_txt = gi.read_text(encoding="utf-8", errors="replace") if gi.is_file() else ""
     check(".gitignore blocks config.json + *.env + secrets/",

@@ -1,4 +1,4 @@
-# v0.3.x Point-in-Time Backtest — Cross-Panel Verdict (updated, regbank populated + penny-guarded)
+# v0.3.x Point-in-Time Backtest, Cross-Panel Verdict (updated, regbank populated + penny-guarded)
 
 > Synthesis by the controller (the agent synthesis step hit transient gateway 530s; the numbers
 > below are computed deterministically from the 25 on-disk cell JSONs). Source:
@@ -18,7 +18,7 @@
 
 - **Actual BUYs fired across the entire 5-year × 5-theme panel = 0** (no name cleared eligible AND
   MoS≥30 AND clean in any cell). The "buy_eligible (flag)" row is the weaker eligibility-flag superset
-  (mostly sub-MoS, cell-bucketed WATCH) — and even it **lags IWM at the median (−0.078)**.
+  (mostly sub-MoS, cell-bucketed WATCH), and even it **lags IWM at the median (−0.078)**.
 - **The de-risk gradient is INVERTED**: AVOID (median +0.148, win 63%) is the *best* bucket; WATCH ≈
   market; the eligibility-flagged names are worst. The labels do not order forward returns as a
   de-risk scanner intends.
@@ -36,34 +36,34 @@
 - **2022 broad bear = NO protection**: every bucket negative at the median, AVOID worst. The rubric
   did not de-risk the one true bear.
 - **2020 V-bottom**: the rubric was cautious at the bottom (BUY-flagged names −0.58!), i.e. it is
-  pro-cyclically late — it missed the recovery's biggest movers.
+  pro-cyclically late, it missed the recovery's biggest movers.
 
 ## 3. Blowup-avoidance (>40% drawdown over the horizon)
 
 Pooled: **4 / 72 = 5.6%** of blowups were in AVOID/abstain (63 in WATCH, 5 in buy_eligible-flag).
-Overall weak — the rubric over-routes nearly everything to WATCH, so blowups concentrate there.
+Overall weak, the rubric over-routes nearly everything to WATCH, so blowups concentrate there.
 
-## 4. regbank-2023 (SVB regional-bank crisis) — the key new natural experiment, and a genuine WIN
+## 4. regbank-2023 (SVB regional-bank crisis), the key new natural experiment, and a genuine WIN
 
 - universe 100 (capped), buckets {WATCH 83, AVOID 10, abstain 7, **BUY 0**}, IWM +9.8%.
-- **Blowup-avoidance = 1.0 (1/1): PNBK — the one bank that cratered >40% — was correctly in AVOID.**
+- **Blowup-avoidance = 1.0 (1/1): PNBK, the one bank that cratered >40%, was correctly in AVOID.**
 - AVOID median excess **+0.23 (win 80%)**, abstain +0.25, WATCH +0.08. In a real sector crisis the
   kill-flag / abstain routing *did* identify and side-step the failing bank and outperformed.
 
 ## 5. Verdict (honest, nuanced)
 
-**As a return-predictive bucket gradient, the rubric is NOT validated — and is mildly inverted.**
+**As a return-predictive bucket gradient, the rubric is NOT validated, and is mildly inverted.**
 - The BUY signal has **no demonstrated edge**: it literally never fired a real BUY in 5 years × 5
   themes, and the eligibility-flagged superset lags IWM at the median. Extreme conservatism is the
   empirical norm (consistent with "0-BUY is valid", now taken to the limit).
-- The **AVOID label does not broadly identify losers** (AVOID *outperforms* in 4 of 5 regimes) —
+- The **AVOID label does not broadly identify losers** (AVOID *outperforms* in 4 of 5 regimes) ,
   i.e. names the model flags as risky mostly do fine; the gradient is inverted, not monotone.
 - Overall **blowup-avoidance is weak (5.6%)** because almost everything is routed to WATCH.
 
 **But there is one real, narrow de-risk signal:** in the **targeted SVB regional-bank crisis
 (regbank-2023)** the rubric put the single >40% crasher (PNBK) in AVOID (blowup-avoidance 1.0) and
 its AVOID/abstain buckets out-returned WATCH. The kill-flag / financial-abstain machinery works in a
-genuine sector crisis — it just doesn't generalize into a return gradient across normal/bear regimes.
+genuine sector crisis, it just doesn't generalize into a return gradient across normal/bear regimes.
 
 **Bottom line:** the skill is a *disciplined refuse-to-overpay + don't-buy-the-obviously-broken*
 screen whose **forward-return edge is unproven (BUY) and inverted (AVOID) on this panel**, with a
@@ -74,14 +74,14 @@ not alpha.
 ## 7. Formal significance test (stratified within-cell label permutation, B=20000)
 
 `significance_test.py` (reproducible, seed=42). The honest null shuffles bucket labels *within each
-cell* (respects IWM/regime clustering; treating all 959 names as independent — as Kruskal-Wallis
-does — is anti-conservative).
+cell* (respects IWM/regime clustering; treating all 959 names as independent, as Kruskal-Wallis
+does, is anti-conservative).
 
 | test | result | reading |
 |---|---|---|
-| **omnibus** — any bucket structure beyond random? | **p = 0.122** | NOT significant — the 4-bucket scheme *as a whole* is statistically **indistinguishable from random labeling** |
-| buy_eligible underperforms WATCH | **p = 0.61** | NOT significant — the BUY signal is noise / no-edge (CI [−0.23, +0.04] includes 0) |
-| AVOID outperforms WATCH (the inversion) | **p = 0.006** | **significant** (survives Bonferroni ×3); AVOID CI [+0.005, +0.32] excludes 0 — the inversion is REAL |
+| **omnibus**, any bucket structure beyond random? | **p = 0.122** | NOT significant, the 4-bucket scheme *as a whole* is statistically **indistinguishable from random labeling** |
+| buy_eligible underperforms WATCH | **p = 0.61** | NOT significant, the BUY signal is noise / no-edge (CI [−0.23, +0.04] includes 0) |
+| AVOID outperforms WATCH (the inversion) | **p = 0.006** | **significant** (survives Bonferroni ×3); AVOID CI [+0.005, +0.32] excludes 0, the inversion is REAL |
 
 Cluster-bootstrap 95% CIs of median excess: **only AVOID excludes 0** (+0.005..+0.324);
 buy_eligible / WATCH / abstain all include 0. Clustering-naive references (anti-conservative):
@@ -89,7 +89,7 @@ Kruskal-Wallis p=0.024, Mann-Whitney AVOID>WATCH p=0.0017.
 
 **Conclusion:** the BUY signal and the overall bucketing are statistically **indistinguishable from
 random**. The *only* effect that survives a proper clustering-aware test is the **AVOID inversion**
-(p=0.006) — significant and in the WRONG direction: AVOID-labeled names reliably *outperformed*. The
+(p=0.006), significant and in the WRONG direction: AVOID-labeled names reliably *outperformed*. The
 SVB save (PNBK→AVOID) is a real tail case, but on average AVOID over-flags healthy names. Net: as a
 return/risk signal the rubric is random-or-backwards; its demonstrated value is mechanical discipline
 (refuse to overpay, no artifact BUYs, rare genuine crisis flags), not statistical edge.

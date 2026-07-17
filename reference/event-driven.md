@@ -1,4 +1,4 @@
-# Event-Driven Discovery — Phase 5
+# Event-Driven Discovery, Phase 5
 
 > This document is the design and rationale reference for `tools/discover_events.py`.
 > Entry workflow: see `SKILL.md §Entry 4 — events`.
@@ -12,12 +12,12 @@ The run-3 hunting-grounds audit established a key empirical result:
 
 > Theme/industry discovery is efficiently priced in the >$200M market-cap band.
 > The mispricing that small capital can still capture is overwhelmingly **event-driven /
-> forced-trading** — not static "cheap neglected value" within a sector.
+> forced-trading**, not static "cheap neglected value" within a sector.
 
 This is not a theoretical claim.  The run-3 evidence was:
 - Three full theme runs (~40 deep dives) across industrials, deathcare, ag inputs, and AI.
 - BUY count across all runs: **0**.
-- The WATCH ratings were mostly correct — efficiently priced cyclicals with no margin of safety.
+- The WATCH ratings were mostly correct, efficiently priced cyclicals with no margin of safety.
 - The rubric's BUY trigger (Phase 3, `margin_of_safety_pct ≥ 30%`) is conservative by design
   (12% cap rate on normalized FCF), but even at that bar, no theme company cleared it.
 
@@ -28,8 +28,8 @@ filing events**, not in "undiscovered value" within identifiable sectors.
 Two event types have theoretical and empirical backing as sources of persistent (if decaying)
 structural mis-pricing:
 
-1. **Spinoffs — Form 10-12B** — forced index-fund selling creates supply overhang.
-2. **Cluster open-market insider buys — Form 4** — insiders buying at market price with
+1. **Spinoffs, Form 10-12B**, forced index-fund selling creates supply overhang.
+2. **Cluster open-market insider buys, Form 4**, insiders buying at market price with
    personal capital is the hardest management-conviction signal available.
 
 Both are already enumerated as qualifying catalyst categories (a) and (b) in
@@ -39,7 +39,7 @@ same downstream deep-dive and rating engine.
 
 ---
 
-## Axis 1 — Spinoffs: Form 10-12B
+## Axis 1, Spinoffs: Form 10-12B
 
 ### What 10-12B Is
 
@@ -64,7 +64,7 @@ The forced-selling mechanism is structurally documented:
 1. **Index-fund mandate mismatch.** When a company is spun off, it is initially not
    included in the major indices (S&P 500, Russell 2000, etc.) because it has not yet
    satisfied seasoning requirements.  Passive ETFs and index funds that hold the parent
-   must sell the spinoff shares they receive in the distribution — their mandates do not
+   must sell the spinoff shares they receive in the distribution, their mandates do not
    permit holding non-index securities.
 
 2. **Supply overhang.** This forced selling creates a temporary supply overhang with no
@@ -82,12 +82,12 @@ in the small/micro-cap band where index-fund pressure is largest relative to flo
 
 ### Parsing Notes
 
-`discover_events.py --spinoffs` uses the EDGAR EFTS response with no keyword query —
+`discover_events.py --spinoffs` uses the EDGAR EFTS response with no keyword query ,
 only the `forms=10-12B` filter.  This is structurally high-precision by definition.
 
 EFTS `display_names` entries have two variants:
-- `"Company Inc.  (TICK)  (CIK 0001234567)"` — ticker already assigned
-- `"Company Inc.  (CIK 0001234567)"` — no ticker yet (common for very new registrations)
+- `"Company Inc.  (TICK)  (CIK 0001234567)"`, ticker already assigned
+- `"Company Inc.  (CIK 0001234567)"`, no ticker yet (common for very new registrations)
 
 Both are handled.  Deduplication by CIK keeps the most informative record (prefers the
 variant with a ticker; preserves earliest file date).
@@ -110,13 +110,13 @@ specific forced-selling mechanism per the rubric's five-requirement checklist.
 
 ---
 
-## Axis 2 — Cluster Open-Market Insider Buys
+## Axis 2, Cluster Open-Market Insider Buys
 
 ### What the openinsider Cluster-Buy Table Is
 
 `http://openinsider.com/latest-cluster-buys` aggregates Form 4 filings where **multiple
 insiders at the same company purchased shares in the open market within a recent window**.
-The page is already filtered to cluster events — every row represents a company where
+The page is already filtered to cluster events, every row represents a company where
 ≥1 insiders bought, and the "Ins" column shows the count.
 
 `discover_events.py --insider-clusters` parses this HTML table using the same
@@ -127,7 +127,7 @@ The page is already filtered to cluster events — every row represents a compan
 Note on the openinsider table: every row in the `/latest-cluster-buys` page represents a
 company where openinsider has observed at least one insider buy in their raw aggregation;
 the `Ins` column shows the cluster count. The tool applies `--min-insiders 2` (default)
-to enumerate at the rubric floor — the `n_insiders` field is surfaced per record so the
+to enumerate at the rubric floor, the `n_insiders` field is surfaced per record so the
 deep-dive agent or human analyst can prefer clusters of 3+ for higher conviction.
 Set `--min-insiders 3` if you want the tool itself to pre-filter to the higher bar.
 
@@ -137,7 +137,7 @@ An insider purchasing shares at market price with personal capital is qualitativ
 different from any other ownership increase:
 - It is **voluntarily funded** (unlike RSU vesting or option exercise).
 - It signals that the insider believes the current market price is **below intrinsic value**.
-- When **multiple** insiders buy within a short window, the signal strength compounds —
+- When **multiple** insiders buy within a short window, the signal strength compounds ,
   the probability that all of them are miscalibrated simultaneously is lower.
 
 The Form 4 filing requirement ensures **T1-sourced, audited evidence** of the purchase.
@@ -184,7 +184,7 @@ Each cluster-buy candidate carries:
 }
 ```
 This directly satisfies the rubric's catalyst category (b):
-> "(b) Cluster open-market insider purchases: Form 4 filings showing ≥2–3 insiders
+> "(b) Cluster open-market insider purchases: Form 4 filings showing ≥2 to 3 insiders
 > purchasing shares at market prices within any rolling 90-day window."
 
 ---
@@ -192,7 +192,7 @@ This directly satisfies the rubric's catalyst category (b):
 ## Why No Theme-Fit Gate Is Needed
 
 The two-stage precision gate (SIC coarse filter + LLM theme-fit gate) in the theme
-discovery flow exists because **keyword FTS over-recalls severely** — a term like
+discovery flow exists because **keyword FTS over-recalls severely**, a term like
 "refractory" matches every oncology filing.  The gate is the precision restoration
 mechanism for a fundamentally noisy input channel.
 
@@ -209,7 +209,7 @@ under-covered companies the event mode is designed to surface.
 
 **Practical consequence:** downstream, skip Gate 1 (SIC filter) and Gate 2 (LLM
 theme-fit) for event candidates.  The mechanical kill-flag scan (`cheap_pass.py`) still
-runs — a compelling catalyst does not excuse a going-concern filing.
+runs, a compelling catalyst does not excuse a going-concern filing.
 
 ---
 
@@ -245,7 +245,7 @@ The anomalies documented here are **real but decaying**:
 
 2. **Cluster insider signal has weakened.**  Post-2010 academic replication finds the
    Seyhun / Lakonishok result substantially reduced in magnitude.  The signal is strongest
-   for small clusters (2–4 insiders, not 15–20) and for micro-caps where the purchase
+   for small clusters (2 to 4 insiders, not 15 to 20) and for micro-caps where the purchase
    is large relative to float.
 
 3. **Liquidity eats gross edge.**  Even when the signal is correct, the spread and
@@ -256,7 +256,7 @@ The anomalies documented here are **real but decaying**:
 4. **Track-forward before trusting any edge.**  Per `cognitive-priors.md`, all
    ratings from this skill are structured hypotheses until validated by a multi-year
    track-forward record.  Event-mode ratings carry the same caveat.  **0 BUY may still
-   be the correct output** after running the full event discovery pipeline — a strong
+   be the correct output** after running the full event discovery pipeline, a strong
    catalyst does not override zero margin of safety or active kill-flags.
 
 5. **openinsider data quality.**  openinsider aggregates SEC Form 4 filings but is not
@@ -267,10 +267,10 @@ The anomalies documented here are **real but decaying**:
 
 ## Cross-References
 
-- `SKILL.md §Entry 4` — workflow orchestration for event-driven runs
-- `judgment-rubric.md §Catalyst / Forced-Trading Modifier` — rubric integration for
+- `SKILL.md §Entry 4`, workflow orchestration for event-driven runs
+- `judgment-rubric.md §Catalyst / Forced-Trading Modifier`, rubric integration for
   categories (a) spinoff and (b) cluster insider buy
-- `cognitive-priors.md §5` — run-3 audit finding that event-driven is where remaining
+- `cognitive-priors.md §5`, run-3 audit finding that event-driven is where remaining
   edge lives; honest caveat that anomalies are decaying (one line below)
-- `discovery-engine.md` — for event-driven discovery see this document (event-driven.md)
-- `mechanical-checks.md` — kill-flag scan still mandatory for event candidates
+- `discovery-engine.md`, for event-driven discovery see this document (event-driven.md)
+- `mechanical-checks.md`, kill-flag scan still mandatory for event candidates

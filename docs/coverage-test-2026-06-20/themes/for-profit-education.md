@@ -1,4 +1,4 @@
-# Coverage Test — for-profit-education
+# Coverage Test, for-profit-education
 
 - **Run batch:** `reports/smallcap/2026-06-21_cov-for-profit-education/`
 - **Skill version:** v0.3.0 (commit `f12fef5`)
@@ -23,7 +23,7 @@
 | **LLM theme-fit gate (Gate 2) survivors** | **14** | 13 pure_play + 1 partial; 43 deep-band misrecalls dropped |
 | Deep-dived (every survivor, no sampling) | 14 | 0 deepdive ERROR files, 0 missing reports |
 | Valuated (`--json` + `--ticker`/`--mktcap`) | 14 | AMBO needed `--mktcap 90942873` (yfinance null) |
-| **Mechanical BUYs** | **0** | — |
+| **Mechanical BUYs** | **0** |, |
 
 - **No dedicated SIC floor:** education (8200-series) is **not** in `THEME_SIC`, so SIC
   reverse-recall is a clean no-op and discovery ran FTS-only + mktcap fallback. This is correct,
@@ -38,14 +38,14 @@
 
 **Pure-play (13):** APEI, PXED (University of Phoenix), LINC, STRA (Strayer+Capella), COUR
 (Coursera), CHGG (Chegg), NRDY (Nerdy/Varsity Tutors), GOTU (Gaotu), DAO (Youdao), AMBO (Ambow),
-JDZG (Jiade), SKIL (Skillsoft — corporate L&D), HSTM (HealthStream — healthcare workforce learning).
+JDZG (Jiade), SKIL (Skillsoft, corporate L&D), HSTM (HealthStream, healthcare workforce learning).
 
-**Partial (1):** FC (Franklin Covey — leadership/corporate training content; adjacent but core
+**Partial (1):** FC (Franklin Covey, leadership/corporate training content; adjacent but core
 business is behavior-change training, retained for deep-dive).
 
 **Representative misrecalls dropped:** LEE (newspapers), CNDT (Conduent BPO), OPRT (lending),
 RPD (Rapid7 cyber), EVH (Evolent healthcare), WEN (Wendy's), GTY (Getty Realty), JSM/Navient
-(student-loan *servicer* — education-finance adjacent, not an education provider), FLYW (Flywire —
+(student-loan *servicer*, education-finance adjacent, not an education provider), FLYW (Flywire ,
 education *payments*, not education), DHX (Dice job board), UPWK (Upwork freelance), KLTR (Kaltura
 video SaaS), the Bitwise crypto ETFs (CLNK/ETHW/XRP), and a string of banks. Each cleared an FTS
 keyword but fails true theme membership.
@@ -64,7 +64,7 @@ keyword but fails true theme membership.
 | 6 ⬇ | APEI | 避开 | fcf_cap | -70.0 | false | 0 | cross_source_mismatch; also deeply overvalued vs intrinsic. |
 | 7 ⬇ | CHGG | 避开 | fcf_cap | +578.8 | false | 0 | **The textbook artifact.** Raw MoS looks spectacular; vetoed by extreme-MoS + fundamental_decline + peak_contamination + fcf_sustainability_uncertain. See §3. |
 | 8 ⬇ | COUR | 避开 | fcf_cap | -51.0 | false | 0 | fcf_sustainability_uncertain + cross_source_mismatch. |
-| 9 ⬇ | DAO | 避开 | abstain | — | false | 0 | cross_source_mismatch; MoS abstained (China VIE, loss-making). |
+| 9 ⬇ | DAO | 避开 | abstain |, | false | 0 | cross_source_mismatch; MoS abstained (China VIE, loss-making). |
 | 10 ⬇ | FC | 避开 | nav | -100.0 | false | 0 | debt_truncation_suspected. |
 | 11 ⬇ | GOTU | 避开 | nav | -65.1 | false | 0 | debt_truncation_suspected + cross_source_mismatch (China VIE). |
 | 12 ⬇ | JDZG | 避开 | fcf_cap | null | false | 1 | cross_source_mismatch; ~-99% dilution flag (micro China name). |
@@ -75,16 +75,16 @@ keyword but fails true theme membership.
 
 ---
 
-## 3. BUY analysis — honest 0-BUY
+## 3. BUY analysis, honest 0-BUY
 
 **There are zero mechanical BUYs.** No candidate cleared the rule
 `mos_basis ∈ {fcf_cap, nav} AND MoS ≥ 30 AND buy_eligible AND zero kill-flags`.
 
-This is the correct answer for this theme today, and the failure modes are instructive — they map
+This is the correct answer for this theme today, and the failure modes are instructive, they map
 directly onto the **regulatory/declining code-path focus**:
 
 - **The only positive raw MoS belongs to a declining company, and the guards caught it.**
-  CHGG shows `margin_of_safety_pct = +578.8%` — at face value an enormous "bargain." It is a pure
+  CHGG shows `margin_of_safety_pct = +578.8%`, at face value an enormous "bargain." It is a pure
   artifact: Chegg's revenue collapsed (rev_slope = -1, latest below trailing average,
   contamination_ratio = 0.085, latest net income = -$103M). The conservative FCF-cap divides a
   market cap that has already de-rated by a trailing-average FCF inflated by peak (pre-AI) years.
@@ -95,26 +95,26 @@ directly onto the **regulatory/declining code-path focus**:
 
 - **The genuinely healthy names are simply not cheap.** STRA (the best-quality survivor:
   profitable, 9% FCF yield, P/E 13.5, zero flags) prices ~35% *above* its conservative FCF-cap
-  intrinsic band ($1.11–1.43B vs $1.71B cap). HSTM is high-quality but rich (P/E 40.8). APEI sits
+  intrinsic band ($1.11 to 1.43B vs $1.71B cap). HSTM is high-quality but rich (P/E 40.8). APEI sits
   ~70% above intrinsic. The market is **not** mispricing the clean for-profit-education operators;
   they are efficiently-to-richly valued. "Neglected ≠ undervalued" in its purest form.
 
 - **The China VIE cohort is correctly distrusted.** GOTU, DAO, JDZG, AMBO all carry
-  `cross_source_mismatch` and/or `debt_truncation_suspected` — the cross-source and debt guards
+  `cross_source_mismatch` and/or `debt_truncation_suspected`, the cross-source and debt guards
   flag the unreliable/structurally-opaque financials of Cayman-holdco / VIE filers. None are
   eligible.
 
 - **The SIC/insurance firewall fired correctly on SKIL.** Skillsoft's XBRL contains a
   `DeferredPolicyAcquisitionCosts` concept, tripping `insurance_concepts_present` →
   `financial_sic_forced_unsuitable`, forcing NAV and marking it ineligible. (Mild false-positive
-  risk noted in §5 — this is an insurance-vocabulary tag in a non-insurer — but the guard behaved
+  risk noted in §5, this is an insurance-vocabulary tag in a non-insurer, but the guard behaved
   as designed and the name was richly valued anyway.)
 
-**Adversarial verification:** Not required — there are no mechanical BUYs to stress-test.
+**Adversarial verification:** Not required, there are no mechanical BUYs to stress-test.
 For completeness, the closest-to-BUY name (STRA) was examined adversarially and **confirmed a
 genuine non-opportunity, not a data suppression**: its negative MoS comes from a clean,
 cross-source-validated valuation (P/E 13.5, EV/EBITDA 7.0, reverse-DCF implied growth 3.3% vs
-actual 4.0% — internally consistent). The tool is correctly saying "fairly valued," not erroneously
+actual 4.0%, internally consistent). The tool is correctly saying "fairly valued," not erroneously
 hiding value.
 
 **n_buy_clean = 0.**
@@ -141,7 +141,7 @@ hiding value.
 - `make_report.py` x14 (deterministic pre-fill + data-quality trust banner + firewalled T2
   signals section).
 - `finalize_run.py` (completeness assert PASS, 14 verdicts emitted, RANKING rebuilt, trust banner).
-- `track_forward.py --recall-gold` → "no gold list for theme — not measurable" (clean no-op).
+- `track_forward.py --recall-gold` → "no gold list for theme, not measurable" (clean no-op).
 - **Signals side-channel:** confirmed embedded inside each deepdive JSON (`signals` key) and the
   report's firewalled "T2 DIAGNOSTIC SIGNALS" section, explicitly NOT read by valuation /
   buy_eligible / BUY trigger. Firewall intact.
@@ -151,7 +151,7 @@ hiding value.
 ## 5. Data-quality issues
 
 - **AMBO** market cap unavailable from yfinance (`yfinance_returned_null`); resolved with the
-  discovery-stage mktcap via `--mktcap`. AMBO is a Cayman micro-holdco — financials are thin and it
+  discovery-stage mktcap via `--mktcap`. AMBO is a Cayman micro-holdco, financials are thin and it
   carries `cross_source_mismatch` regardless.
 - **PXED (University of Phoenix)** XBRL is severely thin: DA, capex, normalized EBITDA and
   normalized FCF all unavailable → intrinsic band null → MoS null. The single largest US
@@ -164,11 +164,11 @@ hiding value.
   worth a human override check in a real workflow, though the name was richly valued so the verdict
   (避开) is unaffected.
 - **China VIE cohort** (GOTU/DAO/JDZG/AMBO): pervasive `cross_source_mismatch` /
-  `debt_truncation_suspected` — structural opacity, correctly distrusted.
+  `debt_truncation_suspected`, structural opacity, correctly distrusted.
 - **HSTM** `debt_stale:>18_months_behind_latest_assets` and the C1 guard blocking FCF-cap → forced
   to NAV.
 - Several names had `concentration_unquantified` (text flag true but XBRL magnitude null) and
-  `debt_is_total_liabilities_proxy` — standard small-cap disclosure gaps, all surfaced in the trust
+  `debt_is_total_liabilities_proxy`, standard small-cap disclosure gaps, all surfaced in the trust
   banner.
 
 ---
@@ -177,23 +177,23 @@ hiding value.
 
 **n/a.** `for-profit-education` is not in `track_forward.THEME_GOLD` (the gold lists are
 water-utilities, railcar-leasing, regional-gaming, deathcare). `--recall-gold` returned
-"no gold list for theme — not measurable." Recall is therefore not quantifiable for this run; the
+"no gold list for theme, not measurable." Recall is therefore not quantifiable for this run; the
 funnel above is the only coverage evidence.
 
 ---
 
-## 7. Market-intel / T2 context (labeled — does NOT drive any verdict)
+## 7. Market-intel / T2 context (labeled, does NOT drive any verdict)
 
 - **TrendsMCP enrichment was unavailable** this run (daily + monthly request quota exhausted).
   No Trends time-series could be attached.
 - **No cached market-intel report** exists for an education vertical in
   `~/CodesSelf/market-intel/reports/`.
 - **Domain T2 read (analyst context only):** the US for-profit postsecondary sector is structurally
-  *declining and regulation-shadowed* — enrollment at the legacy degree-granting players (Phoenix,
+  *declining and regulation-shadowed*, enrollment at the legacy degree-granting players (Phoenix,
   Strayer/Capella, APEI) has been flat-to-down for a decade under Title IV / gainful-employment /
   90-10 / borrower-defense regulatory pressure, while the consumer-edtech names (Chegg, Coursera,
   Nerdy) face an AI-driven demand shock (Chegg's collapse is the extreme case). This macro is
-  *consistent with* the pipeline's mechanical output — the survivors that are healthy are richly
+  *consistent with* the pipeline's mechanical output, the survivors that are healthy are richly
   priced (no growth thesis to underwrite cheaply), and the optically-cheap one (Chegg) is cheap
   because it is structurally impaired. The "regulatory/declining" code-path focus is well-matched
   to this theme. **This paragraph is context; it influenced no buy_eligible value.**
@@ -206,18 +206,18 @@ funnel above is the only coverage evidence.
 challenged theme: a clean **0-BUY** with the reasoning legible at every node.
 
 - The funnel did real work: 114 → 88 → 57 deep-band → 14 true members, with 43 misrecalls
-  explicitly resolved (75% of deep-band FTS recall was noise — the LLM gate, not SIC, carried
+  explicitly resolved (75% of deep-band FTS recall was noise, the LLM gate, not SIC, carried
   precision here because education has no dedicated-SIC floor).
 - Every guard that mattered fired and is auditable: the lone "spectacular bargain" (Chegg, +579%
-  MoS) was vetoed by four independent decline/contamination guards — the single most important
+  MoS) was vetoed by four independent decline/contamination guards, the single most important
   thing this tool can do, and it did it.
 - The healthy operators (STRA, HSTM) are correctly tagged "fairly-to-richly valued," not falsely
-  promoted — "neglected ≠ undervalued" holds.
+  promoted, "neglected ≠ undervalued" holds.
 - Honest gaps are surfaced, not hidden: PXED un-valuable from filings, SKIL's likely insurance-tag
   false-positive, the China-VIE distrust cohort, AMBO's mktcap fallback.
 
 The only caveat a PM should carry forward: this theme has **no recall@gold instrument**, so the
-recall *floor* is unmeasured — coverage confidence rests on the FTS+Gate-2 funnel alone. That is a
+recall *floor* is unmeasured, coverage confidence rests on the FTS+Gate-2 funnel alone. That is a
 known limitation of the theme, not a defect of the run.
 
 ---

@@ -1,4 +1,4 @@
-# Coverage Test — Theme: medtech-devices (Medical Devices / Surgical Instruments)
+# Coverage Test, Theme: medtech-devices (Medical Devices / Surgical Instruments)
 
 - **Sector:** HealthCare
 - **Keywords:** `medical devices, surgical instruments`
@@ -8,7 +8,7 @@
 - **Date:** 2026-06-21 (run executed under cov label)
 - **Verdict in one line:** **0 mechanical BUYs. Correct "nothing found."** The small-cap
   medical-device universe is dominated by pre-profit, cash-burning growth-stage names whose
-  negative normalized FCF makes a DCF intrinsic band — and therefore a margin of safety —
+  negative normalized FCF makes a DCF intrinsic band, and therefore a margin of safety ,
   uncomputable. The handful that are FCF-positive trade well above intrinsic value.
 
 ---
@@ -18,7 +18,7 @@
 | Stage | Count | Notes |
 |---|---|---|
 | Raw discovery (universe CSV) | 345 rows | EDGAR FTS on keywords UNION SIC reverse-recall + mktcap fallback |
-| Small-cap deep band (mktcap < $2.0B) | 37 | watch-band ($2.0B–$5.0B) = 8, surfaced separately, no deep-dive |
+| Small-cap deep band (mktcap < $2.0B) | 37 | watch-band ($2.0B,$5.0B) = 8, surfaced separately, no deep-dive |
 | cheap_pass survivors | 45 | kill-flag scan (going-concern / death-spiral / ICFR / concentration) |
 | After SIC Gate 1 | 45 | keep=5, review=40 (review → LLM Gate 2) |
 | Candidates JSON (deep+watch) | 45 | 37 deep, 8 watch |
@@ -37,7 +37,7 @@ simply produced zero buys).
 ## 2. Code-paths fired (coverage evidence)
 
 ### EBIT concept cascade (focus)
-`ebit_source` distribution across 37 valuations — all three rungs exercised:
+`ebit_source` distribution across 37 valuations, all three rungs exercised:
 
 | `ebit_source` | Count | Tickers |
 |---|---|---|
@@ -71,7 +71,7 @@ debt-truncation proxy (8: `debt_is_total_liabilities_proxy`), `low_revenue_loss_
 ### Signals firewall (P16/P17)
 Verified: 0 valuation files contain a `signals` key; the diagnostic side-channel is present on
 the deepdive JSONs only (e.g. `deepdive_AORT` has `signals`). `buy_eligible` is byte-isolated
-from signals — the firewall holds. The signals channel did NOT touch any BUY decision (there
+from signals, the firewall holds. The signals channel did NOT touch any BUY decision (there
 were none to touch).
 
 ---
@@ -90,7 +90,7 @@ All 27 non-floor names are rated **观察 / WATCH** (no BUY qualifies). Top by R
 | 27 | TNDM | Tandem Diabetes (insulin pumps) | $290M | -$1M | -$10M | +3% | 0 | pure_play |
 
 Profitable members (positive NI + OCF): **AORT, BVS, IRMD**. These are the only names where a
-DCF band was computable AND positive cash flow exists — yet IRMD's MoS = -88% (overvalued),
+DCF band was computable AND positive cash flow exists, yet IRMD's MoS = -88% (overvalued),
 and AORT/BVS land in `intrinsic_band_unavailable` (normalized FCF still net negative across the
 window). None clears the 30% MoS threshold.
 
@@ -98,7 +98,7 @@ Full per-ticker due-diligence scaffolds: `reports/smallcap/2026-06-21_cov-medtec
 
 ---
 
-## 4. BUY analysis — honest 0-BUY
+## 4. BUY analysis, honest 0-BUY
 
 **There are no mechanical BUYs, so there is no adversarial-verification target.** `n_buy_clean = 0`.
 
@@ -106,13 +106,13 @@ Why zero, mechanically (the BUY rule: `mos_basis∈{fcf_cap,nav}` ∧ numeric Mo
 `buy_eligible==true` ∧ 0 kill-flags):
 
 - **21 names are `buy_eligible==true`** but every one fails on MoS:
-  - 16 have **MoS = None** (`intrinsic_band_unavailable` — negative normalized FCF → no
+  - 16 have **MoS = None** (`intrinsic_band_unavailable`, negative normalized FCF → no
     reverse-DCF band can be built). This is the structural signature of cash-burning,
     growth-stage medical-device companies (LUNG, CVRX, SGHT, KIDS, NVCR, PRCT, SIBN, STIM, …).
-  - 5 have a numeric but **negative** MoS — overvalued vs intrinsic: IRMD -88%, KRMD -93%,
+  - 5 have a numeric but **negative** MoS, overvalued vs intrinsic: IRMD -88%, KRMD -93%,
     OSUR -31%, PSNL -82%, SKIN -100%.
 - **16 names are `buy_eligible==false`**, blocked by the guards above. The only positive-MoS
-  name in the entire run — **RDGT at +1690.9%** — is a $1M reverse-merger shell (SIC 5912 drug
+  name in the entire run, **RDGT at +1690.9%**, is a $1M reverse-merger shell (SIC 5912 drug
   stores) and is correctly killed by `extreme_mos_review_required`. This is exactly the data
   artifact the extreme-MoS guard exists to catch; had the guard been absent, RDGT would have
   been a spurious BUY.
@@ -125,7 +125,7 @@ profitable names are not cheap. A scanner that returned a BUY here would be a na
 - **RDGT (+1690% MoS):** artifact, not opportunity. $1M shell, reverse merger, SIC = drug
   stores, NAV driven by a tiny tangible-equity base vs a near-zero market cap. Correctly killed.
 - **IRMD (FCF-positive, -88% MoS):** real, high-quality niche business (MRI-compatible IV
-  pumps), but priced at ~21x EV/EBITDA equivalent — genuinely expensive, not a data error. The
+  pumps), but priced at ~21x EV/EBITDA equivalent, genuinely expensive, not a data error. The
   negative MoS is a true valuation signal, not an artifact.
 - **AORT (profitable, MoS None):** real business; the None is because 5-yr normalized FCF is
   still net-negative (recent turn to profit). Merits human diligence as a WATCH, not a BUY.
@@ -136,14 +136,14 @@ profitable names are not cheap. A scanner that returned a BUY here would be a na
 
 | Issue | Count / 37 | Read |
 |---|---|---|
-| `cross_source_mismatch` (yfinance vs SEC > 2.5×) | 11 | **Highest-impact.** Mostly total_debt and revenue disagreements on recently-IPO'd or foreign-filer (ADR) medtech. yfinance frequently reports a TTM/consolidated figure vs SEC's filed annual — e.g. TNDM revenue SEC $290M vs yf $1027M (3.5×), BNR SEC $77M vs yf $514M (6.7×), SY revenue 7.6×. The guard correctly blocks BUY rather than trust a possibly-stale second source. |
-| `net_income_nonpositive_pe_null` | 31 | Universe is overwhelmingly loss-making — expected for growth medtech. |
+| `cross_source_mismatch` (yfinance vs SEC > 2.5×) | 11 | **Highest-impact.** Mostly total_debt and revenue disagreements on recently-IPO'd or foreign-filer (ADR) medtech. yfinance frequently reports a TTM/consolidated figure vs SEC's filed annual, e.g. TNDM revenue SEC $290M vs yf $1027M (3.5×), BNR SEC $77M vs yf $514M (6.7×), SY revenue 7.6×. The guard correctly blocks BUY rather than trust a possibly-stale second source. |
+| `net_income_nonpositive_pe_null` | 31 | Universe is overwhelmingly loss-making, expected for growth medtech. |
 | `intrinsic_band_null` | 30 | Negative normalized FCF → no DCF band. This is *the* reason for 0 BUY. |
 | `ebitda_nonpositive` / partial EBITDA series | 18 / 15 | EV/EBITDA undefined for most; multiples sparse. |
 | `concentration_unquantified` (text flag, no XBRL magnitude) | 15 | Concentration language present but unquantified; advisory only, did not kill. |
-| `debt_is_total_liabilities_proxy` | 8 | Debt fallback used (no clean debt concept) — inflates NAV liabilities conservatively. |
-| `wrong_entity_suspected` | 1 (BNR) | China VIE / ADR structure — second-source check flagged entity mismatch. |
-| `low_revenue_loss_ratio_extreme` | 2 (PLSE, QSI) | PLSE rev ≈ $0 with large loss; QSI similar — pre-commercial. |
+| `debt_is_total_liabilities_proxy` | 8 | Debt fallback used (no clean debt concept), inflates NAV liabilities conservatively. |
+| `wrong_entity_suspected` | 1 (BNR) | China VIE / ADR structure, second-source check flagged entity mismatch. |
+| `low_revenue_loss_ratio_extreme` | 2 (PLSE, QSI) | PLSE rev ≈ $0 with large loss; QSI similar, pre-commercial. |
 
 Foreign filers / ADRs (BNR, SY, EDAP, GHRS, SOPH, WOK) are the main source of cross-source and
 wrong-entity noise. A PM should treat any yfinance-derived figure on these names as unreliable;
@@ -154,7 +154,7 @@ the SEC-filed numbers are authoritative and the guard's instinct to block is cor
 ## 6. recall@gold
 
 **n/a.** There is no gold cohort for `medtech-devices` (gold lists exist only for
-water-utilities, railcar-leasing, regional-gaming, deathcare — confirmed via
+water-utilities, railcar-leasing, regional-gaming, deathcare, confirmed via
 `track_forward.theme_gold('medtech-devices') == []`). `track_forward.py --recall-gold` was not
 applicable and not run for a score.
 
@@ -167,21 +167,21 @@ applicable and not run for a score.
 local market-intel repo (`~/CodesSelf/market-intel/reports/` has no med/device/surg
 file). T2 context is labeled-optional and **never drives `buy_eligible`**, so its absence does
 not affect the mechanical result. Qualitatively (analyst prior, not data): small-cap medtech in
-2026 remains a capital-intensive, FDA-gated, pre-profit cohort — consistent with the funnel's
+2026 remains a capital-intensive, FDA-gated, pre-profit cohort, consistent with the funnel's
 30/37 "no intrinsic band" outcome.
 
 ---
 
 ## 8. Skeptical-PM usable verdict
 
-**USABLE — and the answer it gives is the correct one: do nothing here.**
+**USABLE, and the answer it gives is the correct one: do nothing here.**
 
 The pipeline executed cleanly end-to-end on a 37-name deep band with zero crashes and zero
 silent-skips, exercised the EBIT cascade across all three rungs, fired six distinct
 `buy_eligible` guard families, and correctly killed the single positive-MoS artifact (RDGT
 shell). The 0-BUY outcome is mechanically explained (pre-profit universe → no DCF band → no
 MoS) rather than a coverage failure. The biggest caveat for a PM is the 11/37
-cross-source-mismatch rate, concentrated in ADRs/recent IPOs — but the tool handles it the
+cross-source-mismatch rate, concentrated in ADRs/recent IPOs, but the tool handles it the
 conservative way (block, don't guess). I would trust this run's "nothing to buy" and would use
 the WATCH list (AORT, IRMD, BVS as the profitable trio) as a human-diligence queue, not a buy
 list.

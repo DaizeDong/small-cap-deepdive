@@ -75,7 +75,7 @@ def stage_discover(theme_kw: str, out_slug: str, max_mcap: float,
         cmd += ["--watch-band-max", str(watch_band_max)]
     _run(cmd, "DISCOVER")
 
-    # Locate the output — prefer today's date, fall back to any matching file.
+    # Locate the output, prefer today's date, fall back to any matching file.
     date = today()
     uni = REPORTS / f"universe_{out_slug}_{date}.csv"
     if not uni.exists():
@@ -221,16 +221,16 @@ def main() -> None:
         flush=True,
     )
 
-    # Stage 1 — discover (Phase 4: passes watch_band_max for dual-band tagging)
+    # Stage 1, discover (Phase 4: passes watch_band_max for dual-band tagging)
     universe_csv = stage_discover(args.theme, out_slug, max_mcap, watch_band_max=watch_band_max)
 
-    # Stage 2 — cheap pass
+    # Stage 2, cheap pass
     cheappass_csv = stage_cheap_pass(universe_csv, out_slug)
 
-    # Stage 3 — inline SIC filter → candidates JSON
+    # Stage 3, inline SIC filter → candidates JSON
     candidates_json = stage_sic_filter(cheappass_csv, universe_csv, out_slug, theme_kw=args.theme)
 
-    # Stage 4 — handoff message
+    # Stage 4, handoff message
     print(
         f"\n{'='*72}\n"
         f"  DONE — mechanical pipeline complete.\n"

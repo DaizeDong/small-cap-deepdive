@@ -1,6 +1,6 @@
 # small-cap-deepdive
 
-Mechanically de-risk the SEC small-cap universe for a theme or ticker — kill the landmines, then deep-dive the survivors.
+Mechanically de-risk the SEC small-cap universe for a theme or ticker, kill the landmines, then deep-dive the survivors.
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -13,22 +13,22 @@ Mechanically de-risk the SEC small-cap universe for a theme or ticker — kill t
 
 ---
 
-## ⭐ Read this first — the design philosophy
+## ⭐ Read this first, the design philosophy
 
 **Being neglected is not the same as being undervalued.**
 
 Small-caps with zero analyst coverage have cleared a necessary but not sufficient condition.
 Neglect is efficiently priced. What creates exploitable inefficiency is delayed information
 diffusion around a real fundamental change. This tool exists to find companies where that
-condition might hold — and to mechanically eliminate the ones where it cannot, before any
+condition might hold, and to mechanically eliminate the ones where it cannot, before any
 analyst time is spent.
 
 **The output is a landmine-scanner, not a buy list.**
 
 A company at the top of the ranked output means it survived all kill-flags, has genuine theme
 exposure, and warrants full human due diligence. It does not mean buy it. The primary value is
-in what the tool eliminates — going-concern candidates, death-spiral diluters, disclosure
-non-filers — before any judgment begins.
+in what the tool eliminates, going-concern candidates, death-spiral diluters, disclosure
+non-filers, before any judgment begins.
 
 **Zero buys is a feature, not a bug.**
 
@@ -39,7 +39,7 @@ narrative generator.
 
 The one-sentence version: **the tool's edge is mechanical discipline applied consistently
 across the full candidate set, not narrative synthesis on any individual company.** Every tool,
-invariant, and hard rule in this repo exists because of four principles — root-cause design (not
+invariant, and hard rule in this repo exists because of four principles, root-cause design (not
 symptom patching), Hybrid-not-thin (the data layer earns its keep), discipline-as-moat, and a
 single source of truth in `reference/`.
 
@@ -58,7 +58,7 @@ disconfirmation, and ranks surviving candidates. What it does, step by step:
    comparable across versions. `export SMALLCAP_RUN=$(python tools/new_run.py --label <theme>)`.
 
 1. **Enumerates the SEC universe** for a theme using EDGAR full-text search (FTS), UNIONed with a
-   **SIC reverse-recall floor** (`discover.py` + `filter_by_sic.py`) — for themes with a dedicated SIC
+   **SIC reverse-recall floor** (`discover.py` + `filter_by_sic.py`), for themes with a dedicated SIC
    code, every registrant in that SIC is enumerated so low-keyword-density true members aren't missed.
    Market cap is resolved with a fallback chain (SEC shares×price when yfinance is null); names that
    still can't be priced flow through as `band="unknown"` instead of being silently dropped.
@@ -70,19 +70,19 @@ disconfirmation, and ranks surviving candidates. What it does, step by step:
    theme swept the entire oncology biotech sector. Zero railcar companies. Recall is *measured*
    via `recall@gold` against hand-built true-member lists, not assumed.
 
-3. **Mechanical de-risk** (`cheap_pass.py`): hard kill-flags from SEC filings — going-concern
+3. **Mechanical de-risk** (`cheap_pass.py`): hard kill-flags from SEC filings, going-concern
    auditor paragraphs, death-spiral convertibles, ICFR material weaknesses, magnitude-based
    customer/government-program concentration. Eliminated companies do not proceed to judgment.
 
 4. **Deep-dive data pull** (`deepdive_data.py`): XBRL financials (with EBIT concept cascade, debt
    and shares fallbacks), Form 4 insider trades, shelf/ATM status, dilution history, material event
    timeline. Data-integrity guards: debt-truncation, wrong-entity, low-revenue-loss, and a
-   **second-source cross-check** (SEC vs yfinance — a >2.5× disagreement is flagged and blocks BUY).
+   **second-source cross-check** (SEC vs yfinance, a >2.5× disagreement is flagged and blocks BUY).
 
 5. **Valuation + mechanical `buy_eligible` gate** (`valuation.py`): reverse-DCF (normalized FCF),
    EV/EBITDA multiples, cyclical-trough EBITDA, and asset-heavy NAV path. A BUY requires
    `mos_basis∈{fcf_cap,nav}` AND margin of safety ≥ 30% AND **`buy_eligible == true`** AND 0
-   kill-flags AND no T3 thesis. `buy_eligible` ANDs in every guard — extreme-MoS, large-cap-ceiling,
+   kill-flags AND no T3 thesis. `buy_eligible` ANDs in every guard, extreme-MoS, large-cap-ceiling,
    FCF-sustainability, financial-SIC / insurance exclusion, debt-truncation, cross-source-mismatch,
    concentration-kill, and the **V-shape value-trap vetoes** (`fundamental_decline_flag` for monotone
    decline + `peak_contamination_flag` for trough→peak→rollover). Closed-list catalyst modifier
@@ -100,31 +100,31 @@ disconfirmation, and ranks surviving candidates. What it does, step by step:
 8. **Track-forward calibration** (`track_forward.py`): verdicts logged to `metrics/verdicts.jsonl`,
    Brier-scored vs IWM at maturity, with de-risk-native metrics (blowup-avoidance / downside-capture).
 
-9. **Diagnostic signals — firewalled** (`signals.py`): a strictly diagnostic side-channel that
-   measures the *delayed-information-diffusion* thesis — **price-divergence** (fundamental trajectory
+9. **Diagnostic signals, firewalled** (`signals.py`): a strictly diagnostic side-channel that
+   measures the *delayed-information-diffusion* thesis, **price-divergence** (fundamental trajectory
    vs trailing price return → `unpriced_improvement` / `melting_ice_cube_priced` / `aligned`) and
    **ownership** (13D/13G + short interest). It **never** touches `buy_eligible` or the BUY decision;
    it is recorded for future per-signal calibration only.
 
 **What it does not do:**
 
-- Factor/quant screening or backtesting — empirical evidence that factor alpha evaporates
+- Factor/quant screening or backtesting, empirical evidence that factor alpha evaporates
   net of transaction costs is baked into the design; that decision space is out of scope.
 - Trading signals, execution, or portfolio management.
-- Real-time data — all data is from SEC filings (1–4 day lag typical).
-- Large-cap or sell-side coverage — the tool is calibrated for micro/small-cap names with
+- Real-time data, all data is from SEC filings (1 to 4 day lag typical).
+- Large-cap or sell-side coverage, the tool is calibrated for micro/small-cap names with
   no or minimal analyst coverage.
-- Automated buy recommendations — every output ends with "merits human diligence," not "buy."
+- Automated buy recommendations, every output ends with "merits human diligence," not "buy."
 
 ### Validated out-of-sample (2026-06)
 
-A 25-cell survivorship-safe point-in-time backtest (5 themes × 5 as-of dates 2020–2024, 12mo
-horizon) tested the skill's claims on held-out data. Honest result — write-up in
+A 25-cell survivorship-safe point-in-time backtest (5 themes × 5 as-of dates 2020 to 2024, 12mo
+horizon) tested the skill's claims on held-out data. Honest result, write-up in
 [`docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md`](docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md):
 
 - **No durable alpha.** Cheapness (Margin-of-Safety) beats the market in-sample but it is a
-  2020–21 recovery-regime artifact and vanishes out-of-sample (holdout permutation p=0.72). The
-  tool **cannot pick market-beaters and does not claim to** — this is *why* it never issues a "buy."
+  2020 to 21 recovery-regime artifact and vanishes out-of-sample (holdout permutation p=0.72). The
+  tool **cannot pick market-beaters and does not claim to**, this is *why* it never issues a "buy."
 - **A real downside-avoidance edge** (its actual mission). The OOS-validated **CORE-4 distress
   kill-flag** (operating-cash-flow loss, operating loss, accumulated deficit, Altman Z″ < 1.1)
   routes distressed names to AVOID with top-quintile blowup **lift 2.56×**, recall 62%, and a
@@ -176,7 +176,7 @@ ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 
 ## Config
 
-`small-cap-deepdive` is **config-bearing** — every tool reads its tuning parameters and the one
+`small-cap-deepdive` is **config-bearing**, every tool reads its tuning parameters and the one
 required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-field contract:
 [CONFIG.md](CONFIG.md).
 
@@ -190,9 +190,9 @@ required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-fie
   # edit config.json: set "sec_user_agent" to your real name + email (the only hard requirement)
   python scripts/verify_config.py    # doctor: PASS/FAIL per field, names what is missing
   ```
-- **Switch configs (hot-swap):** point the env var at another config dir — configs are self-contained
+- **Switch configs (hot-swap):** point the env var at another config dir, configs are self-contained
   (repo-relative `output_dir`, no hardcoded paths): `export SMALL_CAP_DEEPDIVE_CONFIG_DIR=~/configs/A` ↔ `~/configs/B`.
-- **Secrets / PII:** Mode B — `config.json`, `*.env`, and `secrets/*` are gitignored and never enter
+- **Secrets / PII:** Mode B, `config.json`, `*.env`, and `secrets/*` are gitignored and never enter
   git. Point `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` at a dir **outside** this repo for full repo separation.
 
 ---
@@ -205,7 +205,7 @@ required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-fie
 
 There are four entry modes.
 
-### 1. Theme run — full universe screen
+### 1. Theme run, full universe screen
 
 For a ranked shortlist of small-cap pure-plays in a theme:
 
@@ -215,7 +215,7 @@ For a ranked shortlist of small-cap pure-plays in a theme:
 
 Full step-by-step: **[runbooks/theme-run.md](runbooks/theme-run.md)**
 
-Expected token budget: ~300k tokens, ~$0.30, 1–3 hours for a niche theme.
+Expected token budget: ~300k tokens, ~$0.30, 1 to 3 hours for a niche theme.
 
 ### 2. Single-ticker deep-dive
 
@@ -228,7 +228,7 @@ For a rigorous report on a company you already know:
 
 Full step-by-step: **[runbooks/single-deepdive.md](runbooks/single-deepdive.md)**
 
-Expected token budget: ~10k–15k tokens per company, <$0.02.
+Expected token budget: ~10k to 15k tokens per company, <$0.02.
 
 ### 3. Re-rank existing scores
 
@@ -242,9 +242,9 @@ python tools/rank.py --input reports/railcar_scores/
 
 Full step-by-step: **[runbooks/batch-rank.md](runbooks/batch-rank.md)**
 
-Expected token budget: Zero — deterministic, no LLM calls.
+Expected token budget: Zero, deterministic, no LLM calls.
 
-### 4. Event-driven discovery — spinoffs or insider clusters
+### 4. Event-driven discovery, spinoffs or insider clusters
 
 For theme-independent discovery via structural catalysts (forced trading):
 
@@ -257,12 +257,12 @@ python tools/discover_events.py --insider-clusters
 ```
 
 Spinoff catalyst: passive index-fund holders of the parent are forced to sell the spun-off
-child if it falls outside their index mandate — temporary supply overhang, no natural buyer.
+child if it falls outside their index mandate, temporary supply overhang, no natural buyer.
 
 Insider-cluster catalyst: multiple insiders purchasing at market price with personal capital
 is the strongest available management-conviction signal (Form 4, open-market cash only).
 
-No theme-fit gate needed — form-type enumeration is structurally precise. Kill-flag scan
+No theme-fit gate needed, form-type enumeration is structurally precise. Kill-flag scan
 still mandatory (`cheap_pass.py --universe <candidates_event_*.json>`). Pre-listing spinoffs
 (no ticker yet) are processed via CIK, in the `band="unknown"` cohort.
 
@@ -294,10 +294,10 @@ Each candidate is rated mechanically. The scorecard quick reference:
 
 | Score | Meaning | Action |
 |---|---|---|
-| 4–5 | Survived all gates, real theme exposure, no structural red flags | Merits full human diligence |
-| 3 | Borderline — one weak dimension | Read dimension detail before deciding |
-| 1–2 | Hard-rule ceiling applied | Named structural problem; do not invest without resolving it |
-| Eliminated | Kill-flag fired at `cheap_pass` | Stop — do not re-examine |
+| 4 to 5 | Survived all gates, real theme exposure, no structural red flags | Merits full human diligence |
+| 3 | Borderline, one weak dimension | Read dimension detail before deciding |
+| 1 to 2 | Hard-rule ceiling applied | Named structural problem; do not invest without resolving it |
+| Eliminated | Kill-flag fired at `cheap_pass` | Stop, do not re-examine |
 
 The rating is mechanical: `rating = f(MoS / NAV-MoS, kill-flags, hard-ceilings, buy_eligible)`. The
 7-dimension scorecard is a diagnostic `/35` summary (no hidden weights), not the rating driver; hard
@@ -336,7 +336,7 @@ thin judgment layer (LLM — reads JSON, applies rubric, never computes financia
 
 **Two firm boundaries.** (1) `tools/*.py` never produces investment judgments (only data); the
 judgment layer never computes financials (only reads JSON). (2) The diagnostic `signals` layer is
-firewalled — `valuation.py` / `buy_eligible` / the BUY trigger contain **zero** references to any
+firewalled, `valuation.py` / `buy_eligible` / the BUY trigger contain **zero** references to any
 signal (`buy_eligible` is byte-identical with vs without signals). The data/judgment split was
 validated across two production-bug rounds (all bugs were in the data layer, contained by the
 boundary); the signals firewall was grep-verified each iteration.
@@ -357,20 +357,20 @@ boundary); the signals firewall was grep-verified each iteration.
 **market-intel (optional read-only reuse):** When the `market-intel` skill is installed, the
 judgment layer reads its source catalog to route qualitative research (X sentiment, industry
 news, competitor web presence) to the best available MCP tool. The market-intel skill is never
-invoked as a skill at runtime — the catalog is read as documentation. Full anti-recursion
+invoked as a skill at runtime, the catalog is read as documentation. Full anti-recursion
 design: `reference/data-sources.md §market-intel`.
 
 **openinsider fragility:** The default `insider_source` config uses `openinsider.com` for
 Form 4 direction parsing. This is a third-party service with no explicit automated-access
 terms. The tool automatically falls back to direct EDGAR Form 4 parsing when openinsider is
 unavailable. Reports label the source accordingly. To default to EDGAR Form 4 from the start,
-set `"insider_source": "edgar"` — but note that mode is a **roadmap stub, not yet implemented**
+set `"insider_source": "edgar"`, but note that mode is a **roadmap stub, not yet implemented**
 (returns `available: false`); the tested default is `openinsider`. See
 `reference/data-sources.md` for the fallback behaviour.
 
 **workflow .js files are optional:** `workflows/theme-fit-gate.js` and
 `workflows/deepdive-fanout.js` accelerate fan-out steps when Claude Code's Workflow tool is
-available in the session. They are not required — the natural-language orchestration in
+available in the session. They are not required, the natural-language orchestration in
 `SKILL.md` is the primary path and works in any Claude Code session.
 
 **X sentiment routing:** When X/Twitter sentiment is requested for a ticker, the skill routes

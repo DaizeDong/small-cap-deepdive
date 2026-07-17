@@ -31,7 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import resolve_mktcap  # noqa: E402  (resolve-then-band fallback chain)
 
-DEFAULT_BENCHMARK = "IWM"   # Russell 2000 small-cap ETF — matches track_forward.DEFAULT_BENCHMARK
+DEFAULT_BENCHMARK = "IWM"   # Russell 2000 small-cap ETF, matches track_forward.DEFAULT_BENCHMARK
 DEFAULT_HORIZON_MONTHS = 12
 # Sub-$0.10 entry => a penny/sub-penny forward return is a data artifact, not a tradeable outcome
 # (e.g. GNOLF 2024 oilsvc: entry $0.00001 -> exit $0.01 = a fake +999x that swung the raw panel mean
@@ -279,7 +279,7 @@ def mktcap_asof(
         shares = None
     out["shares"] = shares
 
-    # resolve_mktcap with yf_mktcap=None forces the SEC shares x price branch — the look-ahead-safe
+    # resolve_mktcap with yf_mktcap=None forces the SEC shares x price branch, the look-ahead-safe
     # path. (We pass cik through; the injected shares_fn already carries the asof.)
     mc, src = resolve_mktcap(None, price, cik, shares_fn=lambda _c: shares)
     out["mktcap"], out["source"] = mc, src
@@ -328,7 +328,7 @@ def benchmark_return(
 
 
 # ---------------------------------------------------------------------------
-# Selftest — network-free (injectable price_fn), deterministic.
+# Selftest, network-free (injectable price_fn), deterministic.
 # ---------------------------------------------------------------------------
 
 
@@ -344,20 +344,20 @@ def _selftest() -> None:
     # A scripted price book: (ticker, on_date) -> (price, resolved_date). Mirrors yfinance's
     # "most recent trading day on/before on_date" contract; a missing key => None (unavailable).
     BOOK = {
-        # NORMAL name — full horizon, +25% total return, exit resolves AT the target date.
+        # NORMAL name, full horizon, +25% total return, exit resolves AT the target date.
         ("AAA", "2020-06-30"): (100.0, "2020-06-30"),
         ("AAA", "2021-06-30"): (125.0, "2021-06-30"),
-        # DELISTED/blown-up name — entered at 50, last print 0.40 in 2020-09, then the series
-        # STOPS. Any exit-date request resolves to that last close (2020-09-15) — ~9.5 months
+        # DELISTED/blown-up name, entered at 50, last print 0.40 in 2020-09, then the series
+        # STOPS. Any exit-date request resolves to that last close (2020-09-15), ~9.5 months
         # before the 2021-06-30 target => realized_to_last_close, return ~= -99.2%.
         ("ZZZ", "2020-06-30"): (50.0, "2020-06-30"),
         ("ZZZ", "2021-06-30"): (0.40, "2020-09-15"),
-        # IWM benchmark — +18% over the window.
+        # IWM benchmark, +18% over the window.
         ("IWM", "2020-06-30"): (140.0, "2020-06-30"),
         ("IWM", "2021-06-30"): (165.2, "2021-06-30"),
-        # NEVER-LISTED-at-asof name — no entry print at all.
+        # NEVER-LISTED-at-asof name, no entry print at all.
         # ("NOPE", ...) intentionally absent.
-        # ENTRY-only name — entry exists, exit window fully un-fetchable.
+        # ENTRY-only name, entry exists, exit window fully un-fetchable.
         ("HALF", "2020-06-30"): (10.0, "2020-06-30"),
         # ("HALF", "2021-06-30") intentionally absent => no_exit_price.
     }
@@ -387,7 +387,7 @@ def _selftest() -> None:
     assert d["status"] == "ok", f"delisted status: {d['status']}"
     assert d["realized_to_last_close"] is True, "delisted name MUST flag realized_to_last_close"
     assert d["exit_date"] == "2020-09-15", f"delisted exit resolves to last close, got {d['exit_date']}"
-    # (0.40/50) - 1 = -0.992 — a blown-up name lands near -100% (the POINT).
+    # (0.40/50) - 1 = -0.992, a blown-up name lands near -100% (the POINT).
     assert abs(d["total_return"] - (0.40 / 50.0 - 1.0)) < 1e-9, f"delisted return, got {d['total_return']}"
     assert d["total_return"] < -0.95, "a blown-up name must land near -100%"
 
