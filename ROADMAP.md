@@ -2,7 +2,7 @@
 
 Current: **v0.3.3**
 
-## v0.3.0 — Optimization campaign (2026-06-20) ✓ SHIPPED
+## v0.3.0, Optimization campaign (2026-06-20) ✓ SHIPPED
 
 A 5-iteration, subagent-driven, test-driven campaign (reflect → design → implement → test →
 iterate). Closed all four top structural diagnoses from a 10-lens reflection. Full write-up:
@@ -20,26 +20,26 @@ iterate). Closed all four top structural diagnoses from a 10-lens reflection. Fu
   19 backfilled false-positive BUYs.
 - **Ergonomics ✓** `new_run.py` batch outputs + `_run.json` manifests; `finalize_run.py`
   deterministic reports/verdicts/RANKING + trust banner; `make_report.py`; `rank.py` front-matter.
-- **Diagnostic alpha ✓** firewalled `signals.py` side-channel — price-divergence (P16) + ownership
+- **Diagnostic alpha ✓** firewalled `signals.py` side-channel, price-divergence (P16) + ownership
   (P17), strictly diagnostic, never touches `buy_eligible` (P15 alt-data agent-gathered). The
   delayed-information-diffusion thesis is now *measured* (diagnostically), not just asserted.
 
-### Forward roadmap (deferred — non-blocking for real-world-usable)
+### Forward roadmap (deferred, non-blocking for real-world-usable)
 
-- **P14 — forensic spine:** Sloan accruals, diluted-share CAGR, SBC%, NI−FCF gap from XBRL with
-  hard-ceiling triggers — move the highest-halo rubric dimensions onto T1 ground.
-- **P11-full — catalyst-mechanism verification:** `{mechanism_verified, trigger_date,
+- **P14, forensic spine:** Sloan accruals, diluted-share CAGR, SBC%, NI−FCF gap from XBRL with
+  hard-ceiling triggers, move the highest-halo rubric dimensions onto T1 ground.
+- **P11-full, catalyst-mechanism verification:** `{mechanism_verified, trigger_date,
   days_remaining}` per catalyst. The MoS-waiver is currently **frozen to WATCH**; un-freeze only
   after per-category Brier exists.
 - **Signals per-signal Brier calibration:** score the recorded `signals_snapshot` once verdicts
-  mature (~2027-06). Only then could a signal ever be considered for a non-diagnostic role — a
+  mature (~2027-06). Only then could a signal ever be considered for a non-diagnostic role, a
   fresh human decision.
 - **P15 alt-data automation:** wire TrendsMCP / news into automated T2 capture (today agent-gathered).
 - **recall@gold expansion:** build gold true-member lists beyond deathcare.
 
 ---
 
-## v0.2.0 — Phase 2–7 buildout (2026-06-19) ✓ SHIPPED
+## v0.2.0, Phase 2 to 7 buildout (2026-06-19) ✓ SHIPPED
 
 - **P2 ✓** Valuation engine (`tools/valuation.py`): reverse-DCF, EV/EBITDA multiples,
   cyclical-trough EBITDA normalization, asset-heavy NAV path.
@@ -51,7 +51,7 @@ iterate). Closed all four top structural diagnoses from a 10-lens reflection. Fu
   cluster insider buys (openinsider). Four entry modes: theme / ticker / rank / events.
   CIK-first processing for pre-listing spinoffs.
 - **P6 ✓** Track-forward calibration (`tools/track_forward.py`): `metrics/verdicts.jsonl`,
-  Brier scoring vs IWM, 40 seeded verdicts (none mature until 2027-06 — calibration unknown).
+  Brier scoring vs IWM, 40 seeded verdicts (none mature until 2027-06, calibration unknown).
 - **P7 integration fixes ✓** (see CHANGELOG v0.2.0 for detail):
   - C1: config.json gitignored + setup instructions clarified.
   - C2: material_weakness → Dim 1 ceiling fix (was incorrectly capping Dim 5).
@@ -61,7 +61,7 @@ iterate). Closed all four top structural diagnoses from a 10-lens reflection. Fu
 
 ---
 
-## v0.1.0 — Initial release (2026-06-18)
+## v0.1.0, Initial release (2026-06-18)
 
 - Hybrid architecture: deterministic `tools/*.py` data layer + thin LLM judgment layer.
 - Three entry modes: `theme` (full universe screen), `ticker` (single deep-dive), `rank` (re-rank).
@@ -97,7 +97,7 @@ parsing errors.
 `tools/track_forward.py` ships in v0.2.0. Verdicts logged to `metrics/verdicts.jsonl`;
 `--score` pulls realized prices at maturity; `--scorecard` writes `metrics/scorecard.md`.
 Benchmark: IWM (not SPY). 40 seeded verdicts from 2026-06 runs; none mature until 2027-06.
-Rubric tuning gated on ≥20 matured verdicts — see `reference/track-forward.md`.
+Rubric tuning gated on ≥20 matured verdicts, see `reference/track-forward.md`.
 
 ### More themes and sector-specific precision gates
 
@@ -105,7 +105,7 @@ The two-stage precision gate is calibrated for general industrial/SaaS themes. C
 require specialized Gate 1 expansions:
 
 - **Biotech/pharma:** when the theme is explicitly biotech (e.g., "RNA delivery vehicles"),
-  the default SIC exclusion blocks biotech — the wrong direction. Need per-theme gate inversion
+  the default SIC exclusion blocks biotech, the wrong direction. Need per-theme gate inversion
   support: `sic_inclusion_override: ["2836", "8731"]` to restrict to biotech SICs.
 - **Energy transition:** SIC codes for legacy energy vs. emerging clean-energy overlap in
   ways the default hard-exclusion list handles poorly. Need a curated SIC allow-list for
@@ -113,10 +113,10 @@ require specialized Gate 1 expansions:
 - **Financial-adjacent thematic plays:** companies that have financial SIC codes but are
   substantially operating businesses (e.g., specialty finance in an infrastructure theme).
 
-### theme-scout (deferred — human alpha)
+### theme-scout (deferred, human alpha)
 
-**Deferred by design.** Automated theme discovery — finding investment themes from news, X,
-earnings call transcripts — is a tractable LLM task. It is deferred because the alpha in
+**Deferred by design.** Automated theme discovery, finding investment themes from news, X,
+earnings call transcripts, is a tractable LLM task. It is deferred because the alpha in
 theme selection is human: knowing which themes are at the right stage of the adoption cycle,
 which are already over-indexed by retail, and which have an identifiable small-cap beneficiary
 pool. Automating that selection would optimize for novelty, not investment merit.
@@ -127,14 +127,14 @@ Brier scoring above as a prerequisite).
 
 ---
 
-## Run-3 audit synthesis (2026-06-18) — prioritized
+## Run-3 audit synthesis (2026-06-18), prioritized
 
 Four parallel audits (recall / rubric-calibration / hunting-grounds / pipeline) on the
 4-theme run. Prioritized; the first is a **bug**, the rest are improvements. Honest caveat
 up front: three runs / ~40 deep dives produced **0 BUY**; part is genuine market efficiency,
 part is the calibration gap below. None of this is guaranteed to surface a BUY.
 
-**P1 — Mechanical data-correctness bug (highest; this is a defect, not a feature).**
+**P1, Mechanical data-correctness bug (highest; this is a defect, not a feature).**
 `concept_series`'s 350-380-day annual window mis-handles fiscal-year≠calendar-year filers →
 wrong revenue anchors in run-3 (BUKS revenue stuck at FY2018 $48M vs real ~$84M; WLFC unit
 leakage 730 vs real $569M; LNN $659M vs $676M). Agents caught these via WebSearch but should
@@ -144,23 +144,23 @@ passes while these fail); shares fallback chain (`CommonStockSharesOutstanding` 
 `dei:EntityCommonStockSharesOutstanding` → diluted WANSO); pass discover's `avg_dollar_vol`
 through to the deepdive JSON (`liquidity_adv`). ~1 day, single file (`deepdive_data.py`).
 
-**P2 ✓ DONE (v0.2.0)** — Valuation engine (`tools/valuation.py`): reverse-DCF, EV/EBITDA,
+**P2 ✓ DONE (v0.2.0)**, Valuation engine (`tools/valuation.py`): reverse-DCF, EV/EBITDA,
 cyclical-trough EBITDA, NAV path.
 
-**P3 ✓ DONE (v0.2.0)** — Symmetric BUY trigger (MoS ≥ 30%) + closed-list catalyst axis
+**P3 ✓ DONE (v0.2.0)**, Symmetric BUY trigger (MoS ≥ 30%) + closed-list catalyst axis
 (four forced-trading categories) + perpetual-veto prohibition.
 
-**P4 ✓ DONE (v0.2.0)** — 20-F/40-F fallback, SIC downgrade-to-review (not drop), dual
+**P4 ✓ DONE (v0.2.0)**, 20-F/40-F fallback, SIC downgrade-to-review (not drop), dual
 market-cap band, per-theme keyword guidance.
 
-**P5 ✓ DONE (v0.2.0)** — Event-driven discovery: spinoffs (Form 10-12B) + cluster insider
+**P5 ✓ DONE (v0.2.0)**, Event-driven discovery: spinoffs (Form 10-12B) + cluster insider
 buys (openinsider). Four entry modes: theme / ticker / rank / events. CIK-first for
 pre-listing spinoffs.
 
-**P6 ✓ DONE (v0.2.0)** — material_weakness false-positive fix: affirmative ICFR finding
+**P6 ✓ DONE (v0.2.0)**, material_weakness false-positive fix: affirmative ICFR finding
 required; bare risk-factor boilerplate does not fire the flag.
 
-**P7 (theme-fit gate redundancy)** — run_theme.py candidates JSON omits `json_path`, so the
+**P7 (theme-fit gate redundancy)**, run_theme.py candidates JSON omits `json_path`, so the
 gate always WebSearches, then deepdive re-judges `theme_fit` anyway. Either pass `json_path`
 through, or fold theme-fit into the deep-dive and drop the separate gate for the single-pass
 path. (Deferred to future release.)

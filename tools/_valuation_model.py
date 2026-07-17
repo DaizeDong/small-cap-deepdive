@@ -132,7 +132,7 @@ def _build_ebitda_series(ebit_series: list[dict], da_series: list[dict]) -> tupl
         if e is not None and d is not None:
             result.append({"end": end, "val": e + d})
         else:
-            n_partial += 1  # skip partial — do not let half-sums distort CV
+            n_partial += 1  # skip partial, do not let half-sums distort CV
     return result, n_partial
 
 

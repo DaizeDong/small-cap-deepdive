@@ -51,7 +51,7 @@ OPENINSIDER_CLUSTER = "http://openinsider.com/latest-cluster-buys"
 
 # Match "Company Name  (TICK)  (CIK 0001234567)"
 _NAME_TICK_CIK = re.compile(r"^(.*?)\s*\(([A-Za-z0-9.\-]+)\)\s*\(CIK\s*(\d+)\)")
-# Match "Company Name  (CIK 0001234567)" — no ticker yet
+# Match "Company Name  (CIK 0001234567)", no ticker yet
 _NAME_CIK = re.compile(r"^(.*?)\s*\(CIK\s+(\d+)\)")
 
 
@@ -121,7 +121,7 @@ def _band(mktcap: float | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Mode 1 — Spinoffs via Form 10-12B
+# Mode 1, Spinoffs via Form 10-12B
 # ---------------------------------------------------------------------------
 
 def discover_spinoffs(
@@ -219,7 +219,7 @@ def discover_spinoffs(
             "name": item["name"],
             "theme": "event:spinoff",
             "theme_slug": "event_spinoff",
-            "horizon": None,          # D2: event-mode — no keyword-horizon concept applies
+            "horizon": None,          # D2: event-mode, no keyword-horizon concept applies
             "catalyst": catalyst,
             "event_type": "spinoff",
             "file_date": item["file_date"],
@@ -233,7 +233,7 @@ def discover_spinoffs(
 
 
 # ---------------------------------------------------------------------------
-# Mode 2 — Insider cluster buys via openinsider
+# Mode 2, Insider cluster buys via openinsider
 # ---------------------------------------------------------------------------
 
 class _ClusterTableParser(HTMLParser):
@@ -430,7 +430,7 @@ def discover_insider_clusters(
             "name": item["name"],
             "theme": "event:insider_cluster",
             "theme_slug": "event_insider_cluster",
-            "horizon": None,          # D2: event-mode — no keyword-horizon concept applies
+            "horizon": None,          # D2: event-mode, no keyword-horizon concept applies
             "catalyst": catalyst,
             "event_type": "insider_cluster",
             "n_insiders": item["n_insiders"],

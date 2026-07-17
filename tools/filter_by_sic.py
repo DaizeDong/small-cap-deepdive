@@ -57,19 +57,19 @@ from _common import CFG, REPORTS, http_get, slug
 HARD_EXCLUDE = CFG["sic_hard_exclude"]
 
 # ---------------------------------------------------------------------------
-# P8 SIC reverse-recall — the dedicated-SIC recall FLOOR.
+# P8 SIC reverse-recall, the dedicated-SIC recall FLOOR.
 #
 # THEME_SIC maps a theme slug (the discover.py --out-slug / first-phrase slug) to the
 # theme's dedicated SIC code(s). This is the "SIC->keep mapping" that filter_by_sic owns:
-# the SIC(s) that, for this theme, are not coarse-excludes but the OPPOSITE — a member
+# the SIC(s) that, for this theme, are not coarse-excludes but the OPPOSITE, a member
 # of these SIC(s) is presumptively in-theme and must not be dropped just because FTS
 # keyword density was low. Keys are matched case-insensitively and as a substring of the
 # theme slug (so "deathcare", "funeral_deathcare", etc. all resolve).
 #
 # Seeded with the deathcare gold cohort (assessment §P8): SCI/CSV are SIC 7200
-# (Services-Personal Services) — the dedicated deathcare operator SIC. MATW (3360,
+# (Services-Personal Services), the dedicated deathcare operator SIC. MATW (3360,
 # castings) and SNFCA (6199, finance) are cross-SIC by design and are NOT a dedicated
-# deathcare SIC, so they are deliberately NOT floored here — track_forward's recall@gold
+# deathcare SIC, so they are deliberately NOT floored here, track_forward's recall@gold
 # is what measures that residual FTS-only gap.
 THEME_SIC: dict[str, list[str]] = {
     "deathcare": ["7200"],
@@ -273,14 +273,14 @@ def sic_reverse_recall(theme: str, forms: str = "10-K", mapping=None,
 
 
 # ---------------------------------------------------------------------------
-# v0.3.2 backlog #10 — SIC-floor sidecar namespacing.
+# v0.3.2 backlog #10, SIC-floor sidecar namespacing.
 #
 # The dedicated-SIC enumeration is a per-theme RECALL artifact. A previous run
 # wrote that sidecar to a FIXED, cross-theme path (e.g. candidates_railcar_leasing.json),
 # so a machinery run dir ended up with a stale 63-name railcar-leasing sidecar that
 # finalize_run would have falsely demanded reports for. The fix: the sidecar MUST be
 # (a) written into the ACTIVE run/batch dir (REPORTS, the SMALLCAP_RUN subdir when set),
-# and (b) namespaced by the ACTIVE theme slug — never a fixed cross-theme filename. Two
+# and (b) namespaced by the ACTIVE theme slug, never a fixed cross-theme filename. Two
 # concurrent themes therefore write distinct files in distinct run dirs and never collide.
 # ---------------------------------------------------------------------------
 
@@ -493,7 +493,7 @@ def _selftest():
     assert "recall_channel" not in fts[0], "union_recall must NOT mutate its inputs"
 
     # -----------------------------------------------------------------------
-    # v0.3.2 #10 — SIC-floor sidecar must be namespaced under the ACTIVE run dir
+    # v0.3.2 #10, SIC-floor sidecar must be namespaced under the ACTIVE run dir
     # and the ACTIVE theme slug, never a fixed cross-theme path. Two distinct
     # slugs/runs must NOT clobber each other.
     # -----------------------------------------------------------------------
@@ -501,7 +501,7 @@ def _selftest():
     with tempfile.TemporaryDirectory() as _td:
         run_machinery = Path(_td) / "2026-06-20_cov-machinery"
         run_railcar = Path(_td) / "2026-06-20_cov-railcar-leasing"
-        # The sidecar filename derives from the ACTIVE theme slug — never a fixed cross-theme name.
+        # The sidecar filename derives from the ACTIVE theme slug, never a fixed cross-theme name.
         p_mach = sic_floor_sidecar_path("cov-machinery", run_dir=run_machinery)
         p_rail = sic_floor_sidecar_path("railcar-leasing", run_dir=run_railcar)
         assert p_mach.name == "_sic_floor_cov_machinery.json", f"#10: slug-namespaced sidecar name: {p_mach.name}"

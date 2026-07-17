@@ -113,38 +113,38 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # P-B: low_revenue_loss_ratio is a DATA-QUALITY LABEL ONLY (early/pre-revenue resource
     # pattern: present-but-tiny revenue + large genuine loss). It surfaces in data_quality so a
     # PM sees the real cause (right entity, tiny revenue) instead of the old wrong_entity misfire.
-    # It does NOT by itself flip buy_eligible — those names stay blocked by their null/negative
+    # It does NOT by itself flip buy_eligible, those names stay blocked by their null/negative
     # FCF (MoS null) as before, NOT by this label.
     if der.get("low_revenue_loss_ratio"):
         _lrl_detail = der.get("low_revenue_loss_ratio_detail", "")
         # A4: distinguish the EXTREME (>20x) tier (gates buy_eligible) from the advisory label.
         _lrl_tag = "low_revenue_loss_ratio_extreme" if der.get("low_revenue_loss_ratio_extreme") else "low_revenue_loss_ratio"
         dq.append(f"{_lrl_tag}:{_lrl_detail}")
-    # A2: concentration_unquantified — text customer-concentration flag True but no XBRL magnitude
+    # A2: concentration_unquantified, text customer-concentration flag True but no XBRL magnitude
     # (text-only / pre-/early-XBRL filer, the SWMR/LFCR SIGA-class blind spot). Advisory ONLY:
     # surfaced in data_quality so a PM sees the unquantified concentration; does NOT gate.
     if der.get("concentration_unquantified"):
         dq.append("concentration_unquantified:text_flag_true_but_xbrl_magnitude_null")
-    # v0.3.2 #11: foreign_filer_unvaluable — a 20-F/40-F filer whose revenue/net-income/OCF were
+    # v0.3.2 #11: foreign_filer_unvaluable, a 20-F/40-F filer whose revenue/net-income/OCF were
     # STILL empty after the producer's us-gaap+ifrs-full concept cascade. Surface it as an EXPLICIT
-    # data-quality label so the abstain reads "foreign filer — un-valuable from EDGAR" instead of a
+    # data-quality label so the abstain reads "foreign filer, un-valuable from EDGAR" instead of a
     # bare intrinsic_band_unavailable null. Label-only here; the null MoS already gates buy_eligible
-    # via not_assessable_no_intrinsic_band (no separate BUY gate needed — never a false BUY).
+    # via not_assessable_no_intrinsic_band (no separate BUY gate needed, never a false BUY).
     _foreign_filer_unvaluable = bool(der.get("foreign_filer_unvaluable", False))
     if _foreign_filer_unvaluable:
         _ffu_detail = der.get("foreign_filer_unvaluable_detail", "")
         dq.append(f"foreign_filer_unvaluable:{_ffu_detail}")
 
-    # --- C2: financial-SIC guard — exclude financial sector from FCF-cap model ---
+    # --- C2: financial-SIC guard, exclude financial sector from FCF-cap model ---
     # SIC prefixes: 60=banks, 61=non-depository credit, 63=insurance carriers,
     #               64=insurance agents, 67=holding companies/investment/REITs/BDCs
     _FINANCIAL_SIC_PREFIXES = ("60", "61", "63", "64", "67")
     sic_code = str(der.get("sic") or "").strip()
     _financial_sic = bool(sic_code and any(sic_code.startswith(p) for p in _FINANCIAL_SIC_PREFIXES))
-    # A3: insurance_concepts_present — an insurance underwriter / insurance-subsidiary holdco
+    # A3: insurance_concepts_present, an insurance underwriter / insurance-subsidiary holdco
     # detected from XBRL concepts (PremiumsEarned / policy reserves / losses&LAE / policyholder
     # funds). These route like a financial_sic name (nav/abstain, never an fcf_cap BUY) EVEN when
-    # the top-level SIC is non-financial — closing the BOC SIC-65 surety-insurance-holdco hole
+    # the top-level SIC is non-financial, closing the BOC SIC-65 surety-insurance-holdco hole
     # where prefix 65 is not in _FINANCIAL_SIC_PREFIXES. Distinct buy_eligible gate below.
     _insurance_concepts_present = bool(der.get("insurance_concepts_present", False))
     _financial_sic_forced_unsuitable = False
@@ -159,8 +159,8 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     elif not sic_code:
         # C2-fallback: SEC submissions sometimes omit the top-level SIC (observed on
         # several BDCs / closed-end funds, e.g. WHF). Detect the investment-company
-        # signature — NO GAAP revenue but operating cash flow present (loan/portfolio
-        # cash flows) — and treat it as financial-structure: FCF-cap is unsuitable.
+        # signature, NO GAAP revenue but operating cash flow present (loan/portfolio
+        # cash flows), and treat it as financial-structure: FCF-cap is unsuitable.
         if latest_revenue is None and latest_ocf is not None:
             _financial_sic_forced_unsuitable = True
             dq.append("financial_structure_suspected_no_sic:revenue_absent_ocf_present")
@@ -297,7 +297,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     fcf_cap_model_unsuitable: bool = False
     if _financial_sic_forced_unsuitable:
         # C2: financial-sector companies (banks, insurers, BDCs, REITs, holding cos)
-        # — FCF capitalization is structurally invalid for these business models.
+        #, FCF capitalization is structurally invalid for these business models.
         fcf_cap_model_unsuitable = True
         # note already appended to dq above
     elif latest_debt is not None and latest_assets and latest_assets > 0:
@@ -309,11 +309,11 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # --- v0.3.2 #8: lessor / leasing-business NAV routing (debt/assets<0.62 hole) ---
     # Asset-heavy lessors (railcar/equipment/auto) are textbook lease-fleet NAV candidates, but
     # their balance sheets sit BELOW the 0.62 debt/assets threshold (GBX 0.41, RAIL 0.35), so the
-    # FCF-cap firewall above did not route them to NAV — they were mis-valued on trough-cycle FCF.
+    # FCF-cap firewall above did not route them to NAV, they were mis-valued on trough-cycle FCF.
     # The producer (deepdive_data.py) emits derived.lessor_asset_heavy=True on a leasing/rental
     # business signal (leasing SIC, lease-income concept, or very-high PP&E/lease-fleet ratio with
     # rental revenue). Consume it here: a lessor forces fcf_cap_model_unsuitable=True (-> lease-fleet
-    # NAV basis) EVEN WHEN debt/assets<0.62. This NEVER manufactures a BUY — it only routes a name
+    # NAV basis) EVEN WHEN debt/assets<0.62. This NEVER manufactures a BUY, it only routes a name
     # AWAY from the FCF-cap path toward NAV/abstain. This is the consumer half of the #8 contract.
     _lessor_asset_heavy = bool(der.get("lessor_asset_heavy", False))
     if _lessor_asset_heavy and not fcf_cap_model_unsuitable:
@@ -458,7 +458,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         _extreme_mos_review_required = True
         dq.append(f"extreme_mos_review_required:mos={_active_mos*100:.1f}%_exceeds_100pct")
 
-    # --- G2: large-cap ceiling — mktcap > watch_band_max must NOT receive BUY ---
+    # --- G2: large-cap ceiling, mktcap > watch_band_max must NOT receive BUY ---
     # For a small-cap tool, anything in the large-cap band is out of scope.
     # watch_band_max from config (default 2B).
     _WATCH_BAND_MAX = int(cfg.get("watch_band_max", 2_000_000_000))
@@ -468,10 +468,10 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
 
     # --- I1: FCF sustainability guard ---
     # Downgrade BUY→WATCH when FCF quality is suspect:
-    #   (i)  reverse_dcf_implied_growth < -0.15 — market prices in steep decline while
+    #   (i)  reverse_dcf_implied_growth < -0.15, market prices in steep decline while
     #        our MoS says cheap = contradiction → unsupported terminal value
     #   (ii) OCF-proxy AND capital-intensive (large PP&E proxy = assets >> equity, or
-    #        large capex historically) — true FCF after capex is unknown and likely lower
+    #        large capex historically), true FCF after capex is unknown and likely lower
     #   (iii) lumpy OCF (CV high but not fully captured by cyclical flag)
     #
     # This only fires for fcf_cap path (nav/abstain already route away from BUY).
@@ -482,10 +482,10 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
             _fcf_sustainability_uncertain = True
             dq.append(f"fcf_sustainability_uncertain:rdcf_growth={rdcf_growth:.3f}<-0.15")
 
-        # (ii) P2: EVERY OCF-proxy FCF is uncertain — true FCF after capex is unknown
+        # (ii) P2: EVERY OCF-proxy FCF is uncertain, true FCF after capex is unknown
         # and structurally <= OCF. assets/rev>5 is used ONLY to escalate severity,
         # NEVER as a gate (the old dead `elif` silently skipped capital-light proxies
-        # with assets present but ratio<=5 — ~18% of the universe went unflagged).
+        # with assets present but ratio<=5, ~18% of the universe went unflagged).
         if fcf_is_proxy:
             _fcf_sustainability_uncertain = True
             if latest_assets is not None and latest_revenue and latest_revenue > 0:
@@ -501,13 +501,13 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
                         f"(assets/rev={asset_rev_ratio:.1f})"
                     )
             else:
-                # No asset/revenue data — still uncertain (unknown capex on unknown base)
+                # No asset/revenue data, still uncertain (unknown capex on unknown base)
                 dq.append("fcf_sustainability_uncertain:ocf_proxy_capex_unknown")
 
     # --- P10: lumpy-OCF normalization guard (specced in I1, never coded until now) ---
     # When a cyclical name is normalized on a trailing 5yr average, a single peak year
     # (e.g. SIGA's 2023 BARDA delivery, ~8x the trough) over-inflates norm_fcf and
-    # manufactures a false MoS. Flag-and-downgrade — NEVER silently delete the year.
+    # manufactures a false MoS. Flag-and-downgrade, NEVER silently delete the year.
     # A year is "lumpy" when its OCF > 2x the median of the OTHER years in the window.
     # This overlaps P6 contamination; we read the producer's contamination_ratio as the
     # corroborating signal (latest below its own 5yr-avg base => over-normalized peak).
@@ -587,7 +587,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # --- P7: second-source sanity band (read from producer derived) ---
     # The producer (deepdive_data.py) cross-checks SEC-XBRL latest debt/revenue/shares against an
     # independent source (yfinance). cross_source_mismatch is True ONLY when a field disagreed
-    # grossly (>2.5x) — meaning the single SEC value cannot be trusted. This is a DATA-INTEGRITY
+    # grossly (>2.5x), meaning the single SEC value cannot be trusted. This is a DATA-INTEGRITY
     # gate (unlike the flag-only signals): it is FINE for it to gate, because a corrupted input
     # number cannot produce a tradeable MoS. An absent second source leaves cross_source_checked
     # False / mismatch False, so this NEVER blocks a name on missing data. When set, a static-MoS
@@ -604,7 +604,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # average still emits a POSITIVE normalized_fcf -> a phantom positive MoS (+55.1% mechanical BUY).
     # The producer (deepdive_data.py) emits normalization_masks_current_loss = normalized_fcf>0 AND
     # (latest_ocf<0 OR latest_fcf<0 OR contamination_ratio<0). We AND (not flag) into buy_eligible
-    # here so the BUY is downgraded BUY->WATCH — exactly like fundamental_decline / peak_contamination.
+    # here so the BUY is downgraded BUY->WATCH, exactly like fundamental_decline / peak_contamination.
     # Downgrade-only: it NEVER manufactures a BUY. This is the consumer half of the #1 contract.
     _normalization_masks_current_loss = bool(der.get("normalization_masks_current_loss", False))
     if _normalization_masks_current_loss:
@@ -614,7 +614,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
             f"contamination_ratio={_contamination_ratio}"
         )
 
-    # --- P1: compose buy_eligible — the single mechanical boolean the BUY trigger ANDs ---
+    # --- P1: compose buy_eligible, the single mechanical boolean the BUY trigger ANDs ---
     # buy_eligible is True ONLY when every blocking guard is clear. The rubric/SKILL BUY
     # trigger additionally requires mos_basis=="fcf_cap" AND MoS>=30 AND zero Tier-3-load-
     # bearing; buy_eligible is the deterministic guard-composite half of that contract.
@@ -658,14 +658,14 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "normalized_ebitda": round(norm_ebitda) if norm_ebitda is not None else None,
         "normalized_fcf": round(norm_fcf) if norm_fcf is not None else None,
         "normalization_note": norm_note,
-        # Reverse DCF (equity-FCF basis — denominator is market_cap, not EV)
+        # Reverse DCF (equity-FCF basis, denominator is market_cap, not EV)
         "rdcf_basis": rdcf_basis,
         "reverse_dcf_implied_growth": rdcf_growth,
         "reverse_dcf_null_reason": rdcf_null_reason,
         # Asset-heavy / model suitability
         "fcf_cap_model_unsuitable": fcf_cap_model_unsuitable,
         # v0.3.2 #8: lessor_asset_heavy (read from producer derived). When True, this name was
-        # routed to NAV/abstain (fcf_cap_model_unsuitable forced True) EVEN at debt/assets<0.62 —
+        # routed to NAV/abstain (fcf_cap_model_unsuitable forced True) EVEN at debt/assets<0.62 ,
         # the GBX/RAIL lease-fleet NAV fix. Surfaced so the report can say "lessor -> NAV basis".
         "lessor_asset_heavy": _lessor_asset_heavy,
         "lessor_asset_heavy_detail": der.get("lessor_asset_heavy_detail") if _lessor_asset_heavy else None,
@@ -714,7 +714,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "concentration_unquantified": bool(der.get("concentration_unquantified", False)),
         # P-G: filing-form provenance (10-K/20-F/40-F) for the trust banner
         "form_used": der.get("form_used"),
-        # v0.3.2 #11: foreign_filer_unvaluable (read from producer derived) — a 20-F/40-F filer whose
+        # v0.3.2 #11: foreign_filer_unvaluable (read from producer derived), a 20-F/40-F filer whose
         # financials stayed empty even after the us-gaap+ifrs-full cascade. Explicit abstain label
         # for the report/banner so it is NOT a silent intrinsic_band_unavailable null.
         "foreign_filer_unvaluable": _foreign_filer_unvaluable,
@@ -993,7 +993,7 @@ def _selftest():
     out_lnn.write_text(json.dumps(block_lnn, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # --- C2: financial-SIC exclusion unit test ---
-    # Simulate a BDC (SIC 6726) with positive FCF — must route to nav/abstain, NOT fcf_cap
+    # Simulate a BDC (SIC 6726) with positive FCF, must route to nav/abstain, NOT fcf_cap
     _dd_financial = {
         "ticker": "TEST_BDC",
         "derived": {
@@ -1041,7 +1041,7 @@ def _selftest():
     )
     print("  C2 financial-SIC exclusion: BDC SIC 6726 routes to nav/abstain  OK")
 
-    # --- C2-fallback: SIC absent + BDC signature (no revenue, OCF present) — real WHF case ---
+    # --- C2-fallback: SIC absent + BDC signature (no revenue, OCF present), real WHF case ---
     _dd_no_sic_bdc = {
         "ticker": "TEST_BDC_NO_SIC",
         "derived": {
@@ -1137,7 +1137,7 @@ def _selftest():
         print("  G1 extreme-MoS defense: MoS null (insufficient data), skipping assertion")
 
     # --- G2: large-cap ceiling unit test ---
-    # Use a market_cap > 2B — should set large_cap_out_of_scope=True
+    # Use a market_cap > 2B, should set large_cap_out_of_scope=True
     _block_large = compute_valuation(_dd_extreme, 5_000_000_000, cfg)  # $5B market cap
     assert _block_large.get("large_cap_out_of_scope") is True, (
         f"G2: large_cap_out_of_scope must be True for $5B market cap"
@@ -1360,9 +1360,9 @@ def _selftest():
 
     # --- P-A: peak_contamination_flag => buy_eligible False (V-shape value-trap veto) ---
     # NRP-class: a clean MECHANICAL BUY (rev_slope_sign=+1 so fundamental_decline_flag stays
-    # False) that is actually a melting ice cube — the producer set peak_contamination_flag on
+    # False) that is actually a melting ice cube, the producer set peak_contamination_flag on
     # the V-shape (contamination<0.8 AND latest_below_avg AND latest_NI<0). valuation must read
-    # the flag, downgrade BUY->WATCH, and surface the veto — WITHOUT fundamental_decline_flag.
+    # the flag, downgrade BUY->WATCH, and surface the veto, WITHOUT fundamental_decline_flag.
     _dd_peak = dict(_dd_clean_base)
     _dd_peak["derived"] = dict(_dd_clean_base["derived"])
     _dd_peak["ticker"] = "TEST_NRP_VSHAPE"
@@ -1530,7 +1530,7 @@ def _selftest():
     _block_blocked = compute_valuation(_dd_blocked, 200_000_000, cfg)
     # CRITICAL (per data contract): the relabel removed the OLD wrong_entity_suspected misfire
     # from buy_ineligible_reasons, so it must NOT have introduced low_revenue_loss_ratio as a
-    # block, and — most importantly — the name must remain a NON-tradeable BUY because its FCF/MoS
+    # block, and, most importantly, the name must remain a NON-tradeable BUY because its FCF/MoS
     # is null. A tradeable BUY downstream requires mos_basis=="fcf_cap" AND a NUMERIC MoS>=30; a
     # null MoS can never satisfy that. We assert the real block (MoS null) holds regardless of
     # whatever buy_eligible reports, AND that low_revenue_loss_ratio never became a block reason.
@@ -1546,7 +1546,7 @@ def _selftest():
         f"got {_block_blocked.get('margin_of_safety_pct')}"
     )
     # Belt-and-suspenders: a null MoS cannot constitute a tradeable BUY no matter what
-    # buy_eligible says — encode that the BUY trigger (mos_basis==fcf_cap AND MoS>=30) fails.
+    # buy_eligible says, encode that the BUY trigger (mos_basis==fcf_cap AND MoS>=30) fails.
     _mos_blocked = _block_blocked.get("margin_of_safety_pct")
     _tradeable_buy = (
         _block_blocked.get("buy_eligible") is True
@@ -1564,7 +1564,7 @@ def _selftest():
     # --- A4: low_revenue_loss_ratio_extreme (>20x) GATES buy_eligible (STSS/MVIS/TIPT tail) ---
     # The clean fixture is buy_eligible=True on fcf_cap. Setting ONLY the extreme tier (with the
     # advisory label also True, as the producer always co-sets them) must flip buy_eligible=False
-    # with the accurate reason-string — replacing the old wrong_entity_suspected co-fire.
+    # with the accurate reason-string, replacing the old wrong_entity_suspected co-fire.
     _dd_lrl_ext = dict(_dd_clean_base)
     _dd_lrl_ext["derived"] = dict(_dd_clean_base["derived"])
     _dd_lrl_ext["ticker"] = "TEST_LOW_REV_LOSS_EXTREME"
@@ -1593,7 +1593,7 @@ def _selftest():
     )
     print("  A4 low_revenue_loss_ratio_extreme: >20x gates buy_eligible=False (not wrong_entity)  OK")
 
-    # A4-regression: the NON-extreme label (>2x, <=20x) must NOT gate — buy_eligible unchanged.
+    # A4-regression: the NON-extreme label (>2x, <=20x) must NOT gate, buy_eligible unchanged.
     _dd_lrl_mild = dict(_dd_clean_base)
     _dd_lrl_mild["derived"] = dict(_dd_clean_base["derived"])
     _dd_lrl_mild["ticker"] = "TEST_LOW_REV_LOSS_MILD"
@@ -1612,11 +1612,11 @@ def _selftest():
     # --- A3: insurance_concepts_present routes nav/abstain AND gates buy_eligible ---
     # An insurance-subsidiary holdco on a NON-financial SIC (BOC SIC-65 = 6510, NOT in the
     # financial-SIC prefix list) must route like financial_sic (nav/abstain, never fcf_cap) and
-    # gate buy_eligible with a distinct, accurate reason — closing the latent fcf_cap-BUY hole.
+    # gate buy_eligible with a distinct, accurate reason, closing the latent fcf_cap-BUY hole.
     _dd_ins = dict(_dd_clean_base)
     _dd_ins["derived"] = dict(_dd_clean_base["derived"])
     _dd_ins["ticker"] = "TEST_INSURANCE_HOLDCO"
-    _dd_ins["derived"]["sic"] = "6510"            # SIC-65 real-estate operator (BOC) — NON-financial prefix
+    _dd_ins["derived"]["sic"] = "6510"            # SIC-65 real-estate operator (BOC), NON-financial prefix
     _dd_ins["derived"]["insurance_concepts_present"] = True
     _dd_ins["derived"]["insurance_concept_matched"] = "PremiumsEarnedNet"
     _block_ins = compute_valuation(_dd_ins, 120_000_000, cfg)
@@ -1784,7 +1784,7 @@ def _selftest():
     assert any("normalization_masks_current_loss" in str(x) for x in _block_tusk.get("data_quality", [])), (
         "#1: normalization_masks_current_loss must surface in data_quality"
     )
-    # NEGATIVE CONTROL: a clean grower (producer flag False) must stay buy_eligible — the gate must
+    # NEGATIVE CONTROL: a clean grower (producer flag False) must stay buy_eligible, the gate must
     # NOT fire on healthy normalization. Reuse the clean fixture (flag absent/False).
     assert _block_clean.get("normalization_masks_current_loss") is False, (
         "#1: clean grower must have normalization_masks_current_loss=False (no false fire)"
@@ -1858,7 +1858,7 @@ def _selftest():
         "#9 CRITICAL: buy_eligible must NEVER be True with a null MoS"
     )
     # Belt-and-suspenders: across ALL three null-MoS basis routes (fcf_cap null band, nav with no NAV
-    # MoS, abstain) buy_eligible must be False — assert the invariant directly on the no-band block.
+    # MoS, abstain) buy_eligible must be False, assert the invariant directly on the no-band block.
     assert not (_block_no_band.get("buy_eligible") is True
                 and _block_no_band.get("margin_of_safety_pct") is None), (
         "#9 INVARIANT: buy_eligible=True with margin_of_safety_pct=None is forbidden"
@@ -1872,7 +1872,7 @@ def _selftest():
     _dd_lessor = dict(_dd_clean_base)
     _dd_lessor["derived"] = dict(_dd_clean_base["derived"])
     _dd_lessor["ticker"] = "TEST_LESSOR_GBX"
-    _dd_lessor["derived"]["sic"] = "3743"               # railroad equipment — non-financial prefix
+    _dd_lessor["derived"]["sic"] = "3743"               # railroad equipment, non-financial prefix
     _dd_lessor["derived"]["lessor_asset_heavy"] = True
     _dd_lessor["derived"]["lessor_asset_heavy_detail"] = "lessor_sic:3743;ppe_fleet_ratio=0.70>0.55+rental_rev"
     # debt/assets = 410M/1000M = 0.41 < 0.62 (the firewall would NOT route this without #8).
@@ -1898,7 +1898,7 @@ def _selftest():
                for x in _block_lessor.get("data_quality", [])), (
         f"#8: routing reason must be in data_quality, got {_block_lessor.get('data_quality')}"
     )
-    # Negative control: the SAME fixture WITHOUT the lessor flag (and below 0.62) routes fcf_cap —
+    # Negative control: the SAME fixture WITHOUT the lessor flag (and below 0.62) routes fcf_cap ,
     # proving the routing is driven by lessor_asset_heavy, not by the debt/assets ratio.
     _dd_not_lessor = dict(_dd_lessor)
     _dd_not_lessor["derived"] = dict(_dd_lessor["derived"])
@@ -1926,7 +1926,7 @@ def _selftest():
     _dd_rail = dict(_dd_clean_base)
     _dd_rail["derived"] = dict(_dd_clean_base["derived"])
     _dd_rail["ticker"] = "TEST_LESSOR_RAIL"
-    _dd_rail["derived"]["sic"] = "7359"                  # equipment rental/leasing — non-financial prefix
+    _dd_rail["derived"]["sic"] = "7359"                  # equipment rental/leasing, non-financial prefix
     _dd_rail["derived"]["lessor_asset_heavy"] = True
     _dd_rail["derived"]["lessor_asset_heavy_detail"] = "lessor_sic:7359;operating_lease_income_concept+rental_rev"
     # debt/assets = 350M/1000M = 0.35 < 0.62 (firewall would NOT route this without #8).
@@ -1955,7 +1955,7 @@ def _selftest():
                for x in _block_rail.get("data_quality", [])), (
         f"#8 RAIL: routing reason must surface in data_quality, got {_block_rail.get('data_quality')}"
     )
-    # Normal-name control restated at 0.35: the clean (non-lessor) fixture is unchanged — proving
+    # Normal-name control restated at 0.35: the clean (non-lessor) fixture is unchanged, proving
     # the NAV routing is attributable to lessor_asset_heavy, never to the sub-firewall ratio itself.
     assert _block_clean.get("lessor_asset_heavy") is False, (
         f"#8: a normal name must have lessor_asset_heavy=False, got {_block_clean.get('lessor_asset_heavy')}"
@@ -1972,7 +1972,7 @@ def _selftest():
     # A 20-F filer whose financials stayed empty after the producer's IFRS cascade emits
     # derived.foreign_filer_unvaluable=True. valuation MUST surface it in the block + data_quality
     # so the abstain is CLEARLY labeled (not a silent intrinsic_band_unavailable null). It is a
-    # LABEL only — the null MoS still gates buy_eligible via not_assessable (no false BUY).
+    # LABEL only, the null MoS still gates buy_eligible via not_assessable (no false BUY).
     _dd_ffu = dict(_dd_no_band)                          # no-band fixture => null MoS already
     _dd_ffu["derived"] = dict(_dd_no_band["derived"])
     _dd_ffu["ticker"] = "TEST_FOREIGN_UNVALUABLE"

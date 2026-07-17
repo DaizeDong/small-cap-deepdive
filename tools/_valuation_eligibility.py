@@ -38,7 +38,7 @@ def compose_buy_eligibility(
 
     Returns (buy_eligible, buy_ineligible_reasons).
     """
-    # --- P1: compose buy_eligible — the single mechanical boolean the BUY trigger ANDs in ---
+    # --- P1: compose buy_eligible, the single mechanical boolean the BUY trigger ANDs in ---
     _buy_ineligible_reasons: list[str] = []
     if extreme_mos_review_required:
         _buy_ineligible_reasons.append("extreme_mos_review_required")
@@ -52,7 +52,7 @@ def compose_buy_eligibility(
     # unsuitable so the reason-string is accurate even on a non-financial SIC, e.g. BOC SIC-65).
     if insurance_concepts_present:
         _buy_ineligible_reasons.append("insurance_concepts_present")
-    # A4: low_revenue_loss_ratio_extreme (|NI|/rev>20x — STSS/MVIS/TIPT tail) gates buy_eligible
+    # A4: low_revenue_loss_ratio_extreme (|NI|/rev>20x, STSS/MVIS/TIPT tail) gates buy_eligible
     # with the accurate label, replacing the old wrong_entity_suspected co-fire on that tail. The
     # non-extreme low_revenue_loss_ratio (>2x) stays a data_quality label ONLY (does NOT gate).
     if der.get("low_revenue_loss_ratio_extreme"):
@@ -69,7 +69,7 @@ def compose_buy_eligibility(
     if peak_contamination_flag:
         _buy_ineligible_reasons.append("peak_contamination_flag")
     # P7: cross_source_mismatch (a >2.5x SEC-vs-yfinance disagreement on debt/revenue/shares)
-    # gates buy_eligible — a corrupted single-source number cannot back a tradeable MoS. This is
+    # gates buy_eligible, a corrupted single-source number cannot back a tradeable MoS. This is
     # a DATA-INTEGRITY gate, not a between-filings signal; gating here is intended.
     if cross_source_mismatch:
         _buy_ineligible_reasons.append("cross_source_mismatch")
@@ -81,7 +81,7 @@ def compose_buy_eligibility(
         _buy_ineligible_reasons.append("normalization_masks_current_loss")
     # v0.3.1 #9: a null MoS can NEVER be a tradeable BUY. When the active basis carries no numeric
     # MoS (fcf_cap with no intrinsic band, or nav/abstain with no NAV MoS), buy_eligible MUST be
-    # False with an explicit reason — not left True-by-absence-of-data (the DAVA/TV/QNC footgun
+    # False with an explicit reason, not left True-by-absence-of-data (the DAVA/TV/QNC footgun
     # where buy_eligible=True co-existed with MoS=null, caught only by the downstream MoS>=30 clause).
     _active_mos_for_eligibility = mos if mos_basis == "fcf_cap" else nav_mos
     if _active_mos_for_eligibility is None:

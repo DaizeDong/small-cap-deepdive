@@ -115,7 +115,7 @@ def collect_trust_flags(deep: dict, val: dict) -> list[str]:
         _add(f"data_quality: {f}")
     for r in (val.get("buy_ineligible_reasons") or []):
         _add(f"buy_ineligible: {r}")
-    # P3 concentration kill/watch — surface verbatim with its detail.
+    # P3 concentration kill/watch, surface verbatim with its detail.
     cflag = der.get("concentration_flag")
     if cflag in ("kill", "watch"):
         detail = der.get("concentration_detail") or ""
@@ -180,12 +180,12 @@ def _mos_field(v) -> str:
         return "null"
 
 
-# P-E — a prose `<...>` token (e.g. "<One sentence ...>", "<e.g. ...>") that the agent never
-# filled. Non-greedy, no nested '<', so the `—` em-dashes and inline quotes inside a placeholder
+# P-E, a prose `<...>` token (e.g. "<One sentence ...>", "<e.g. ...>") that the agent never
+# filled. Non-greedy, no nested '<', so the `,` em-dashes and inline quotes inside a placeholder
 # are tolerated. The fenced rating block uses ' # ' comments (not angle brackets) and the trust
 # banner has no '<...>', so this NEVER touches the machine-decision layer.
 _PLACEHOLDER_RE = re.compile(r"<[^<>]*>")
-_PLACEHOLDER_FILLER = "_(待补)_"  # neutral "to be filled" marker — never a literal <...> token
+_PLACEHOLDER_FILLER = "_(待补)_"  # neutral "to be filled" marker, never a literal <...> token
 
 
 def strip_placeholders(md: str) -> str:
@@ -201,7 +201,7 @@ def strip_placeholders(md: str) -> str:
     for line in md.splitlines():
         new = _PLACEHOLDER_RE.sub(_PLACEHOLDER_FILLER, line)
         # A bullet/line that is now ONLY the filler (the entire content was a placeholder) is
-        # noise — drop a bare "- _(待补)_" but keep "Label: _(待补)_" (the label is informative).
+        # noise, drop a bare "- _(待补)_" but keep "Label: _(待补)_" (the label is informative).
         stripped = new.strip()
         if stripped in ("- " + _PLACEHOLDER_FILLER, _PLACEHOLDER_FILLER):
             continue
@@ -210,14 +210,14 @@ def strip_placeholders(md: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# T2 DIAGNOSTIC SIGNALS section (P15/P16/P17 firewall — see THE FIREWALL).
+# T2 DIAGNOSTIC SIGNALS section (P15/P16/P17 firewall, see THE FIREWALL).
 #
 # This renders the TOP-LEVEL "signals" namespace (a sibling of "derived", produced by
 # signals.py). It is DIAGNOSTIC-ONLY context. The firewall (design §5 Q2): valuation.py,
-# buy_eligible, and the BUY trigger NEVER read signals.* — and a PM reading this report must
+# buy_eligible, and the BUY trigger NEVER read signals.*, and a PM reading this report must
 # not mistake it for a rating driver. So the section is rendered well BELOW the rating contract
 # + trust banner, behind its own "---" rule, with an explicit non-rating header and a banner
-# that restates "context only — NOT used in the rating".
+# that restates "context only, NOT used in the rating".
 # ---------------------------------------------------------------------------
 
 # The exact header string is part of the contract: callers/selftests assert on it and a PM
@@ -353,7 +353,7 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
     rating_block = build_rating_block(deep, val)
     banner = build_trust_banner(collect_trust_flags(deep, val))
     # FIREWALL: signals is the TOP-LEVEL namespace (sibling of 'derived'), produced by
-    # signals.py. We read it here ONLY to render the diagnostic section — never to influence
+    # signals.py. We read it here ONLY to render the diagnostic section, never to influence
     # the rating block / banner / any number above. valuation.py never sees it.
     signals_section = build_signals_section(deep.get("signals"))
 
@@ -425,7 +425,7 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
         "Assessment: <credible / stretched / heroic>",
         f"MoS basis: {val.get('mos_basis') or 'abstain'}   "
         # v0.3.1 #13: margin_of_safety_pct / nav_margin_of_safety_pct are DECIMAL FRACTIONS from
-        # valuation (0.30 = 30%), so render via _fmt_pct_ratio (x100 + '%') — NOT _fmt(...,'%'),
+        # valuation (0.30 = 30%), so render via _fmt_pct_ratio (x100 + '%'), NOT _fmt(...,'%'),
         # which appended '%' to the raw fraction and printed BZH's 0.30 as '0.3%'.
         f"MoS: {_fmt_pct_ratio(val.get('margin_of_safety_pct'))}   "
         f"[NAV MoS: {_fmt_pct_ratio(val.get('nav_margin_of_safety_pct'))}]   "
@@ -508,7 +508,7 @@ def main() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Selftest — synthetic JSON -> report has banner + rating block parses + flags surfaced.
+# Selftest, synthetic JSON -> report has banner + rating block parses + flags surfaced.
 # Imports the SAME parser finalize_run.py / rank.py use, so the contract is verified end-to-end.
 # ---------------------------------------------------------------------------
 
@@ -527,7 +527,7 @@ def _selftest() -> None:
         "tenk": {"has_going_concern": False, "has_material_weakness": False,
                  "has_death_spiral": False},
         # FIREWALL: top-level "signals" namespace (sibling of "derived"), as produced by
-        # signals.py. melting-ice-cube + an activist 13D — diagnostic-only T2 context.
+        # signals.py. melting-ice-cube + an activist 13D, diagnostic-only T2 context.
         "signals": {
             "price_divergence": {
                 "price_return_6m": 0.34, "price_return_12m": 0.41,
@@ -589,13 +589,13 @@ def _selftest() -> None:
     assert parsed["killflag_count"] == 1, f"killflag_count (concentration kill) parse: {parsed}"
     assert parsed["concentration_flag"] == "kill", f"concentration_flag parse: {parsed}"
     assert parsed["fundamental_decline_flag"] is True, f"decline parse: {parsed}"
-    # rating/confidence pre-filled as TBD (agent decides) — must be recognized as unset.
+    # rating/confidence pre-filled as TBD (agent decides), must be recognized as unset.
     assert parsed["rating"] in (None, TBD), f"rating should be TBD pre-fill: {parsed}"
 
     # 3. Clean company -> banner says clean, no spurious flags, killflag_count 0.
     deep_clean = {"ticker": "CLN", "derived": {"concentration_flag": None,
                   "fundamental_decline_flag": False}, "tenk": {}}
-    # v0.3.1 #13: BZH-shape — a 0.30 decimal fraction MUST render as 30%, never 0.3%.
+    # v0.3.1 #13: BZH-shape, a 0.30 decimal fraction MUST render as 30%, never 0.3%.
     val_clean = {"ticker": "CLN", "mos_basis": "fcf_cap", "margin_of_safety_pct": 0.30,
                  "buy_eligible": True, "data_quality": [], "buy_ineligible_reasons": []}
     md_clean = render_report(deep_clean, val_clean, date="2026-06-20")
@@ -633,7 +633,7 @@ def _selftest() -> None:
         "#13: nav-basis rating-block mos_pct must be the nav MoS x100 (42.0)"
     )
 
-    # P-E: rendered report must contain NO literal `<...>` prose placeholder tokens — a PM never
+    # P-E: rendered report must contain NO literal `<...>` prose placeholder tokens, a PM never
     # sees template skeletons. The machine-decision block (rating contract + trust banner) must
     # still be intact and parseable after stripping.
     assert _PLACEHOLDER_RE.search(md) is None, "no literal <...> placeholder may survive (P-E)"
@@ -648,7 +648,7 @@ def _selftest() -> None:
         "labelled placeholder keeps label + marker"
     assert _PLACEHOLDER_RE.search(md_clean) is None, "clean-company report also placeholder-free"
 
-    # 4. UTF-8 read helper round-trips (GBK friction — G5).
+    # 4. UTF-8 read helper round-trips (GBK friction, G5).
     import tempfile, os
     fd, p = tempfile.mkstemp(suffix=".json")
     os.close(fd)
@@ -656,7 +656,7 @@ def _selftest() -> None:
     assert read_json_utf8(p)["ticker"] == "中文", "utf-8 read helper round-trip"
     os.unlink(p)
 
-    # 5. FIREWALL — T2 DIAGNOSTIC SIGNALS section (P15/P16/P17).
+    # 5. FIREWALL, T2 DIAGNOSTIC SIGNALS section (P15/P16/P17).
     # 5a. The section renders with its exact contract header and is marked non-rating.
     assert SIGNALS_HEADER in md, "T2 DIAGNOSTIC SIGNALS section header must render"
     assert "context only — NOT used in the rating" in md, "section must be marked non-rating"
@@ -676,7 +676,7 @@ def _selftest() -> None:
     # and trust banner, so a PM cannot mistake it for a driver of the decision block.
     assert md.index("```rating") < md.index("DATA-QUALITY TRUST BANNER") < md.index(SIGNALS_HEADER), \
         "signals section must be below rating contract + trust banner (firewall)"
-    # 5d. The machine-decision contract must NOT contain any signals field name — proves the
+    # 5d. The machine-decision contract must NOT contain any signals field name, proves the
     # rating block / parser is not fed by the side-channel (firewall at the contract level).
     rating_block_text = md.split("```rating", 1)[1].split("```", 1)[0]
     for forbidden in ("divergence", "price_return", "short_interest", "13d", "13g", "signals"):
@@ -707,7 +707,7 @@ def _selftest() -> None:
 
 
 # parse_rating_block is defined in finalize_run; import lazily for selftest reuse to keep a
-# single parser definition (DRY — the report producer verifies the consumer's parser).
+# single parser definition (DRY, the report producer verifies the consumer's parser).
 def parse_rating_block(md: str) -> dict:  # noqa: E302 (kept adjacent to selftest)
     from finalize_run import parse_rating_block as _p
     return _p(md)

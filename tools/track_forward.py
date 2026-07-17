@@ -54,15 +54,15 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import CFG, REPORTS, today
 
-# v0.3.3 refactor — the scoring MATH and the P8 recall-floor audit were extracted into sibling
+# v0.3.3 refactor, the scoring MATH and the P8 recall-floor audit were extracted into sibling
 # modules to shrink this orchestrator. They are re-exported below so the PUBLIC API
 # (track_forward.<symbol>) is UNCHANGED for every consumer (finalize_run ingests via
 # _build_verdicts_from_json; filter_by_sic/reference docs cite THEME_GOLD; the selftest exercises
-# every helper by bare name). Both submodules import ONLY stdlib — never back from this module —
+# every helper by bare name). Both submodules import ONLY stdlib, never back from this module ,
 # so there is no circular import. NO behavior change.
-#   _calibration.py — Brier kernel + confidence-as-prob (P12a) + data_false_positive predicate
+#   _calibration.py, Brier kernel + confidence-as-prob (P12a) + data_false_positive predicate
 #                     (P12d) + de-risk-native metrics (P12c).
-#   _recall.py      — THEME_GOLD + recall@gold + 5-stage loss breakdown + candidate/universe readers.
+#   _recall.py, THEME_GOLD + recall@gold + 5-stage loss breakdown + candidate/universe readers.
 from _calibration import (
     RATING_PROB, RATING_DIRECTION, BLOWUP_DRAWDOWN_THRESHOLD, CALIB_BUCKETS,
     _implied_prob_from_confidence, _brier,
@@ -141,7 +141,7 @@ VERDICTS_FILE = _LazyPath(_verdicts_file)
 SCORECARD_FILE = _LazyPath(_scorecard_file)
 
 DEFAULT_HORIZON_MONTHS = 12
-DEFAULT_BENCHMARK = "IWM"  # Russell 2000 small-cap ETF — correct universe comparison
+DEFAULT_BENCHMARK = "IWM"  # Russell 2000 small-cap ETF, correct universe comparison
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ def _append_verdict(row: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Signals snapshot (P15/P16/P17) — DIAGNOSTIC-ONLY, RECORDED-BUT-INERT.
+# Signals snapshot (P15/P16/P17), DIAGNOSTIC-ONLY, RECORDED-BUT-INERT.
 #
 # THE FIREWALL (approved philosophy decision Q2): the between-filings side-channel computed by
 # tools/signals.py lives in a SEPARATE top-level "signals" namespace and NEVER originates or
@@ -260,7 +260,7 @@ def _append_verdict(row: dict) -> None:
 # the verdict row so per-signal predictive value can be Brier-calibrated LATER. This snapshot is
 # WRITE-ONLY from the scorer's perspective: implied_prob, rating, and every scoring path
 # (_implied_prob_from_confidence, _brier, cmd_score, the scorecard) MUST NOT read it. It is
-# recorded-but-inert — present in the row for future per-signal calibration, load-bearing on
+# recorded-but-inert, present in the row for future per-signal calibration, load-bearing on
 # nothing today. The selftest asserts implied_prob/rating are identical with vs without it.
 # ---------------------------------------------------------------------------
 
@@ -393,7 +393,7 @@ def _build_verdict_from_flags(args) -> dict:
         "brier": None,
         "adjudication": None,
         "fp_cause": None,
-        # P15/P16/P17 diagnostic side-channel snapshot — recorded-but-inert (firewall). The CLI
+        # P15/P16/P17 diagnostic side-channel snapshot, recorded-but-inert (firewall). The CLI
         # flag path carries no signals namespace, so this is None here; the JSON-fanout path
         # (_build_verdicts_from_json) populates it from the deepdive's top-level "signals".
         "signals_snapshot": None,
@@ -621,7 +621,7 @@ def cmd_backfill(args) -> None:
 # reports/smallcap/2026-06-19_validation-v0.2.0/). MoS% as reported (whole-percent); fp_cause is
 # the validated structural pathology. These are logged as rating=买入 with a NEW field
 # adjudication="data_false_positive" so the BUY arm of the calibration loop is not permanently
-# empty — and they are KEPT OUT of the price-Brier (adjudicated by balance-sheet cross-check,
+# empty, and they are KEPT OUT of the price-Brier (adjudicated by balance-sheet cross-check,
 # not by a forward price). cik is unknown in the validation artifacts (not emitted by valuation
 # JSON) → null.
 VALIDATION_FP_DATE = "2026-06-19"
@@ -654,7 +654,7 @@ def _build_validation_fp_rows() -> list[dict]:
     rows = []
     for ticker, mos_pct, theme, fp_cause in VALIDATION_FP:
         rating = "买入"
-        # confidence is not the axis here — these are adversarially RESOLVED. Keep the BUY
+        # confidence is not the axis here, these are adversarially RESOLVED. Keep the BUY
         # convention implied_prob=0.65 for reference, but they never enter the price-Brier.
         implied_prob = _implied_prob_from_confidence(rating, None)
         rows.append({
@@ -735,7 +735,7 @@ def cmd_score(args) -> None:
         if row.get("scored"):
             continue
         # data_false_positive verdicts (P12d) are adjudicated by balance-sheet cross-check, not by
-        # a forward price horizon — never price-score them.
+        # a forward price horizon, never price-score them.
         if _is_data_false_positive(row):
             continue
         months_elapsed = _months_between(row["verdict_date"], today_str)
@@ -803,7 +803,7 @@ def cmd_scorecard(args) -> None:
     fp_rows = [r for r in rows if _is_data_false_positive(r)]
     pending = [r for r in rows if not r.get("scored") and not _is_data_false_positive(r)]
 
-    # De-risk-native metrics (P12c) — measurable now, alongside / ahead of the price-Brier.
+    # De-risk-native metrics (P12c), measurable now, alongside / ahead of the price-Brier.
     blowup_avoid = _blowup_avoidance_rate(rows)
     downside_cap = _downside_capture_rate(rows)
     buy_integrity = _buy_data_integrity_rate(rows)
@@ -929,7 +929,7 @@ def cmd_scorecard(args) -> None:
         # Calibration table
         # Calibration error = realized_freq − mean(implied_prob of members in bucket).
         # Using the mean implied_prob (not the bucket geometric midpoint) is correct because
-        # all 观察 verdicts sit at exactly p=0.50 — error must be realized_freq − 0.50,
+        # all 观察 verdicts sit at exactly p=0.50, error must be realized_freq − 0.50,
         # not realized_freq − 0.475 (the midpoint of [0.40, 0.55)).
         lines += [
             "",
@@ -1076,7 +1076,7 @@ def cmd_recall_gold(args) -> None:
         recalled, fts_count, stage_sets = _recall_set_from_universe_files(universe_paths)
         source = "universe"
         # If candidate files are ALSO supplied, layer ONLY their gated_out (deep-dive stage) on
-        # top — the universe cannot see gating. Never let candidates shrink the universe recall.
+        # top, the universe cannot see gating. Never let candidates shrink the universe recall.
         if cand_paths:
             _, _, cand_stages = _recall_set_from_candidate_files(cand_paths)
             stage_sets["gated_out"] |= cand_stages["gated_out"]
@@ -1165,7 +1165,7 @@ def _selftest() -> None:
     assert abs(uninf_avg - 0.25) < 1e-9, f"Uninformative Brier should be 0.25, got {uninf_avg}"
     print(f"  PASS: uninformative (p=0.5) prediction set → Brier = {uninf_avg}")
 
-    # --- Test 5: bucket aggregation — 买入 bucket with 2 scored verdicts ---
+    # --- Test 5: bucket aggregation, 买入 bucket with 2 scored verdicts ---
     bucket_verdicts = [
         {"rating": "买入", "implied_prob": 0.65, "brier": _brier(0.65, True),  "realized_excess_pct": 10.0},
         {"rating": "买入", "implied_prob": 0.65, "brier": _brier(0.65, False), "realized_excess_pct": -5.0},
@@ -1180,7 +1180,7 @@ def _selftest() -> None:
     assert abs(hit_rate - 0.5) < 1e-9, f"Hit rate should be 0.5, got {hit_rate}"
     print(f"  PASS: bucket aggregation — 买入 avg Brier={avg_buy_brier:.4f}, hit_rate={hit_rate:.1%}")
 
-    # --- Test 6: calibration table — bucket membership + mean-implied-prob error ---
+    # --- Test 6: calibration table, bucket membership + mean-implied-prob error ---
     # All 观察 verdicts sit at p=0.50. Calibration error must be realized_freq − 0.50,
     # NOT realized_freq − 0.475 (bucket midpoint of [0.40, 0.55)).
     calib_test = [
@@ -1324,7 +1324,7 @@ def _selftest() -> None:
     assert _downside_capture_rate([{"rating": "观察", "scored": True}]) is None, "no-避开 downside-capture should be None"
     print(f"  PASS: de-risk metrics — integrity={integ:.2f}, blowup-avoid={ba:.2f}, downside-capture={dc:.2f}")
 
-    # --- P8: recall@gold — measure the recall floor against a hand-built gold list ---
+    # --- P8: recall@gold, measure the recall floor against a hand-built gold list ---
     # theme_gold resolves via case-insensitive substring (compound slug), unmapped -> [].
     assert theme_gold("deathcare") == ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA"], (
         f"P8: deathcare gold cohort mismatch: {theme_gold('deathcare')}"
@@ -1383,7 +1383,7 @@ def _selftest() -> None:
     _uncapped = recall_at_gold("deathcare", ["SCI"], fts_hit_count=999)
     assert _uncapped["fts_cap_warning"] is None, "P8: below the cap must NOT warn"
 
-    # P8 loss-stage breakdown — a SYNTHETIC candidate set + gold list exercising every stage.
+    # P8 loss-stage breakdown, a SYNTHETIC candidate set + gold list exercising every stage.
     # Deathcare gold = {SCI, CSV, MATW, HI, STON, SNFCA}; construct one member per stage:
     #   SCI   -> recalled_final (FTS hit, survived to the final set)
     #   MATW  -> sic_recovered  (FTS missed it, SIC reverse-recall caught it)
@@ -1536,7 +1536,7 @@ def _selftest() -> None:
         _urec, _ufts, _ustg = _recall_set_from_universe_files([_uf6])
         # Universe recall set = the names that cleared size/liquidity (smallcap_candidate True).
         assert _urec == {"CSV", "SNFCA", "MATW"}, f"#6: universe survivor set: {_urec}"
-        # FTS-channel count: fts/both rows (CSV, SNFCA, SCI, HI) — MATW is sic_reverse-only.
+        # FTS-channel count: fts/both rows (CSV, SNFCA, SCI, HI), MATW is sic_reverse-only.
         assert _ufts == 4, f"#6: universe FTS-hit count (fts+both): {_ufts}"
         assert _ustg["sic"] == {"CSV", "MATW", "SCI"}, f"#6: universe SIC-channel set: {_ustg['sic']}"
         assert _ustg["mktcap_dropped"] == {"SCI", "HI"}, (
@@ -1566,8 +1566,8 @@ def _selftest() -> None:
         )
         # MATW: SIC-reverse recall (FTS missed it, the floor caught it) AND it survived size/
         # liquidity into the candidate set -> recalled_final (a survivor wins over the channel
-        # tag; pipeline-priority order). The SIC-floor credit is that it was recalled at all —
-        # visible in the sic channel set (asserted above) — not lost to fts_missed.
+        # tag; pipeline-priority order). The SIC-floor credit is that it was recalled at all ,
+        # visible in the sic channel set (asserted above), not lost to fts_missed.
         assert "MATW" in _u_sb["recalled_final"], (
             f"#6: SIC-recovered survivor MATW must be recalled_final: {_u_sb['recalled_final']}"
         )
@@ -1645,7 +1645,7 @@ def _selftest() -> None:
         "signals_meta": {"diagnostic_only": True, "never_affects_buy": True, "sources": ["EDGAR"]},
     }
 
-    # (a) snapshot shape — compact divergence_label + ownership summary (newest filing only).
+    # (a) snapshot shape, compact divergence_label + ownership summary (newest filing only).
     _snap = _signals_snapshot(_signals_ns)
     assert _snap is not None, "FIREWALL: snapshot must be built from a populated signals namespace"
     assert _snap["divergence_label"] == "melting_ice_cube_priced", (
@@ -1668,7 +1668,7 @@ def _selftest() -> None:
 
     # (b) the snapshot is RECORDED on the row by the JSON-fanout record path, and (c) the rating/
     # implied_prob/Brier are IDENTICAL whether the signals namespace is present or not. Build two
-    # otherwise-identical source records — one WITH signals, one WITHOUT — through the real builder
+    # otherwise-identical source records, one WITH signals, one WITHOUT, through the real builder
     # (network is exercised for prices, which we don't assert on; the firewall fields are local).
     import tempfile as _tempfile
     _base_rec = {
@@ -1715,7 +1715,7 @@ def _selftest() -> None:
         f"FIREWALL: implied_prob must be identical with/without signals: "
         f"{_row_with['implied_prob']} vs {_row_without['implied_prob']}"
     )
-    # The two rows must be identical in EVERY other field — the ONLY permitted difference is the
+    # The two rows must be identical in EVERY other field, the ONLY permitted difference is the
     # signals_snapshot field itself (the recorded-but-inert diagnostic). Prices are stubbed to None
     # above so even entry_price/benchmark_entry_price match, leaving signals_snapshot the sole delta.
     _scoring_keys = [k for k in _row_with if k != "signals_snapshot"]

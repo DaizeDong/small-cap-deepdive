@@ -70,14 +70,14 @@ def init_edgar() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Concurrency isolation (v0.3.2 backlog #10) — run-state must never be a single
+# Concurrency isolation (v0.3.2 backlog #10), run-state must never be a single
 # shared path.
 #
 # A previous implementation parked run-state in a fixed /tmp/smallcap_run.txt.
 # Two agents running different themes CONCURRENTLY clobbered each other's
 # run-state (observed: cdmo-cro / railcar / space-economy collisions). The fix:
-# the run-state file is namespaced — per SMALLCAP_RUN batch when one is active,
-# else PID-unique — so concurrent agents never write the same path. It lives
+# the run-state file is namespaced, per SMALLCAP_RUN batch when one is active,
+# else PID-unique, so concurrent agents never write the same path. It lives
 # INSIDE the active run dir (REPORTS) when batched, keeping a run self-contained;
 # only the unbatched/legacy path falls back to the system temp dir, and even then
 # it is PID-stamped, never the old fixed /tmp/smallcap_run.txt.
@@ -125,12 +125,12 @@ def http_get(url: str, params: dict | None = None, timeout: int = 25, retries: i
 
 
 # ---------------------------------------------------------------------------
-# Market-cap resolution (P5) — decouple mktcap from yfinance.
+# Market-cap resolution (P5), decouple mktcap from yfinance.
 #
 # yfinance market cap is null for a large fraction of small/foreign tickers,
 # and the theme path used to DROP those rows (flag_no_mktcap). That silently
 # discarded 91-100% of some themes before any gate (synthesis / data_robustness
-# F5). The fix: a fallback chain — yfinance -> SEC companyfacts shares x price —
+# F5). The fix: a fallback chain, yfinance -> SEC companyfacts shares x price ,
 # and, when mktcap is still genuinely unresolvable, tag band="unknown" and let
 # the row FLOW THROUGH the gates (mirroring discover_events.py:_band, which
 # already keeps null as "unknown" rather than dropping pre-listing spinoffs).
@@ -254,7 +254,7 @@ def _selftest() -> None:
     # band_for: explicit thresholds honored
     assert band_for(1.0e9, max_mcap=5e8, watch_max=2e9) == "watch", "custom thresholds"
 
-    # P12 — resolve-THEN-band ordering contract: a yfinance-NaN name (SJW/HI/MRC) whose SEC
+    # P12, resolve-THEN-band ordering contract: a yfinance-NaN name (SJW/HI/MRC) whose SEC
     # shares x price IS resolvable must produce a real in-scope band, so the size-exclusion
     # downstream sees a concrete band and does NOT drop it. resolve_mktcap must run first and
     # feed band_for; the result for an in-band reconstruction is 'deep' (NOT 'unknown').
@@ -263,13 +263,13 @@ def _selftest() -> None:
         f"P12: SJW-like yfinance-NaN must reconstruct via SEC shares x price, got {_mc},{_src}")
     assert band_for(_mc, 2e9, 5e9) == "deep", (
         "P12: a reconstructed in-band mktcap must band 'deep' (resolve-then-band), not 'unknown'")
-    # And an oversize reconstruction still bands 'large' — size-exclusion bites AFTER resolution.
+    # And an oversize reconstruction still bands 'large', size-exclusion bites AFTER resolution.
     _mcb, _ = resolve_mktcap(None, 50.0, "111", shares_fn=lambda c: 200_000_000)
     assert band_for(_mcb, 2e9, 5e9) == "large", (
         "P12: an oversize reconstructed mktcap bands 'large' only AFTER resolution (correct order)")
 
     # -----------------------------------------------------------------------
-    # v0.3.2 #10 — run-state must be PID-unique / per-SMALLCAP_RUN, never a single
+    # v0.3.2 #10, run-state must be PID-unique / per-SMALLCAP_RUN, never a single
     # shared /tmp path. Two distinct runs (and two distinct PIDs) must NOT collide.
     # Override output_dir to a temp dir so the selftest never pollutes real reports/.
     # -----------------------------------------------------------------------
