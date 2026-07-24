@@ -132,58 +132,90 @@ def merge_sic_reverse(fts_hits: list[dict], theme: str, forms: str,
     return merged
 
 
-def enrich_marketcap(df: pd.DataFrame) -> pd.DataFrame:
-    """逐 ticker 补市值+流动性(候选集已小,可逐个)。
+def _enrich_one(t: str, cik) -> dict:
+    """单个 ticker 的市值+流动性补全(供并行池调用,纯函数无共享状态)。
+
+    P12: .info 与 .history 分成 INDEPENDENT try 块,.info 是脆弱腿(对真实名会
+    raise 或返回 {}),旧的单 try 会把两条腿一起中止,连价格/成交量都丢掉,进而
+    (a) 让 resolve_mktcap 缺价格无法用 SEC shares x price 重建 (b) 误触 flag_illiquid。
+    """
+    import yfinance as yf
+    rec = {"mktcap": None, "avg_dollar_vol": None, "price": None,
+           "exch": None, "mktcap_source": "unresolved"}
+    yf_mktcap = None
+    try:
+        info = yf.Ticker(t).info
+        yf_mktcap = info.get("marketCap")
+        rec["price"] = info.get("currentPrice") or info.get("regularMarketPrice")
+        rec["exch"] = info.get("exchange")
+    except Exception:
+        pass
+    try:
+        # 近30日日均成交额
+        h = yf.Ticker(t).history(period="1mo")
+        if not h.empty:
+            rec["avg_dollar_vol"] = float((h["Close"] * h["Volume"]).mean())
+            # P12: .info 无价时从 history 收盘价派生,这是让 resolve_mktcap 对
+            # yfinance-NaN 名字在 size 排除前用 SEC shares 重建 mktcap 的价格。
+            if rec["price"] is None or not (rec["price"] > 0):
+                last_close = float(h["Close"].dropna().iloc[-1])
+                if last_close > 0:
+                    rec["price"] = last_close
+    except Exception:
+        pass
+    # Fallback chain: yfinance -> SEC shares x price. Keeps mktcap when yfinance
+    # is null but a price + SEC shares-outstanding exist (common for small/foreign).
+    mc, src = resolve_mktcap(yf_mktcap, rec["price"], cik)
+    rec["mktcap"] = mc
+    rec["mktcap_source"] = src
+    return rec
+
+
+def enrich_marketcap(df: pd.DataFrame, max_workers: int = 8) -> pd.DataFrame:
+    """逐 ticker 补市值+流动性。
 
     P5: market cap is no longer yfinance-only. Per row we try the fallback chain
     (resolve_mktcap): yfinance marketCap -> SEC companyfacts shares-outstanding x
     last price. mktcap_source records which leg resolved it ("yfinance" /
     "sec_shares_x_price" / "unresolved"). A row that stays unresolved is NOT
     dropped here — apply_filters tags it band="unknown" and flows it through.
+
+    并行:每个 ticker 的 yfinance/SEC 补全彼此独立(_enrich_one 纯函数,无共享可变
+    状态),用线程池并发发 IO。yfinance 的 .info/.history 是网络 IO-bound,串行时
+    整段被逐条网络往返支配。池上限 8 —— Yahoo 本身对有效并发有节流,再高收益递减
+    且徒增 429 风险。结果按原 df 索引重组,保证行序与输入完全一致(下游 apply_filters
+    按位置对齐 concat)。
     """
-    import yfinance as yf
-    ciks = df["cik"].tolist() if "cik" in df.columns else [None] * len(df)
-    rows = []
-    for i, t in enumerate(df["ticker"]):
-        rec = {"mktcap": None, "avg_dollar_vol": None, "price": None,
-               "exch": None, "mktcap_source": "unresolved"}
-        yf_mktcap = None
-        # P12: split .info and .history into INDEPENDENT try blocks. yfinance's
-        # .info call is the fragile leg (SJW/HI/MRC: it raises or returns {} for
-        # real names), and the old single try aborted BOTH legs together, losing
-        # price/volume too, which then (a) starved resolve_mktcap of a price for the
-        # SEC shares x price reconstruction and (b) tripped flag_illiquid. Isolating
-        # them means an .info failure no longer silently drops a real small-cap.
-        try:
-            info = yf.Ticker(t).info
-            yf_mktcap = info.get("marketCap")
-            rec["price"] = info.get("currentPrice") or info.get("regularMarketPrice")
-            rec["exch"] = info.get("exchange")
-        except Exception:
-            pass
-        try:
-            # 近30日日均成交额
-            h = yf.Ticker(t).history(period="1mo")
-            if not h.empty:
-                rec["avg_dollar_vol"] = float((h["Close"] * h["Volume"]).mean())
-                # P12: derive a price from the history close when .info gave none ,
-                # this is the price that lets resolve_mktcap reconstruct mktcap from
-                # SEC shares for a yfinance-NaN name BEFORE any size-exclusion.
-                if rec["price"] is None or not (rec["price"] > 0):
-                    last_close = float(h["Close"].dropna().iloc[-1])
-                    if last_close > 0:
-                        rec["price"] = last_close
-        except Exception:
-            pass
-        # Fallback chain: yfinance -> SEC shares x price. Keeps mktcap when yfinance
-        # is null but a price + SEC shares-outstanding exist (common for small/foreign).
-        mc, src = resolve_mktcap(yf_mktcap, rec["price"], ciks[i] if i < len(ciks) else None)
-        rec["mktcap"] = mc
-        rec["mktcap_source"] = src
-        rows.append(rec)
-        time.sleep(0.25)
-        if (i + 1) % 20 == 0:
-            print(f"  marketcap {i+1}/{len(df)}", file=sys.stderr)
+    n = len(df)
+    ciks = df["cik"].tolist() if "cik" in df.columns else [None] * n
+    tickers = list(df["ticker"])
+    rows: list[dict | None] = [None] * n
+
+    workers = max(1, min(max_workers, n))
+    if workers == 1 or n <= 1:
+        for i, t in enumerate(tickers):
+            rows[i] = _enrich_one(t, ciks[i] if i < len(ciks) else None)
+            if (i + 1) % 20 == 0:
+                print(f"  marketcap {i+1}/{n}", file=sys.stderr)
+    else:
+        import concurrent.futures as _cf
+        done = 0
+        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            fut_to_i = {
+                ex.submit(_enrich_one, t, ciks[i] if i < len(ciks) else None): i
+                for i, t in enumerate(tickers)
+            }
+            for fut in _cf.as_completed(fut_to_i):
+                i = fut_to_i[fut]
+                try:
+                    rows[i] = fut.result()
+                except Exception:
+                    # 池内单条彻底失败也保留占位,band="unknown" 让行继续流过闸门
+                    rows[i] = {"mktcap": None, "avg_dollar_vol": None, "price": None,
+                               "exch": None, "mktcap_source": "unresolved"}
+                done += 1
+                if done % 20 == 0:
+                    print(f"  marketcap {done}/{n}", file=sys.stderr)
     return pd.concat([df.reset_index(drop=True), pd.DataFrame(rows)], axis=1)
 
 
@@ -348,8 +380,38 @@ def _selftest() -> None:
     )
     assert all("recall_channel" not in r for r in fts_hits), "merge must NOT mutate fts_hits input"
 
+    # -----------------------------------------------------------------------
+    # PERF: enrich_marketcap 并行重组必须保序。as_completed 乱序返回,若不按索引
+    # 回填,行会与输入 df 错位,下游 apply_filters 按位置 concat 会张冠李戴。用一个
+    # 故意让"越靠后越快完成"的 stub 替换 _enrich_one(反转真实网络往返的耗时序),
+    # 逼出乱序场景,断言输出仍与输入 ticker 一一对齐。
+    # -----------------------------------------------------------------------
+    import sys as _sys
+    _mod = _sys.modules[__name__]
+    _orig_enrich_one = _mod._enrich_one
+    try:
+        def _stub_enrich_one(t, cik):
+            # 靠后的 ticker 睡得更短 -> 先完成,制造与提交顺序相反的完成顺序
+            idx = int(str(t)[1:]) if str(t)[1:].isdigit() else 0
+            time.sleep(max(0.0, (20 - idx) * 0.002))
+            return {"mktcap": float(idx), "avg_dollar_vol": None, "price": None,
+                    "exch": None, "mktcap_source": f"tag-{t}"}
+        _mod._enrich_one = _stub_enrich_one
+        order_df = pd.DataFrame({"ticker": [f"T{i}" for i in range(20)],
+                                 "cik": [str(i) for i in range(20)]})
+        enriched = enrich_marketcap(order_df, max_workers=8)
+        assert list(enriched["ticker"]) == [f"T{i}" for i in range(20)], "ticker 列顺序不得改变"
+        assert list(enriched["mktcap_source"]) == [f"tag-T{i}" for i in range(20)], (
+            "并行重组错位:mktcap_source 未与输入 ticker 对齐(as_completed 乱序未按索引回填)")
+        assert list(enriched["mktcap"]) == [float(i) for i in range(20)], "mktcap 值必须与行对齐"
+        # workers==1 退化路径也必须保序
+        seq = enrich_marketcap(order_df, max_workers=1)
+        assert list(seq["mktcap_source"]) == [f"tag-T{i}" for i in range(20)], "串行退化路径也须保序"
+    finally:
+        _mod._enrich_one = _orig_enrich_one
+
     print("discover selftest PASS (P5 null-mktcap flow-through + P8 SIC reverse-recall union "
-          "+ P12 SEC-reconstructed mktcap not size-excluded)")
+          "+ P12 SEC-reconstructed mktcap not size-excluded + PERF parallel-order-preserving)")
 
 
 def main():
