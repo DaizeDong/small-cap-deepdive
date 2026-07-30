@@ -47,7 +47,7 @@ Only `sec_user_agent` is required at runtime; every other field has a default in
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `schema_version` | int | no | `1` | Config-spec contract tag (E1; mirrors `registry.json`'s `schema_version`). Pins config major version; `verify_config.py` WARNs if it is not `1`. |
-| `sec_user_agent` | string | **yes** (runtime) |, (placeholder in example) | EDGAR `User-Agent`; **PII** = real name + email, e.g. `"Jane Smith jane@example.com"`. Placeholder/empty → 403 from `efts.sec.gov`. `verify_config.py` reports it as a loud **WARN** (named, never echoed) so a freshly-stamped config is still structurally READY for the hot-swap test (E5); it is the one value you must fill before any live EDGAR call. |
+| `sec_user_agent` | string | **yes** (runtime) | none (placeholder in example) | EDGAR `User-Agent`; **PII** = real name + email, e.g. `"Jane Smith jane@example.com"`. Placeholder/empty → 403 from `efts.sec.gov`. `verify_config.py` reports it as a loud **WARN** (named, never echoed) so a freshly-stamped config is still structurally READY for the hot-swap test (E5); it is the one value you must fill before any live EDGAR call. |
 | `output_dir` | string | no | `./reports/smallcap` | Report root. Repo-relative by default (no absolute-path leakage → portable). `SMALLCAP_RUN` adds a per-run subdir. |
 | `market_cap_max` | int | no | `2000000000` | Deep-dive band ceiling (USD). |
 | `watch_band_max` | int | no | `5000000000` | Watch band ceiling (USD). |
@@ -111,5 +111,5 @@ export SMALL_CAP_DEEPDIVE_CONFIG_DIR=~/configs/aggressive     # config B — sam
 ```
 
 Verify the swap: `python scripts/init_config.py --out ~/configs/A` and `--out ~/configs/B`, set
-`sec_user_agent` in each, run `verify_config.py` against each (`--config-dir`), then flip the env var ,
-both must report **READY**.
+`sec_user_agent` in each, run `verify_config.py` against each (`--config-dir`), then flip the env var. Both must report
+**READY**.

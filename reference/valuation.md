@@ -241,10 +241,10 @@ All inputs come from SEC/XBRL (T1) except market cap (yfinance or override):
 |---|---|---|
 | `total_debt` | `LongTermDebtNoncurrent` + `LongTermDebtCurrent` | `LongTermDebt`; then `Liabilities` (proxy, flagged) |
 | `ebit` | `OperatingIncomeLoss` | Cascade: `IncomeLossFromContinuingOperationsBeforeIncomeTaxes` (+interest addback if available) → pretax proxy; concept used recorded in `ebit_source` (see "EBIT Concept Cascade") |
-| `dep_amort` | `DepreciationAndAmortization`, `DepreciationAmortizationAndAccretionNet`, `DepreciationDepletionAndAmortization` (merged) |, |
+| `dep_amort` | `DepreciationAndAmortization`, `DepreciationAmortizationAndAccretionNet`, `DepreciationDepletionAndAmortization` (merged) | none |
 | `capex` | `PaymentsToAcquirePropertyPlantAndEquipment` | If unavailable, FCF = OCF (proxy, flagged) |
-| `assets` | `Assets` |, |
-| `equity` | `StockholdersEquity` |, |
+| `assets` | `Assets` | none |
+| `equity` | `StockholdersEquity` | none |
 | `goodwill` | `Goodwill` | Absent → 0 used for NAV with proxy flag |
 | `intangibles` | `IntangibleAssetsNetExcludingGoodwill` | Absent → 0 used for NAV with proxy flag |
 

@@ -30,7 +30,7 @@
 **Implementation:** `_common.http_get` provides the UA header + retry/backoff wrapper for all
 EDGAR `requests.get` calls in the data layer. Every `tools/*.py` script must route EDGAR HTTP
 calls through `http_get`, not raw `requests.get`. Per-tool `time.sleep` between calls adds
-a second layer of inter-request spacing. There is no semaphore or central rate limiter ,
+a second layer of inter-request spacing. There is no semaphore or central rate limiter,
 discipline is maintained via per-tool sleep + `http_get` retry.
 
 **Tools:** `edgartools` (MIT license) is the primary wrapper for structured parsing (XBRL,
