@@ -335,8 +335,9 @@ mkdir -p ~/.small-cap-deepdive-config
 cp reference/config.example.json ~/.small-cap-deepdive-config/config.json
 # Edit ~/.small-cap-deepdive-config/config.json: set "sec_user_agent" to "Your Name you@example.com".
 # EDGAR requires a valid User-Agent on every request (format: "Name email"); omission causes 403.
-# (Override the location with $SMALL_CAP_DEEPDIVE_CONFIG_DIR. In-repo reference/config.json is a
-#  deprecated legacy fallback — do not create it; a real identity in the tree is a leak waiting.)
+# (Override the location with $SMALL_CAP_DEEPDIVE_CONFIG_DIR. The in-repo reference/config.json
+#  fallback is GONE: discovery never lands in the repo, init_config.py refuses to write there, and
+#  verify_config.py reports NOT INITIALIZED instead of pointing at a repo path.)
 ```
 
 The `sec_user_agent` field is the only hard requirement. All other config keys have defaults

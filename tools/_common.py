@@ -13,20 +13,39 @@ _REF = _REPO / "reference"
 _CONFIG_DIR_ENV_VARS = ("SMALL_CAP_DEEPDIVE_CONFIG_DIR", "SMALL_CAP_DEEPDIVE_CONFIG")
 
 
-def resolve_config_json() -> Path:
-    """Locate the user's config.json via the documented discovery order (config-spec E2).
+class ConfigNotInitialized(RuntimeError):
+    pass
 
-    First existing wins:
+
+# Same shape as tools/datadir.py's DataDirNotInitialized message: name the state, say it is the
+# CORRECT state for a fresh clone, then give the exact commands. Never "here is a repo path".
+CONFIG_SETUP_HINT = (
+    "small-cap-deepdive has no config.json outside this repo, so it is UNINITIALIZED.\n"
+    "That is the correct state for a freshly cloned public skill. Point it at your own:\n"
+    "    mkdir -p ~/.small-cap-deepdive-config\n"
+    "    cp reference/config.example.json ~/.small-cap-deepdive-config/config.json\n"
+    "    (or set SMALL_CAP_DEEPDIVE_CONFIG_DIR to a dir OUTSIDE this repo)\n"
+    "Then set sec_user_agent (your real name + email) in that file.\n"
+    "There is deliberately NO in-repo fallback: reference/config.json was the documented\n"
+    "'legacy fallback', and a real SEC contact address ended up committed in it. A fallback\n"
+    "into the repo is not a convenience, it IS the leak."
+)
+
+
+def resolve_config_json() -> Path | None:
+    """Locate the user's config.json OUTSIDE this repo, or None if the tool is uninitialized.
+
+    First existing wins (config-spec E2):
       1. $SMALL_CAP_DEEPDIVE_CONFIG_DIR (or alias $SMALL_CAP_DEEPDIVE_CONFIG) -> <dir>/config.json
-      2. ~/.small-cap-deepdive-config/config.json          (dotfile fallback)
-      3. ~/.config/small-cap-deepdive-config/config.json   (XDG fallback)
-      4. reference/config.json                             (in-repo legacy/default)
+      2. ~/.small-cap-deepdive-config/config.json          (dotfile default)
+      3. ~/.config/small-cap-deepdive-config/config.json   (XDG default)
+      4. None                                              -> UNINITIALIZED, which is exactly what a
+                                                              freshly cloned public skill SHOULD be
 
-    Returns the in-repo path as the final fallback even when it does not exist
-    (load_config tolerates a missing overlay -> example defaults only). An
-    out-of-repo config dir lets the config (incl. the sec_user_agent PII) live
-    OUTSIDE the public skill repo (Mode B separation) and lets you hot-swap
-    configs by repointing the env var (E5) — env unset reproduces legacy behaviour.
+    No step lands inside the repo. `config_json_path()` raises ConfigNotInitialized with setup
+    instructions instead, mirroring tools/datadir.py:data_path(). An out-of-repo config dir keeps
+    the config (incl. the sec_user_agent PII) out of the public skill repo and lets you hot-swap
+    configs by repointing the env var (E5).
     """
     for var in _CONFIG_DIR_ENV_VARS:
         d = os.environ.get(var)
@@ -39,15 +58,26 @@ def resolve_config_json() -> Path:
         p = d / "config.json"
         if p.exists():
             return p
-    return _REF / "config.json"
+    return None
+
+
+def config_json_path() -> Path:
+    """Resolve the user's config.json, or fail hard with setup instructions. Never a repo path."""
+    p = resolve_config_json()
+    if p is None:
+        raise ConfigNotInitialized(CONFIG_SETUP_HINT)
+    return p
 
 
 def load_config() -> dict:
-    # precedence: resolved config.json (gitignored / out-of-repo) > config.example.json defaults;
+    # precedence: resolved config.json (out-of-repo) > config.example.json defaults;
     # env SMALLCAP_* overrides scalars. config.json discovery order: see resolve_config_json / CONFIG.md.
+    # A READ may degrade: with no config.json we run on example defaults alone (EDGAR then 403s on
+    # the placeholder sec_user_agent, and verify_config.py names it). What a read may NOT do is
+    # reach back into the repo for an overlay.
     cfg = json.loads((_REF / "config.example.json").read_text(encoding="utf-8"))
     real = resolve_config_json()
-    if real.exists():
+    if real is not None:
         cfg.update(json.loads(real.read_text(encoding="utf-8")))
     for k in list(cfg):
         env = os.environ.get("SMALLCAP_" + k.upper())

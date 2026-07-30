@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
+## [Unreleased]
+
+### Security
+- **The in-repo config fallback is gone.** Config discovery used to end at `reference/config.json`,
+  documented in three docstrings and four docs as the "in-repo legacy/default" step 4. That is the
+  exact shape the data boundary bans (`tools/datadir.py`), and it is how a real SEC contact address
+  once got committed to this public repo. A fallback into the repo is not a convenience, it IS the
+  leak.
+  - `tools/_common.py:resolve_config_json()` returns `None` when nothing is found instead of a repo
+    path, and the new `config_json_path()` raises `ConfigNotInitialized` with setup instructions,
+    mirroring `tools/datadir.py:data_path()`. A read still degrades: `load_config()` falls back to
+    `config.example.json` defaults, never to a repo overlay.
+  - `scripts/verify_config.py` reports `NOT INITIALIZED` and FAILs, rather than validating a
+    phantom, gitignored, in-repo path. An in-repo `--config-dir` is now a FAIL too, replacing the
+    old "is the in-repo config at least gitignored?" check: gitignore is advisory, `git add -f`
+    walks through it.
+  - `scripts/init_config.py` defaults to `~/.small-cap-deepdive-config` and **refuses** a target
+    inside the repo (exit 2). A read may degrade; a write must fail hard.
+  - `reference/config.json` moves from `data` to `data_sealed` in `.dataclass.json`: a dead path,
+    still blocked from the index, no longer owed a schema.
+- Docs corrected to match: `README.md`, `README_CN.md`, `CONFIG.md`, `SKILL.md`. Setup now copies
+  the template to `~/.small-cap-deepdive-config/config.json`, never into the working tree.
+
 ## [0.3.3] - 2026-06-24
 
 A 25-cell survivorship-safe point-in-time backtest study (5 themes × 5 as-of dates 2020 to 2024,

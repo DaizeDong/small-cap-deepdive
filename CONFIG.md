@@ -15,12 +15,20 @@ Your `config.json` is located in this order; the **first that exists wins**:
 
 1. `$SMALL_CAP_DEEPDIVE_CONFIG_DIR/config.json`, environment variable (recommended; location-independent).
 2. `$SMALL_CAP_DEEPDIVE_CONFIG/config.json`, accepted alias.
-3. `~/.small-cap-deepdive-config/config.json`, dotfile-in-home fallback.
-4. `~/.config/small-cap-deepdive-config/config.json`, XDG-style fallback (Linux/macOS).
-5. `reference/config.json`, **in-repo legacy/default** (zero-config; what a fresh `cp` produces).
+3. `~/.small-cap-deepdive-config/config.json`, dotfile-in-home default.
+4. `~/.config/small-cap-deepdive-config/config.json`, XDG-style default (Linux/macOS).
+5. Nothing found: the skill is **NOT INITIALIZED**, and says so.
 
-If none exists, the skill runs on `config.example.json` defaults alone, but EDGAR calls will 403
-until `sec_user_agent` is set. Config is never a hard crash on import; the doctor tells you what's missing.
+**There is no in-repo step, by design.** The list used to end with `reference/config.json`, described
+as the zero-config in-repo default. That is the exact shape the data boundary bans: a real EDGAR
+contact address once got committed through it. A fallback into the repo is not a convenience, it IS
+the leak. `resolve_config_json()` returns `None` and `config_json_path()` raises
+`ConfigNotInitialized` with setup instructions, mirroring `tools/datadir.py:data_path()`.
+
+A **read** may degrade: with no `config.json`, `load_config()` runs on `config.example.json` defaults
+alone, so import is never a hard crash, but EDGAR calls will 403 until `sec_user_agent` is set and
+`verify_config.py` reports NOT READY. A **write** fails hard: `init_config.py` refuses a target
+inside the repo.
 
 Per-scalar env overrides apply on top of whichever `config.json` won: `SMALLCAP_<KEY>` (UPPER_SNAKE of
 the field), e.g. `SMALLCAP_MARKET_CAP_MAX=1000000000`. Run batching uses `SMALLCAP_RUN` (see SKILL.md).
@@ -63,24 +71,30 @@ companion config** (out-of-repo), see `reference/data-sources.md §market-intel`
 
 This skill keeps user state **out of git**, never as a committed file:
 
-- `config.json` (holds your `sec_user_agent` PII) is **gitignored**; only `config.example.json` is tracked.
+- `config.json` (holds your `sec_user_agent` PII) lives **outside this repo**, in
+  `~/.small-cap-deepdive-config/` or wherever `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` points. The repo
+  tracks only `config.example.json`, the schema.
+- `config.json` is also gitignored, but treat that as the backstop, not the control: `.gitignore` is
+  advisory and `git add -f` walks straight through it. The control is that the file is not here.
 - `secrets/*` and `*.env` are gitignored (`secrets/README.md` is the only tracked file there).
-- For full **repo separation**, point `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` at a dir **outside** this public
-  skill repo (e.g. `~/.small-cap-deepdive-config/`), then no config/PII lives inside the repo at all.
+- Nothing resolves to a path inside the repo, so there is no in-repo config for a stray `git add`
+  to catch. `verify_config.py` FAILs if `--config-dir` points inside the repo, and `init_config.py`
+  refuses to write there.
 
 ## First-time setup (E3), succeeds on the first try
 
 ```bash
 pip install -r tools/requirements.txt
 
-# 1. Stamp a conformant config.json from the example template (deterministic — E4).
-#    Default writes the in-repo reference/config.json (zero-config); or pass --out for a private dir:
-python scripts/init_config.py                       # -> reference/config.json
-#   python scripts/init_config.py --out ~/.small-cap-deepdive-config   # out-of-repo (Mode B separation)
+# 1. Stamp a conformant config.json from the example template (deterministic, E4).
+#    Default target is ~/.small-cap-deepdive-config, OUTSIDE this repo. A target inside the repo
+#    is refused: config.json holds your EDGAR identity.
+python scripts/init_config.py                       # -> ~/.small-cap-deepdive-config/config.json
+#   python scripts/init_config.py --out ~/configs/aggressive   # any other out-of-repo dir
 
 # 2. Edit config.json: set "sec_user_agent" to your real name + email (the one hard requirement).
-#    If you used --out, point the skill at it:
-#       export SMALL_CAP_DEEPDIVE_CONFIG_DIR=~/.small-cap-deepdive-config
+#    ~/.small-cap-deepdive-config and the XDG dir are found automatically. For anywhere else:
+#       export SMALL_CAP_DEEPDIVE_CONFIG_DIR=~/configs/aggressive
 
 # 3. Confirm it is ready (PASS/FAIL per field; PII never echoed):
 python scripts/verify_config.py

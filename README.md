@@ -150,10 +150,11 @@ Then install the data-layer dependencies and configure once:
 ```bash
 cd ~/.claude/plugins/small-cap-deepdive
 pip install -r tools/requirements.txt
-cp reference/config.example.json reference/config.json
+mkdir -p ~/.small-cap-deepdive-config
+cp reference/config.example.json ~/.small-cap-deepdive-config/config.json
 ```
 
-Open `config.json` and set `"sec_user_agent"` to your real name and email:
+Open `~/.small-cap-deepdive-config/config.json` and set `"sec_user_agent"` to your real name and email:
 
 ```json
 "sec_user_agent": "Jane Smith jane@example.com"
@@ -161,6 +162,10 @@ Open `config.json` and set `"sec_user_agent"` to your real name and email:
 
 This is the only required field. EDGAR requires a valid `User-Agent` header on every request
 (SEC policy). Omitting it or using a fake value causes 403 errors from `efts.sec.gov`.
+
+Note the config lives **outside** the repo. That is deliberate: `sec_user_agent` is your real name
+and email, and this is a public repo. There is no in-repo config location any more, and the tools
+refuse to create one.
 
 To use the skill from Claude Code via a junction (Windows) or symlink instead of `/plugin install`:
 
@@ -182,18 +187,22 @@ required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-fie
 
 - **Mount (discovery order):** `$SMALL_CAP_DEEPDIVE_CONFIG_DIR/config.json` → `$SMALL_CAP_DEEPDIVE_CONFIG/config.json`
   → `~/.small-cap-deepdive-config/config.json` → `~/.config/small-cap-deepdive-config/config.json` →
-  in-repo `reference/config.json` (zero-config default). First that exists wins; effective config =
+  nothing found, the skill reports **NOT INITIALIZED**. First that exists wins; effective config =
   `config.example.json` defaults ◁ your `config.json` ◁ `SMALLCAP_*` env overrides.
+  **No step lands inside the repo.** The chain used to end at in-repo `reference/config.json`, and a
+  real EDGAR contact address got committed through it. A fallback into the repo is not a
+  convenience, it is the leak.
 - **First time:**
   ```bash
-  python scripts/init_config.py      # stamp config.json from the example template (deterministic)
-  # edit config.json: set "sec_user_agent" to your real name + email (the only hard requirement)
+  python scripts/init_config.py      # stamp config.json into ~/.small-cap-deepdive-config (deterministic)
+  # edit that config.json: set "sec_user_agent" to your real name + email (the only hard requirement)
   python scripts/verify_config.py    # doctor: PASS/FAIL per field, names what is missing
   ```
 - **Switch configs (hot-swap):** point the env var at another config dir, configs are self-contained
   (repo-relative `output_dir`, no hardcoded paths): `export SMALL_CAP_DEEPDIVE_CONFIG_DIR=~/configs/A` ↔ `~/configs/B`.
-- **Secrets / PII:** Mode B, `config.json`, `*.env`, and `secrets/*` are gitignored and never enter
-  git. Point `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` at a dir **outside** this repo for full repo separation.
+- **Secrets / PII:** Mode B, your `config.json` lives outside this repo; `config.json`, `*.env`, and
+  `secrets/*` are also gitignored as a backstop. `init_config.py` refuses to write inside the repo
+  and `verify_config.py` FAILs on an in-repo `--config-dir`.
 
 ---
 
