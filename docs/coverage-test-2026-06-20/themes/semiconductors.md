@@ -18,7 +18,7 @@
 | After mktcap/listing resolution | 200 priced; 87 deep (<\$2.0B) + 17 watch (\$2.0 to 5.0B) | yfinance; several delisted tickers dropped (IVAC, INFN, LAZRQ, ALTR, ANSS, etc.) |
 | Into cheap_pass | 88 | small-cap band |
 | cheap_pass + SIC gate survivors | 32 | SIC filter: 26 keep + 6 review → all 32 retained for Gate 2 |
-|, of which band=deep | 25 | (7 of the 32 are band=watch, surfaced not deep-dived) |
+| - of which band=deep | 25 | (7 of the 32 are band=watch, surfaced not deep-dived) |
 | Gate 2 (LLM theme-fit) drops | 6 misrecall | AIRG, CRNT, DQ, HYSR, AZTA, MOB |
 | **Deep-band survivors deep-dived** | **19** | full deepdive + valuation on every one; 0 ERROR files |
 | Mechanical BUYs | **0** | none reach MoS ≥ +30% on any basis |

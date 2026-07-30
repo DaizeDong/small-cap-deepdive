@@ -15,7 +15,7 @@
 
 | Stage | Count | Note |
 |---|---:|---|
-| Raw discover (FTS + mktcap filter) |, | EDGAR full-text over-recall; FTS-only (no SIC recall floor exists for this theme) |
+| Raw discover (FTS + mktcap filter) | n/a | EDGAR full-text over-recall; FTS-only (no SIC recall floor exists for this theme) |
 | Small-cap cheap-pass input | 45 | after market-cap band tag (deep ≤ $2.0B; watch $2.0 to 5.0B) |
 | Cheap-pass survivors (no hard kill-flag) | 35 | 10 eliminated on going-concern / death-spiral / material-weakness |
 | After SIC Gate-1 | 35 | keep=34, review=1 (ENTA, SIC 2834 pharma, correctly flagged) |
@@ -23,7 +23,7 @@
 | Watch band (band="watch", $2.0 to 5.0B) | 10 | surfaced for human review only, not deep-dived |
 | **Gate-2 theme-fit survivors (deep-dived)** | **10** | 15 deep-band names dropped as misrecalls |
 | Valuation + BUY-rule applied | 10 | all 10 valued (--json + --ticker), 0 deepdive ERROR files |
-| **Mechanical BUYs (clean)** | **0** |, |
+| **Mechanical BUYs (clean)** | **0** | n/a |
 
 **SIC recall floor:** none. `building-products-hvac` is not in `filter_by_sic.THEME_SIC` (only water-utilities, railcar-leasing,
 regional-gaming, deathcare have floors), so the P8 reverse-recall channel was a no-op and recall was FTS-only. This is correct
@@ -38,7 +38,7 @@ behavior, not a gap, there is no single dedicated SIC for "building products / H
 **Dropped as misrecalls (15):** the FTS keyword "building products" recalled a large cohort of entities that merely *hold* or
 *mention* building-products companies, not operate as them:
 
-- **10 BDCs / closed-end investment companies** (SIC nan): BCIC, WHF, NMFC, SLRC, FDUS, PFLT, MFIC, KBDC, OCSL, GSBD ,
+- **10 BDCs / closed-end investment companies** (SIC nan): BCIC, WHF, NMFC, SLRC, FDUS, PFLT, MFIC, KBDC, OCSL, GSBD,
   pure financial entities; keyword fired on portfolio-company descriptions.
 - **ENTA**, biotech (HCV protease inhibitors). **SND**, frac/industrial sand for oil & gas. **FWRD**, asset-light trucking.
   **OLPX**, haircare/beauty. **UPBD**, rent-to-own consumer fintech.

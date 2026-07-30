@@ -42,7 +42,7 @@
 | # | Tkr | Rating | Rev | NI | OCF | RevGr | mos_basis | eff MoS% | buy_eligible | kill |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 1 | AXIL | 观察 | $26M | $1M | $2M | -4% | fcf_cap | -70.1 | True | 1 (rev-split) |
-| 2 | BWMX | 观察 | n/a | n/a | n/a |, | fcf_cap | None | True | 1 (gc+mw) |
+| 2 | BWMX | 观察 | n/a | n/a | n/a | n/a | fcf_cap | None | True | 1 (gc+mw) |
 | 3 | ENR | 观察 | $2,953M | $239M | $147M | +2% | nav | -100.0 | False | 0 |
 | 4 | EPC | 观察 | $2,224M | $25M | $118M | -1% | fcf_cap | -171.3 | False | 0 |
 | 5 | FTLF | 观察 | $16M | $2M | $7M | -75% | fcf_cap | -89.1 | False | 0 |

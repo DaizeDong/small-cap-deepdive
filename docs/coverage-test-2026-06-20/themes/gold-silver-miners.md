@@ -90,7 +90,7 @@ All 31 carry rating **观察 / WATCH**, confidence null (no MoS basis), and sink
 |---|---|---|---:|---:|---:|---:|---|
 | IDR | Idaho Strategic Resources | 10-K | $42M | 31.0 | 33.5 | 2.2% | Only profitable domestic producer here, but NAV MoS −0.8% (priced ≥ asset value); rich EV/EBITDA |
 | MUX | McEwen Inc. | 10-K | $65M | 40.3 | 30.4 | −4.8% | `cross_source_mismatch` + material-weakness; negative FCF |
-| CTGO | Contango ORE | 10-K | n/a |, |, | 4.9% | Positive normalized FCF but no intrinsic band computed; development-stage |
+| CTGO | Contango ORE | 10-K | n/a | n/a | n/a | 4.9% | Positive normalized FCF but no intrinsic band computed; development-stage |
 | GOLD | (mistag, see §5) | 10-K | $3,274M NI | 0.65 | 0.37 | 46% | Data artifact; not investable as scanned |
 
 Everything else is a zero-revenue explorer/developer or royalty shell where the model correctly abstains.

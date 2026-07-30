@@ -20,7 +20,7 @@ Verified directly from valuation JSONs:
 | Name | contam_ratio | rev_slope | below_avg | latest_NI | peak_contam | buy_eligible | MoS/basis | Outcome | Correct? |
 |---|---|---|---|---|---|---|---|---|---|
 | **NRP** (reg) | 0.7445 | +1 | True | −$84.8M | **True** | **False** (`['peak_contamination_flag']`) | **+36.4% fcf_cap** | 避开 | ✅ V-shape trap KILLED by machine |
-| **INVA** (reg) | 0.9015 | +1 |, | + | False | True (`[]`) | **+30.2% fcf_cap** | **买入 BUY** | ✅ clean grower NOT over-blocked |
+| **INVA** (reg) | 0.9015 | +1 | n/a | + | False | True (`[]`) | **+30.2% fcf_cap** | **买入 BUY** | ✅ clean grower NOT over-blocked |
 | **EU** (reg) | 0.8808 | +1 | False | loss | False | True | null fcf_cap | 观察 | ✅ genuine trough-recovery spared |
 | **SIGA** (reg) | 0.9051 | −1 | True | + | False | False (`['concentration_kill','fundamental_decline_flag']`) | null→nav −61% | 避开 | ✅ still double-blocked |
 
@@ -107,7 +107,7 @@ the 5 valuation JSONs:
 | TIPT | 6331 | **nav** | False | financial_sic + debt_trunc + wrong_entity + fund_decline | −75.3% |
 | BWIN | 6411 | **nav** | False | financial_sic + debt_trunc + peak_contamination | −100% |
 | SLQT | 6411 | **nav** | False | `financial_sic_forced_unsuitable` | **+62.6%** |
-| BOC | 6510 | fcf_cap | True | (none), blocked downstream by **null MoS** |, |
+| BOC | 6510 | fcf_cap | True | (none), blocked downstream by **null MoS** | n/a |
 
 - **All four insurance-SIC carriers routed to NAV with `financial_sic_forced_unsuitable` → buy_eligible=
   False.** No financial reached fcf_cap.
@@ -119,7 +119,7 @@ the 5 valuation JSONs:
   in the financial-SIC list (60/61/63/64/67), so despite owning a surety-insurance sub it routed to
   fcf_cap with buy_eligible=True. It produced **no false BUY only because normalized FCF is negative → MoS
   null** (the second line of defense), NOT because the SIC gate caught it. A hypothetical positive-FCF
-  holdco-with-insurance-sub on a non-financial SIC would slip the gate. **Realized? No. Latent? Yes** ,
+  holdco-with-insurance-sub on a non-financial SIC would slip the gate. **Realized? No. Latent? Yes**,
   warrants a coarse-gate override (flag insurance subsidiaries / SIC-65 holdcos). This is the one genuine
   hole the financial stress theme exposed.
 
@@ -159,7 +159,7 @@ unknown, not a failure.
   treats gated names as resolved (kills the spurious "N missing" warning + the manual re-band step).
 
 **Tier-B, the deferred iteration-1 expansions (the strategic agenda; larger):**
-- **P7** secondary-source sanity band (independent cross-check of the single SEC-derived valuation ,
+- **P7** secondary-source sanity band (independent cross-check of the single SEC-derived valuation,
   addresses iter1 core diagnosis #4, no second source).
 - **P8** SIC reverse-recall + `recall@gold`, the recall floor is still never *measured*; Gate-2 precision
   is documented (2.8 to 15.9%) but recall is audited only by manual blurb re-scan. This is the right next

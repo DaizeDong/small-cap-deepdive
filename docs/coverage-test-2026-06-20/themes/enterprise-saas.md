@@ -94,24 +94,24 @@ single most important gate. The MoS column is the whole story for this theme.
 
 | Ticker | basis | MoS% | EV/S | EV/EBITDA | FCF yield | buy_eligible | BUY blocked by |
 |---|---|---|---|---|---|---|---|
-| LPSN | nav | −100.0 | 1.78 |, | −173.8% | True | MoS≪30 (NAV equity wiped; deeply FCF-negative) |
+| LPSN | nav | −100.0 | 1.78 | n/a | −173.8% | True | MoS≪30 (NAV equity wiped; deeply FCF-negative) |
 | NTWK | fcf_cap | −19.4 | 0.54 | 7.13 | −1.9% | True | MoS<30 (closest of all, still negative) |
-| SKIL | nav | −100.0 | 1.03 |, | 34.6% | False | MoS≪30 + `financial_sic_forced_unsuitable`, `insurance_concepts_present` |
-| DOMO | nav | −100.0 | 0.21 |, | −1.8% | False | MoS≪30 + `debt_truncation_suspected` |
-| SMRT | fcf_cap | null | 1.24 |, | −11.5% | False | MoS null + `cross_source_mismatch` |
+| SKIL | nav | −100.0 | 1.03 | n/a | 34.6% | False | MoS≪30 + `financial_sic_forced_unsuitable`, `insurance_concepts_present` |
+| DOMO | nav | −100.0 | 0.21 | n/a | −1.8% | False | MoS≪30 + `debt_truncation_suspected` |
+| SMRT | fcf_cap | null | 1.24 | n/a | −11.5% | False | MoS null + `cross_source_mismatch` |
 | UIS | nav | −100.0 | 0.05 | 0.91 | −65.9% | False | MoS≪30 + `cross_source_mismatch` |
 | HCKT | fcf_cap | −24.6 | 4.42 | 23.48 | 12.4% | False | MoS<30 + **`fundamental_decline_flag`** + `cross_source_mismatch` |
 | RMNI | fcf_cap | −21.6 | 0.73 | 4.85 | 15.6% | False | MoS<30 + `fcf_sustainability_uncertain` |
-| TBRG | fcf_cap | −71.8 | 1.50 |, | 9.1% | True | MoS≪30; **also killflag_count=1 (material_weakness)** |
+| TBRG | fcf_cap | −71.8 | 1.50 | n/a | 9.1% | True | MoS≪30; **also killflag_count=1 (material_weakness)** |
 | RPD | nav | −100.0 | 0.14 | 2.17 | 32.5% | False | MoS≪30 + `debt_truncation_suspected`, `cross_source_mismatch` |
 | AIOT | fcf_cap | null | 1.65 | 9.19 | 1.7% | True | MoS null; **also killflag_count=1 (material_weakness)** |
 | IIIV | fcf_cap | −63.3 | 2.94 | 21.36 | 0.7% | True | MoS≪30 |
 | PD | fcf_cap | −56.0 | 1.76 | 45.66 | 17.1% | True | MoS≪30 (45x EV/EBITDA) |
-| SIFY | fcf_cap | null |, |, |, | False | MoS null + `cross_source_mismatch` (EV/multiples unavailable) |
+| SIFY | fcf_cap | null | n/a | n/a | n/a | False | MoS null + `cross_source_mismatch` (EV/multiples unavailable) |
 | CXM | nav | −70.3 | 1.19 | 17.15 | 13.4% | False | MoS≪30 + `debt_truncation_suspected` |
 | PRGS | fcf_cap | −69.7 | 2.53 | 15.53 | 18.4% | True | MoS≪30 (best fundamentals of the cohort, still −70% MoS) |
 | APPN | fcf_cap | null | 2.24 | 157.67 | 3.9% | True | MoS null (normalized FCF nonpositive; 158x EV/EBITDA) |
-| ASAN | nav | −93.1 | 1.82 |, | 5.4% | False | MoS≪30 + `debt_truncation_suspected`, `cross_source_mismatch` |
+| ASAN | nav | −93.1 | 1.82 | n/a | 5.4% | False | MoS≪30 + `debt_truncation_suspected`, `cross_source_mismatch` |
 
 **Why every MoS is negative:** the reverse-DCF / FCF-cap intrinsic band uses normalized (trailing
 5yr) equity FCF against current market cap. Small-cap enterprise-SaaS names trade at premium

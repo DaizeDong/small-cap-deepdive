@@ -149,10 +149,10 @@ designed-for outcome of the capital-intensive code path. `n_buy_clean = 0`.
   capital-intensive sector; the guard is load-bearing here.
 - **CABO debt truncation**, XBRL total_debt $24.9M vs implied $2.57B; the most severe
   single data defect in the run. Correctly downgraded to NAV and then blocked.
-- **Negative normalized FCF → null intrinsic band** on the 3 pure-play LECs (ATNI/NUVR/SHEN) ,
+- **Negative normalized FCF → null intrinsic band** on the 3 pure-play LECs (ATNI/NUVR/SHEN),
   not a defect, but it means the fcf_cap model is structurally non-informative for this theme;
   a NAV-first or EV/EBITDA-relative lens would be the right T1 valuation basis for these names.
-- **Concentration unquantified** (text flag true, XBRL magnitude null) on NUVR/ATNI/SHEN ,
+- **Concentration unquantified** (text flag true, XBRL magnitude null) on NUVR/ATNI/SHEN,
   flagged, did not kill.
 - **CLFD lumpy-OCF** (peak-year OCF $18.4M > 2× median $8.8M), normalization-suspect flag.
 - **UNIT duplicated 4×** in candidates JSON (SIC-reverse / dual-tier join), cosmetic; watch

@@ -108,7 +108,7 @@ This theme is the designed stress-test for the **cyclical + asset-heavy NAV** pa
   the FCF-cap model was ruled **unsuitable** (`fcf_cap_model_unsuitable` / `c1_data_quality_guard`)
   and valuation routed to the **NAV intrinsic band** (tangible-equity proxy, cap-rate band) for
   OPAD, BZH, CCS, DFH, FRPH. This is the correct path for inventory-heavy builders.
-- **Reverse-DCF null cascade**: `normalized_fcf_nonpositive` for OPAD/DFH/FOR/LGIH/FRPH/JFB/SDHC ,
+- **Reverse-DCF null cascade**: `normalized_fcf_nonpositive` for OPAD/DFH/FOR/LGIH/FRPH/JFB/SDHC,
   trailing-5yr-average FCF is negative because builders consumed cash buying land/building inventory
   into the cycle. Correctly produces a null FCF MoS rather than a fabricated one.
 - **Cross-source data-integrity gate (P7)**: fired on OPAD (shares 10x), DFH, FOR, CCS, blocked BUY
@@ -169,7 +169,7 @@ housing cycle should keep BZH on the WATCH list, but the tool is right not to ca
    misleading** and should show a percent (e.g. `25.4%`) or be labeled as a ratio.
 3. **Stale debt for NAV** (`debt_stale:>18_months_behind_latest_assets`) on BZH and FRPH, the NAV
    band mixes a recent asset figure with an older debt figure; widens NAV uncertainty.
-4. **Book-equity NAV proxy** for OPAD/BZH/CCS/DFH/FRPH (`nav_goodwill_or_intangibles_unavailable`) ,
+4. **Book-equity NAV proxy** for OPAD/BZH/CCS/DFH/FRPH (`nav_goodwill_or_intangibles_unavailable`),
    tangible equity falls back to book equity; for builders this is usually fine (little goodwill) but
    is a proxy.
 5. **3 recent IPOs with < 5y history** (SDHC, JFB, and partly DFH/OPAD) → cyclical normalization

@@ -107,7 +107,7 @@ Sunk (避开): AGM, BATL, FPI, IGIC, MAKO, NRUC, OBE, SID, TRC, TVC, VINP, VTS.
 | AGM/FPI/IGIC | nav | −31% / −100% / −46% | **false** | 0 | financial_sic_forced_unsuitable |
 | TRC | nav | −23.9% | **false** | 0 | fundamental_decline_flag |
 | VTS | fcf_cap | +10.4% | **false** | 0 | fcf_sustainability_uncertain; MoS<30 anyway |
-| TVC / NRUC | abstain | n/a | n/a |, | no tradeable common equity (un-valuable) |
+| TVC / NRUC | abstain | n/a | n/a | none | no tradeable common equity (un-valuable) |
 
 **Two failure clusters, both economically correct:**
 

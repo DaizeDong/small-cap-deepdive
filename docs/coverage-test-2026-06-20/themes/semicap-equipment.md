@@ -53,7 +53,7 @@
 |---|---|---|
 | `fcf_cap` | 3 | CVV, ELMT, SKYT |
 | `nav` | 1 | ASYS |
-| `abstain` | 0 |, |
+| `abstain` | 0 | none |
 
 No survivor produced a numeric MoS at all: every `fcf_cap` name had a null intrinsic band (normalized FCF non-positive or unavailable), and the single `nav` name (ASYS) had a deeply negative NAV MoS.
 

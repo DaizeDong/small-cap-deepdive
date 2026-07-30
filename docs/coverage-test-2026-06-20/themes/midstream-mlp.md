@@ -153,7 +153,7 @@ BUY is the tool working as designed, not a miss.
 - **No SIC recall floor for this theme**, the structural coverage gap (see §2). A low-keyword-density
   micro-cap midstream operator could escape recall. Recommend adding `midstream`/`pipeline` →
   `["4610","4922","4924"]` to `THEME_SIC` if midstream becomes a tracked theme.
-- **Empty business blurbs** for several names (VTS, TXO, HPK, SUUN, KGEI, OBE, NMFC, VET, EPRX) ,
+- **Empty business blurbs** for several names (VTS, TXO, HPK, SUUN, KGEI, OBE, NMFC, VET, EPRX),
   Gate-2 classification for these relied on issuer identity / SIC rather than blurb text. All nine
   were E&P/biotech/finance misrecalls; none were plausible midstream members, so the empty-blurb
   fallback did not change the retained set.
@@ -161,7 +161,7 @@ BUY is the tool working as designed, not a miss.
   data-quality guard and forced the NAV path; correct conservative behavior.
 - **`cross_source_mismatch`** on SLNG, SEC vs yfinance debt disagreement 5.1×, exactly the
   integrity block the second-source check exists for.
-- **`concentration_unquantified`** (text flag true, XBRL magnitude null) on RGCO, OPAL, MTRX, WBI ,
+- **`concentration_unquantified`** (text flag true, XBRL magnitude null) on RGCO, OPAL, MTRX, WBI,
   flagged but not BUY-blocking absent a quantified magnitude.
 - **Lumpy-OCF normalization suspect** on ESOA, OPAL, WBI, peak-year OCF > 2× median of others;
   normalization confidence appropriately discounted.
@@ -183,7 +183,7 @@ TrendsMCP, labeled T2 only:
   (56.0 → 69.3). A constructive, improving macro narrative for the sector.
 - **News volume:** flat 12M and 3M.
 
-Read: the sector backdrop is improving, which *raises*, not lowers, the bar for a mechanical BUY ,
+Read: the sector backdrop is improving, which *raises*, not lowers, the bar for a mechanical BUY,
 a rising-sentiment sector with zero clean cheap small-caps means the obvious value has likely been
 priced. This is T2 color for a human PM; it had **no** effect on any buy_eligible computation.
 

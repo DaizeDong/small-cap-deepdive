@@ -51,16 +51,16 @@ Top non-sunk (观察) names, by rank:
 
 | # | Ticker | Rating | Rev | NI | OCF | Growth | Dilution | Insider | KF | Theme-fit |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | ACB | 观察 | $0M* | $0M* | $0M* |, | +3% | neutral | 0 | pure |
+| 1 | ACB | 观察 | $0M* | $0M* | $0M* | n/a | +3% | neutral | 0 | pure |
 | 2 | CRON | 观察 | $147M | -$3M | $26M | +25% | -1% | neutral | 0 | pure |
 | 3 | GRUSF | 观察 | $32M | $3M | $4M | +22% | +0% | neutral | 0 | pure |
 | 4 | GRWG | 观察 | $162M | -$24M | -$9M | -14% | +0% | net_buy | 1 | partial |
 | 5 | GTBIF | 观察 | $311M*| $83M | $295M | +7% | +0% | neutral | 0 | pure |
-| 6 | HITI | 观察 | $0M* | $0M* | $0M* |, | +8% | neutral | 0 | pure |
+| 6 | HITI | 观察 | $0M* | $0M* | $0M* | n/a | +8% | neutral | 0 | pure |
 | 7 | NLCP | 观察 | $50M | $26M | $42M | +1% | +0% | net_sell | 0 | partial |
-| 8 | OGI | 观察 | $0M* | $0M* | $0M* |, | -64% | neutral | 1 | pure |
+| 8 | OGI | 观察 | $0M* | $0M* | $0M* | n/a | -64% | neutral | 1 | pure |
 | 9 | REFI | 观察 | $49M | $36M | $29M | +341%| +1% | net_buy | 0 | partial |
-| 10| SNDL | 观察 | $0M* | $0M* | $0M* |, | +0% | neutral | 0 | pure |
+| 10| SNDL | 观察 | $0M* | $0M* | $0M* | n/a | +0% | neutral | 0 | pure |
 | 11| TLRY | 观察 | $821M | -$2,187M | -$95M | +4% | +0% | net_buy | 0 | pure |
 | 12| TSNDF| 观察 | $261M | -$81M | $22M | -3% | +0% | net_sell | 0 | pure |
 | 13| VFF | 观察 | $216M | $32M | $10M | +10% | +0% | net_buy | 1 | pure |

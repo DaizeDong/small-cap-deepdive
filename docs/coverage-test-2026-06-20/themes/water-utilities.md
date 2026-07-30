@@ -24,8 +24,8 @@
 | **Gate 2 theme-fit survivors (deep-dived)** | **8** | GWRS, ARTNA, CWCO, YORW, MSEX, NWPX, SHIM, WBI |
 | Gate 2 misrecall (resolved, not deep-dived) | 16 | RE/oil/coal/uranium/banks/biotech/sand |
 | Reports written | 8 | 0 missing |
-| **Mechanical BUY** | **0** |, |
-| **Clean BUY (post-adversarial)** | **0** |, |
+| **Mechanical BUY** | **0** | n/a |
+| **Clean BUY (post-adversarial)** | **0** | n/a |
 
 The over-recall is mild relative to a generic-keyword theme: "water utility" is reasonably specific
 and the **SIC-4941 reverse-recall floor** carried the recall, pulling in every gold-list pure-play.
@@ -46,12 +46,12 @@ that files as a debt issuer, not an investable water equity).
 | **NWPX** | NWPX Infrastructure (Northwest Pipe) | 3317 | deep | $1,341M | **partial** | Engineered steel water-transmission pipe + precast water infrastructure products. Water-infra manufacturer, not a utility. |
 | **SHIM** | Shimmick Corp | 1600 | deep | $150M | **partial** | Heavy-civil construction "designed to strengthen the water market" (dams, treatment, conveyance) + other infra. |
 | **WBI** | WaterBridge Infrastructure | 1389 | deep | $1,560M | **partial** | **Produced-water** midstream for oil & gas (saltwater gathering/disposal). Energy-sector water handling, included on the "water infrastructure" keyword but NOT the regulated drinking-water theme. Flagged. |
-| OZ / LAND / TRC / AHRT | real estate / farmland / ranch REITs | 65xx/67xx | deep |, | misrecall | water assets are concept mentions; core business is real estate |
-| HPK / INR | oil & gas E&P | 1381/1311 | deep |, | misrecall | "water" = produced/frac water, incidental |
-| METC / ODV / EU / ASPI | coal / gold / uranium / isotopes | 12xx/10xx/28xx | deep |, | misrecall | mining/materials |
-| PLBC | Plumas Bancorp | 6153 | deep |, | misrecall | community bank |
-| XOMA | XOMA Royalty | 2834 | deep |, | misrecall | biotech royalty aggregator |
-| SND | Smart Sand | 1400 | deep |, | misrecall | frac/industrial sand |
+| OZ / LAND / TRC / AHRT | real estate / farmland / ranch REITs | 65xx/67xx | deep | n/a | misrecall | water assets are concept mentions; core business is real estate |
+| HPK / INR | oil & gas E&P | 1381/1311 | deep | n/a | misrecall | "water" = produced/frac water, incidental |
+| METC / ODV / EU / ASPI | coal / gold / uranium / isotopes | 12xx/10xx/28xx | deep | n/a | misrecall | mining/materials |
+| PLBC | Plumas Bancorp | 6153 | deep | n/a | misrecall | community bank |
+| XOMA | XOMA Royalty | 2834 | deep | n/a | misrecall | biotech royalty aggregator |
+| SND | Smart Sand | 1400 | deep | n/a | misrecall | frac/industrial sand |
 | TVC | Tennessee Valley Authority | 4911 | unknown | n/a | misrecall | federal power-agency **debt** issuer; not investable equity, and power not water |
 
 **WBI judgment note.** WaterBridge is genuinely "water infrastructure" in the produced-water sense,
@@ -103,11 +103,11 @@ priced as `mos_basis=fcf_cap`; the NAV path never fired (see §5).
 
 | Ticker | mos_basis | MoS | buy_eligible | buy_ineligible_reasons | kill | Why no BUY |
 |---|---|---|---|---|---|---|
-| GWRS | fcf_cap | **null** | True |, | 0 | normalized FCF non-positive → intrinsic band null → no numeric MoS |
-| ARTNA | fcf_cap | **null** | True |, | 0 | normalized FCF non-positive → intrinsic band null |
-| CWCO | fcf_cap | **−43.9%** | True |, | 0 | negative MoS (priced above FCF intrinsic) |
-| MSEX | fcf_cap | **null** | True |, | 0 | normalized FCF non-positive → intrinsic band null |
-| SHIM | fcf_cap | **null** | True |, | 1* | net loss + negative OCF → FCF non-positive; melting-ice-cube (T2) |
+| GWRS | fcf_cap | **null** | True | none | 0 | normalized FCF non-positive → intrinsic band null → no numeric MoS |
+| ARTNA | fcf_cap | **null** | True | none | 0 | normalized FCF non-positive → intrinsic band null |
+| CWCO | fcf_cap | **−43.9%** | True | none | 0 | negative MoS (priced above FCF intrinsic) |
+| MSEX | fcf_cap | **null** | True | none | 0 | normalized FCF non-positive → intrinsic band null |
+| SHIM | fcf_cap | **null** | True | none | 1* | net loss + negative OCF → FCF non-positive; melting-ice-cube (T2) |
 | YORW | fcf_cap | **−124.9%** | **False** | extreme_mos_review_required | 0 | extreme-MoS guard fires; MoS < 30 anyway |
 | NWPX | fcf_cap | **−88.3%** | **False** | cross_source_mismatch | 1* | P7 data-integrity gate: SEC debt $10.7M vs yfinance $110.5M (10.3×) |
 | WBI | fcf_cap | **−140.5%** | **False** | extreme_mos_review_required, fcf_sustainability_uncertain | 0 | OCF-proxy on capital-intensive (assets/rev 7.1); extreme negative MoS |
@@ -133,7 +133,7 @@ A correctly-priced premium utility, not a bargain.
 
 - **FCF-cap path fired for all 8; NAV path fired for NONE**, the headline code-path observation.
   `nav_intrinsic_band` is None and `fcf_cap_model_unsuitable=False` for every name. Regulated water
-  utilities are asset-heavy bond-proxies, exactly the profile one might expect to route onto NAV ,
+  utilities are asset-heavy bond-proxies, exactly the profile one might expect to route onto NAV,
   yet none crossed the routing threshold (debt/assets did not exceed the cutoff; `debt_to_assets`
   was not even populated for these XBRL layouts). Result: every utility was valued on a **trough/thin
   FCF basis** that returns null or deeply-negative MoS. This is the regulated-utility analogue of the
@@ -176,7 +176,7 @@ of the WATCH/no-BUY verdicts artifacts that hide a real opportunity?**
   Caribbean concession risk. **Verdict: correct no-BUY; not a hidden bargain.**
 - **YORW (−124.9%, extreme-MoS):** The highest-multiple name (EV/Sales 9.2×, EV/EBITDA 16.8×), the
   market pays a scarcity premium for a 200-year continuous dividend record. Strong insider net-buy
-  (70 buys / 0 sells) is a T2 curiosity but does **not** make it cheap. **Verdict: correct no-BUY ,
+  (70 buys / 0 sells) is a T2 curiosity but does **not** make it cheap. **Verdict: correct no-BUY,
   expensive bond-proxy, not an opportunity.**
 - **NWPX (cross_source_mismatch):** The buy_eligible=False is driven by a **real data defect** (SEC
   debt truncated to $10.7M vs true ~$110M). Even setting that aside, MoS is −88% on a 26.9× EV/EBITDA

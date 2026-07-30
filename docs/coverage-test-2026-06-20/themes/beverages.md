@@ -19,10 +19,10 @@
 | Stage | Count | Notes |
 |---|---:|---|
 | FTS raw recall | 321 | EDGAR full-text on the 3 keyword phrases (forms 10-K/10-Q/20-F/40-F) |
-|, deep band (<$2.0B) | 109 | market-cap resolved to small-cap |
-|, watch band ($2.0 to 5.0B) | 14 | theme-fit only, no deep-dive (out of small-cap scope) |
-|, large (>$5.0B) | 63 | excluded |
-|, unknown mktcap | 135 | mktcap-fallback could not resolve (illiquid / no price / foreign) |
+| - deep band (<$2.0B) | 109 | market-cap resolved to small-cap |
+| - watch band ($2.0 to 5.0B) | 14 | theme-fit only, no deep-dive (out of small-cap scope) |
+| - large (>$5.0B) | 63 | excluded |
+| - unknown mktcap | 135 | mktcap-fallback could not resolve (illiquid / no price / foreign) |
 | cheap_pass scanned | 82 | mechanical health screen rows produced |
 | cheap_pass survivors | 54 | going-concern / death-spiral / ICFR / concentration screen |
 | SIC gate (Gate 1) | 54 | keep=32, review=22, **no drops** (review forwarded to LLM gate) |

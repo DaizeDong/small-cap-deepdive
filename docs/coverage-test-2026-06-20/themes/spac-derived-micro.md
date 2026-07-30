@@ -132,7 +132,7 @@ de-SPAC failure mode), AND the semantic wrong-entity (MVIS misrecall). Both were
   development stage. pure_play, but pre-revenue.
 - **MVIS (MicroVision)**, **MISRECALL.** Founded 1993, NASDAQ since the late 1990s; never a SPAC.
   FTS matched SPAC references in its filings (it discusses SPAC-funded lidar competitors such as
-  Luminar, whose assets it later bought out of bankruptcy). Correctly excluded on theme membership ,
+  Luminar, whose assets it later bought out of bankruptcy). Correctly excluded on theme membership,
   and, redundantly, blocked by three mechanical guards regardless.
 
 This 4-true / 1-misrecall split (80% Gate-2 precision) is much higher than hot single-keyword themes

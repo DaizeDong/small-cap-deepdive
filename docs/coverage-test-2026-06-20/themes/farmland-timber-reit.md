@@ -70,7 +70,7 @@ SIC 602x), **AGM** (Farmer Mac, agricultural-mortgage finance, SIC 6111; a finan
 **BUY = mos_basis ∈ {fcf_cap, nav} AND numeric MoS ≥ 30 AND buy_eligible==true AND zero kill-flags.**
 Every name fails at least one clause:
 
-- **LAND**, NAV MoS **+47%** (≥30 ✔), but `buy_eligible=false`: vetoed by three v0.3.0 guards ,
+- **LAND**, NAV MoS **+47%** (≥30 ✔), but `buy_eligible=false`: vetoed by three v0.3.0 guards,
   `financial_sic_forced_unsuitable` (SIC 6798 → FCF model unsuitable), `fundamental_decline_flag`
   (rev slope −1, contamination 0.23, latest below avg), and `cross_source_mismatch`
   (SEC rev 12.2M vs yfinance 88.0M, 7.2x). The attractive-looking NAV MoS is **exactly the trap the

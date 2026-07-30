@@ -80,7 +80,7 @@ Code paths that fired:
   equity available), none to `fcf_cap` or `abstain`.
 - **Defense-in-depth guards co-fired** as second blockers: `cross_source_mismatch` (P7),
   `peak_contamination_flag` (P-A V-shape veto on SVC), `debt_truncation_suspected` (C1 on GNL).
-- **Firewall:** signals side-channel did not auto-emit a file in this flow and is irrelevant ,
+- **Firewall:** signals side-channel did not auto-emit a file in this flow and is irrelevant,
   `buy_eligible` is composed solely from the guard list with zero signal references.
 
 **Net:** the BUY rule (`mos_basis∈{fcf_cap,nav}` AND MoS≥30 AND `buy_eligible` AND 0 kill-flags)

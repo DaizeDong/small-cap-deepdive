@@ -42,11 +42,11 @@ AVOID / sunk tier (9): BBBY, CWH, REAL, DXLG, GRWG, DBI, LVLU, CATO, TLYS.
 
 | Ticker | MktCap $M | MoS basis | MoS % | buy_eligible | buy_ineligible_reasons |
 |---|---|---|---|---|---|
-| CATO | 66 | fcf_cap | -49.5 | True |, (overvalued vs intrinsic) |
+| CATO | 66 | fcf_cap | -49.5 | True | - (overvalued vs intrinsic) |
 | TLF | 19 | nav | **+93.6** | False | debt_truncation_suspected |
-| TLYS | 135 | nav | -53.9 | True |, |
-| BBW | 406 | fcf_cap | -25.0 | True |, |
-| BBBY | 442 | nav | -72.7 | True |, |
+| TLYS | 135 | nav | -53.9 | True | none |
+| BBW | 406 | fcf_cap | -25.0 | True | none |
+| BBBY | 442 | nav | -72.7 | True | none |
 | MNRO | 467 | fcf_cap | **+92.3** | False | fundamental_decline_flag, cross_source_mismatch |
 | CTRN | 505 | nav | -80.4 | False | cross_source_mismatch |
 | NGVC | 694 | nav | -74.7 | False | debt_truncation_suspected, cross_source_mismatch |
@@ -54,13 +54,13 @@ AVOID / sunk tier (9): BBBY, CWH, REAL, DXLG, GRWG, DBI, LVLU, CATO, TLYS.
 | HVT | 392 | nav | -37.4 | False | debt_truncation_suspected, wrong_entity_suspected |
 | DXLG | 39 | nav | **+109.7** | False | extreme_mos_review_required, debt_truncation_suspected, peak_contamination_flag, cross_source_mismatch |
 | CWH | 493 | fcf_cap | -87.2 | False | fcf_sustainability_uncertain, cross_source_mismatch |
-| GRWG | 96 | nav | -26.2 | True |, |
+| GRWG | 96 | nav | -26.2 | True | none |
 | ARKO | 840 | fcf_cap | -103.5 | False | extreme_mos_review_required, cross_source_mismatch |
 | SVV | 1563 | fcf_cap | -115.3 | False | extreme_mos_review_required |
 | EYE | 1344 | fcf_cap | -70.3 | False | cross_source_mismatch |
 | UPBD | 1068 | nav | -83.0 | False | cross_source_mismatch |
 | BSET | 135 | nav | -11.1 | False | debt_truncation_suspected |
-| WINA | 1432 | nav | -100.0 | True |, |
+| WINA | 1432 | nav | -100.0 | True | none |
 | JILL | 222 | fcf_cap | **+84.0** | False | cross_source_mismatch |
 | REAL | 1500 | nav | -100.0 | False | low_revenue_loss_ratio_extreme, debt_truncation_suspected, cross_source_mismatch |
 | LVLU | 22 | nav | -100.0 | False | peak_contamination_flag, cross_source_mismatch |

@@ -147,7 +147,7 @@ water-utilities, railcar-leasing, regional-gaming have gold lists). Not measurab
   (price-return series sparse on recent IPOs). No `unpriced_improvement` flags.
 - **TrendsMCP (T2 analyst context):** Google search interest in "rare earth magnets" is **−5.9% YoY
   and −61% over the trailing 3 months** (off a Q1-2026 spike); news volume up YoY (from a ~0 baseline)
-  but −10.6% over 3M. Reading: the theme had an early-2026 attention spike that is now **cooling** ,
+  but −10.6% over 3M. Reading: the theme had an early-2026 attention spike that is now **cooling**,
   textbook "hot theme = casino" (world-view #2). This *supports* the skeptical 0-BUY stance; it is
   explicitly NOT an input to the mechanical decision.
 

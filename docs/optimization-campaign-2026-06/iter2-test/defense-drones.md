@@ -58,7 +58,7 @@ was left as misrecall. **Final deep set = 14.** (Gate-2 audit: `gate2_decisions.
 | 6 | OSS | One Stop Systems | 观察 WATCH | 38% | $457M | $32M | +$5M | −$0M | +31% | 13.5x | n/a | null | 0 |
 | 7 | ODYS | Odysight.ai | 观察 WATCH | 35% | $68M | $3M | −$17M | −$14M | −24% | 16.4x | n/a | null | 0 |
 | 8 | SWMR | Swarmer | 观察 WATCH | 35% | $454M | $0.3M | −$8M | −$5M | −6% | **1393x** | n/a | null | 0 |
-| 9 | MOB | Mobilicom | 观察 WATCH | 33% | $72M | n/d | n/d | n/d |, | n/a | n/a | null | 0 |
+| 9 | MOB | Mobilicom | 观察 WATCH | 33% | $72M | n/d | n/d | n/d | n/a | n/a | n/a | null | 0 |
 | 10 ⬇ | MVIS | MicroVision | **避开 AVOID** | 55% | $126M | $1M | −$95M | −$59M | −74% | **67x** | n/a | −86% (NAV) | 1 (MW) |
 | 11 ⬇ | UMAC | Unusual Machines | **避开 AVOID** | 55% | $1,194M | $11M | −$19M | −$21M | +101% | **87x** | n/a | null | 1 (MW) |
 | 12 ⬇ | KOPN | Kopin | **避开 AVOID** | 50% | $914M | $39M | +$2M | −$16M | −22% | 23.2x | n/a | null | 1 (MW) |
@@ -168,7 +168,7 @@ the discipline; documented gap on early-IPO XBRL coverage.**
 | KOPN | −1 | 1.058 | mixed | +$2.4M | **false** | **false** | ✓ NI>0 + contam>0.8 → no veto; AVOID via MW |
 | MVIS | −1 | 1.122 | mixed | −$95M | **false** | **false** | ✓ contam>0.8 → not a contaminated peak; AVOID via NAV+MW |
 | BKSY/CTM/GILT/ODYS/TATT/UMAC | +1 | 0.9 to 6.0 | mostly False | mixed | **false** | **false** | ✓ |
-| ELMT/MOB/SWMR | 0 / +1 | n/d to 1.63 |, | neg/n-d | **false** | **false** | ✓ (thin XBRL or early grower) |
+| ELMT/MOB/SWMR | 0 / +1 | n/d to 1.63 | n/a | neg/n-d | **false** | **false** | ✓ (thin XBRL or early grower) |
 
 `peak_contamination_flag` fired on **zero of 14** and `fundamental_decline_flag` on **zero of 14**, the
 desired downgrade-only-when-warranted result. The four negative-slope names (OSS, SPAI, KOPN, MVIS) each
@@ -206,7 +206,7 @@ loss-makers, the conservative stress target is met.
   (no mature 10-K XBRL to parse), so GC/MW/DS could not be machine-cleared, recorded as a **data gap,
   not a clearance**, in both reports. This is the same early-filer blind spot that prevented the
   mechanical concentration rule from firing on SWMR.
-- **Severe disclosure thinness on MOB** (cash/debt/D&A/capex all unavailable, EV = market-cap-only) ,
+- **Severe disclosure thinness on MOB** (cash/debt/D&A/capex all unavailable, EV = market-cap-only),
   surfaced, confidence capped at 33%, not silently filled.
 
 No silent skips. **No `deepdive_*_ERROR.json` written** (no crashes / rate-limit kills). All 14
@@ -260,7 +260,7 @@ either pre-profit lottery tickets or control-impaired AVOIDs.**
   insider cluster, but net-dollar insider *selling*, government-program concentration (the SIGA risk),
   and negative normalized FCF. The catalyst freeze correctly kept the cluster from lifting it to BUY.
 - **Pure-play lottery tickets (story, not value): SWMR, UMAC, BKSY, OSS, ODYS, MOB, SPAI.** Maximal
-  theme fit, minimal/no positive cash flow, EV/Sales 11 to 1393x. **SWMR is the single most dangerous** ,
+  theme fit, minimal/no positive cash flow, EV/Sales 11 to 1393x. **SWMR is the single most dangerous**,
   the disclosed single-customer-non-renewal (SIGA pattern) makes the $0.3M-revenue / $454M-market-cap
   gap a binary. UMAC and SPAI add a *material weakness* on top of the valuation.
 - **Avoid outright: MVIS, UMAC, KOPN, LTRX, SPAI** (all material-weakness, sunk to the ranking floor).

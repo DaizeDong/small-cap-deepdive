@@ -107,7 +107,7 @@ And the blocked-eligibility names confirm the v0.3.0 guards bite correctly:
 - **DXC** posted a nominal +543% fcf_cap MoS, exactly the artifact the `extreme_mos_review_required`
   guard exists to catch (`mos=543.3%_exceeds_100pct`), reinforced by `fcf_sustainability_uncertain`
   (reverse-DCF implied growth −72.7%) and `fundamental_decline_flag`. Without these guards this
-  would have been a spurious headline BUY. **The guards converted a data artifact into a WATCH ,
+  would have been a spurious headline BUY. **The guards converted a data artifact into a WATCH,
   this is the test passing.**
 - **CSPI / CXDO** were blocked by the **P7 cross-source sanity band** (the only external,
   non-SEC-internal check): CSPI debt SEC $25.3M vs yfinance $2.1M (12.2x), CXDO revenue SEC

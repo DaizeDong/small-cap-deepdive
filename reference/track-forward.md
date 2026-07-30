@@ -281,7 +281,7 @@ realized_excess_pct = stock_total_return - IWM_total_return
    to inject the 19 validation BUY false-positives (P12d). Idempotent.
 
 3. **Monthly:** run `python tools/track_forward.py --score` to price-score any verdicts whose
-   horizon has elapsed. In the first year this produces 0 price-scored verdicts (all recent) ,
+   horizon has elapsed. In the first year this produces 0 price-scored verdicts (all recent),
    but the BUY-data-integrity metric is already meaningful from the backfilled cohort.
 
 4. **After ~20 verdicts mature:** run `--scorecard` and examine the calibration table + de-risk
@@ -299,7 +299,7 @@ The first forward-tracked verdicts from runs in 2026-06 will mature in 2027-06. 
 - The correct response to "why do we always get WATCH?" is "we don't know yet, check back in 12 months"
 
 **But the BUY arm is no longer blind.** The de-risk-native **BUY data-integrity** metric (P12c/P12d)
-is meaningful **today**: the 19 backfilled validation BUYs give a hard, present-tense answer ,
+is meaningful **today**: the 19 backfilled validation BUYs give a hard, present-tense answer,
 0.0% of BUY verdicts survive a balance-sheet cross-check. That is actionable now, without waiting
 for price. It is the part of the loop most worth heeding before any clean BUY ever fires.
 

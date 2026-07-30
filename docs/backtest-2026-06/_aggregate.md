@@ -56,7 +56,7 @@ Overall weak, the rubric over-routes nearly everything to WATCH, so blowups conc
 - The BUY signal has **no demonstrated edge**: it literally never fired a real BUY in 5 years × 5
   themes, and the eligibility-flagged superset lags IWM at the median. Extreme conservatism is the
   empirical norm (consistent with "0-BUY is valid", now taken to the limit).
-- The **AVOID label does not broadly identify losers** (AVOID *outperforms* in 4 of 5 regimes) ,
+- The **AVOID label does not broadly identify losers** (AVOID *outperforms* in 4 of 5 regimes),
   i.e. names the model flags as risky mostly do fine; the gradient is inverted, not monotone.
 - Overall **blowup-avoidance is weak (5.6%)** because almost everything is routed to WATCH.
 

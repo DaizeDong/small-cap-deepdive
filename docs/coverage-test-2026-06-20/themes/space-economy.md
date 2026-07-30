@@ -31,7 +31,7 @@ The theme-fit gate is the load-bearing precision step here. `space` is a catastr
 over-recall: it matched dozens of REITs ("office space", "retail space"), every Invesco
 CurrencyShares / commodity / crypto ETF trust, biotech ("satellite trial sites", "LEO" / "GEO" /
 "payload" as substrings in genetics text), restaurants, gold miners, and broadcast media. Of 163
-deep-band names, only 8 are genuine space-economy industrial participants (4.9% gate-2 precision ,
+deep-band names, only 8 are genuine space-economy industrial participants (4.9% gate-2 precision,
 consistent with the documented ~7% precision base rate for hot single-keyword themes).
 
 ---

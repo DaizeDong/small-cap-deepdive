@@ -108,7 +108,7 @@ opportunity.
 **Verdict: data artifact, correctly blocked. Not a real opportunity at this MoS.**
 - EV computed as **−$2,611M** with `debt_unavailable` / `ev_excludes_debt`, the 20-F XBRL debt concept
   could not be pulled, so EV is nonsensically negative (net cash > market cap on paper). RANKING shows
-  **revenue $0M** (revenue concept unmapped for the foreign filer) while net income is tagged $1,281M ,
+  **revenue $0M** (revenue concept unmapped for the foreign filer) while net income is tagged $1,281M,
   internally inconsistent.
 - `lumpy_ocf_normalization_suspect` (peak-year OCF $2,067M > 2× median $652M) and
   `normalized_uses_3yr_insufficient` both fire. The +377.9% MoS is built on a corrupted single-source
@@ -186,7 +186,7 @@ No BUY could originate or up-weight from these. Provided purely as analyst color
    (7.4×), NWPX (10.3×), OFLX (4.1×), PPIH (2.9×), PLOW (31.7× + revenue 3.7×). Indicates the SEC debt
    extraction is picking a partial-liability concept on these names; flagged and gated correctly.
 3. **debt_truncation_suspected (IIIN, PLOW):** implausibly small debt magnitudes from XBRL.
-4. **Lumpy-OCF normalization suspect (FRD, SID, and others):** peak-year OCF >2× median of other years ,
+4. **Lumpy-OCF normalization suspect (FRD, SID, and others):** peak-year OCF >2× median of other years,
    normalization correctly flags but the FCF MoS on these should be treated as low-confidence.
 5. **AEBI / HLP:** FCF model produced `mos = null` (normalized FCF ≈ −$5.2M for AEBI; HLP also veto'd by
    fundamental_decline), abstain-like outcome surfaced as WATCH.

@@ -20,8 +20,8 @@
 | **Gate 2 theme-fit survivors (deep-dived)** | **3** | RAIL, GBX, RVSN |
 | Gate 2 misrecall (resolved, not deep-dived) | 146 | banks/miners/chem/oil/biotech/restaurants |
 | Reports written | 3 | 0 missing |
-| **Mechanical BUY** | **0** |, |
-| **Clean BUY (post-adversarial)** | **0** |, |
+| **Mechanical BUY** | **0** | n/a |
+| **Clean BUY (post-adversarial)** | **0** | n/a |
 
 The over-recall is the canonical precision-gate scenario. "equipment leasing" and "rolling stock"
 are generic filing phrases, every bank ("we lease equipment"), miner, chemical company and
@@ -38,7 +38,7 @@ names. Gate 2 (LLM theme-fit from 10-K blurbs) cut 146 → 3.
 | **RVSN** | Rail Vision Ltd. | 3743 | deep | $10M | **partial** | Early-commercialization railway-safety AI for rolling stock. Rolling-stock adjacent, not a lessor/maker. |
 | GEL | Genesis Energy LP | 4610 | deep | $1,772M | misrecall | Pipeline/midstream; "railcar" appears incidentally. |
 | EVI | EVI Industries | 7200 | deep | $205M | misrecall | Leases *commercial laundry* equipment, literal "equipment leasing" but off-theme. |
-| (146 total misrecalls) | banks, miners, chemicals, oil/gas, biotech, restaurants |, |, |, | misrecall | incidental keyword matches |
+| (146 total misrecalls) | banks, miners, chemicals, oil/gas, biotech, restaurants | n/a | n/a | n/a | misrecall | incidental keyword matches |
 
 ## 3. recall@gold (gold list: GATX, TRN, GBX, RAIL)
 

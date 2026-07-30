@@ -61,7 +61,7 @@ drops. 15/19 misrecall rate is high but expected for a broad two-keyword energy 
 
 | Rank | Ticker | mos_basis | MoS | buy_eligible | Rev | NI | OCF | RevGr | kf |
 |---:|---|---|---:|:---:|---:|---:|---:|---:|---:|
-| 1 | APC | fcf_cap | n/a (band null) | ❌ | $0M* | $0M* | $0M* |, | 0 |
+| 1 | APC | fcf_cap | n/a (band null) | ❌ | $0M* | $0M* | $0M* | n/a | 0 |
 | 2 | ARKO | fcf_cap | **−103.5%** | ❌ | $7,644M | $23M | $193M | −12% | 0 |
 | 3 | CAPL | abstain | n/a | ❌ | $3,662M | $9M | $92M | −11% | 0 |
 | 4 | WKC | nav | **−92.0%** | ❌ | $36,917M | −$614M | $293M | −12% | 0 |

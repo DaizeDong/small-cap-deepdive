@@ -65,7 +65,7 @@ mining), GSBD (Goldman Sachs BDC, financial), CHNR (Nevada shell), FURY (gold mi
 (optics/photonics), CMP (salt + plant-nutrition; exited lithium).
 
 The most instructive drop is **EAF**: it is a real graphite/carbon industrial name and trips the FTS
-recall, but graphite *electrodes for electric-arc-furnace steelmaking* are not battery anode material ,
+recall, but graphite *electrodes for electric-arc-furnace steelmaking* are not battery anode material,
 a concept-adjacency the gate correctly rejected.
 
 ---

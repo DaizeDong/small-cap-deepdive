@@ -68,7 +68,7 @@ risk paragraph, not the business.
 | **LWLG** (Lightwave Logic) | partial | Electro-optic (Perkinamine) polymer modulators for photonics/datacom; quantum-photonics adjacent, not QC per se; ~pre-rev | 10-K Item 1 |
 
 > **Note on the empty-blurb names.** QNC, BTQ, LWLG, URG, STRS, VBIX, CETH had empty `business_blurb` fields (foreign filers
-> with non-standard 10-K structure, or trusts). I fetched each Item-1 directly via edgartools + web to avoid a false drop ,
+> with non-standard 10-K structure, or trusts). I fetched each Item-1 directly via edgartools + web to avoid a false drop,
 > this is what saved QNC and BTQ (both real quantum pure-plays) from being silently misclassified by an absent blurb.
 
 ---
@@ -110,8 +110,8 @@ This theme is the cleanest exercise of the **pre-revenue / abstain discipline** 
 |---:|---|---|---:|---:|---:|---:|---:|---:|---|---:|
 | 1 | ASPI | 观察 (WATCH) | 40% | $24M | −$160M | −$38M | +476% | +0% | net_sell | 1 |
 | 2 | LWLG | 观察 (WATCH) | 40% | $0M | −$20M | −$14M | +1623% | +2% | net_sell | 0 |
-| 3 | BTQ | 观察 (WATCH) | 35% | $0M | $0M | $0M |, |, | neutral | 0 |
-| 4 | QNC | 观察 (WATCH) | 35% | $0M | $0M | $0M |, |, | neutral | 0 |
+| 3 | BTQ | 观察 (WATCH) | 35% | $0M | $0M | $0M | n/a | n/a | neutral | 0 |
+| 4 | QNC | 观察 (WATCH) | 35% | $0M | $0M | $0M | n/a | n/a | neutral | 0 |
 
 All 4 rated **WATCH**, survived mechanical de-risk and have genuine theme membership, but none can clear the BUY bar (null MoS).
 None sank (no AVOID / kill-flag ≥ 2). ASPI's 1 kill-flag was carried from cheap-pass but did not sink it.

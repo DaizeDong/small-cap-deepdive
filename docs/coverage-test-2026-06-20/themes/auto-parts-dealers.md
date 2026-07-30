@@ -22,7 +22,7 @@
 | **LLM theme-fit gate (Gate 2)** | 14 retained / 18 misrecall | see §2 |
 | **Deep-band survivors deep-dived (FULL, no sampling)** | **9** | PRTS, SMP, VRM, SRI, STRT, ADNT, THRM, MEI, MYE |
 | Mechanical BUYs | **0** | none satisfy the 4-part BUY rule |
-| Clean BUYs (post-adversarial) | **0** |, |
+| Clean BUYs (post-adversarial) | **0** | n/a |
 
 No SIC recall floor exists for this theme (`auto-parts-dealers` is not in `THEME_SIC`; dealer/parts
 SICs 5013/5531/5500 are not seeded), so recall is FTS-only, expected. No gold list either, so
@@ -104,7 +104,7 @@ for a *false negative* (did the gate wrongly suppress a real opportunity?).
 
 - **Claim under test:** NAV MoS +30.8% (tangible equity \$86.5M vs market cap \$52.9M) looks like a
   net-net.
-- **Disconfirming evidence (decisive):** SEC revenue series shows the e-commerce collapse ,
+- **Disconfirming evidence (decisive):** SEC revenue series shows the e-commerce collapse,
   \$3.18B (2021) → \$1.95B (2022) → \$0.89B (2023, the stale FY in the pull). Vroom **discontinued
   its used-vehicle e-commerce operation in January 2024** and now runs essentially UACC (auto
   finance) + an AI/analytics arm. yfinance TTM revenue is \$6.9M (the runoff entity), a 129x
@@ -125,7 +125,7 @@ The requested focus paths all fired with real, interpretable effect:
 
 - **`_is_cyclical` (CV>0.25) → cyclical normalization (trailing-avg FCF/EBITDA):** fired True on
   PRTS (0.55), VRM (0.94), SRI (0.61), STRT (0.63), MEI (0.71), MYE (0.38); False on SMP/ADNT/THRM.
-- **Cyclical static-MoS lumpy-OCF guard (valuation.py ~L611):** fired on **STRT** ,
+- **Cyclical static-MoS lumpy-OCF guard (valuation.py ~L611):** fired on **STRT**,
   `lumpy_ocf_normalization_suspect: peak_year_ocf=35.1M > 2x median 11.4M`. The cyclical guard
   surfaced the peak-year distortion in the data_quality block.
 - **`debt_truncation_suspected` (floorplan/inventory-financing-relevant XBRL debt truncation):**

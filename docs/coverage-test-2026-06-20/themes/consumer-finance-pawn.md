@@ -26,8 +26,8 @@
 | **candidates JSON (deep-band)** | **73** | (+21 watch-band = 94 total rows) |
 | **Gate 2 LLM theme-fit (deep-band)** | 73 → **20 survivors** | 10 pure_play + 10 partial; **53 misrecalls dropped** |
 | **Deep-dived (every survivor)** | **20 / 20** | 0 ERROR files; full data + valuation on all |
-| **BUY-eligible & clean (MoS≥30, basis∈{fcf,nav}, 0 kill-flags)** | **0** |, |
-| **BUYs surviving adversarial review** | **0** |, |
+| **BUY-eligible & clean (MoS≥30, basis∈{fcf,nav}, 0 kill-flags)** | **0** | n/a |
+| **BUYs surviving adversarial review** | **0** | n/a |
 
 Funnel triple: raw **277** → deepdived **20** → survivors (clean BUY) **0**.
 

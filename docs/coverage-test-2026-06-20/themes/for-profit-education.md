@@ -23,7 +23,7 @@
 | **LLM theme-fit gate (Gate 2) survivors** | **14** | 13 pure_play + 1 partial; 43 deep-band misrecalls dropped |
 | Deep-dived (every survivor, no sampling) | 14 | 0 deepdive ERROR files, 0 missing reports |
 | Valuated (`--json` + `--ticker`/`--mktcap`) | 14 | AMBO needed `--mktcap 90942873` (yfinance null) |
-| **Mechanical BUYs** | **0** |, |
+| **Mechanical BUYs** | **0** | n/a |
 
 - **No dedicated SIC floor:** education (8200-series) is **not** in `THEME_SIC`, so SIC
   reverse-recall is a clean no-op and discovery ran FTS-only + mktcap fallback. This is correct,
@@ -45,7 +45,7 @@ business is behavior-change training, retained for deep-dive).
 
 **Representative misrecalls dropped:** LEE (newspapers), CNDT (Conduent BPO), OPRT (lending),
 RPD (Rapid7 cyber), EVH (Evolent healthcare), WEN (Wendy's), GTY (Getty Realty), JSM/Navient
-(student-loan *servicer*, education-finance adjacent, not an education provider), FLYW (Flywire ,
+(student-loan *servicer*, education-finance adjacent, not an education provider), FLYW (Flywire,
 education *payments*, not education), DHX (Dice job board), UPWK (Upwork freelance), KLTR (Kaltura
 video SaaS), the Bitwise crypto ETFs (CLNK/ETHW/XRP), and a string of banks. Each cleared an FTS
 keyword but fails true theme membership.
@@ -64,7 +64,7 @@ keyword but fails true theme membership.
 | 6 ⬇ | APEI | 避开 | fcf_cap | -70.0 | false | 0 | cross_source_mismatch; also deeply overvalued vs intrinsic. |
 | 7 ⬇ | CHGG | 避开 | fcf_cap | +578.8 | false | 0 | **The textbook artifact.** Raw MoS looks spectacular; vetoed by extreme-MoS + fundamental_decline + peak_contamination + fcf_sustainability_uncertain. See §3. |
 | 8 ⬇ | COUR | 避开 | fcf_cap | -51.0 | false | 0 | fcf_sustainability_uncertain + cross_source_mismatch. |
-| 9 ⬇ | DAO | 避开 | abstain |, | false | 0 | cross_source_mismatch; MoS abstained (China VIE, loss-making). |
+| 9 ⬇ | DAO | 避开 | abstain | n/a | false | 0 | cross_source_mismatch; MoS abstained (China VIE, loss-making). |
 | 10 ⬇ | FC | 避开 | nav | -100.0 | false | 0 | debt_truncation_suspected. |
 | 11 ⬇ | GOTU | 避开 | nav | -65.1 | false | 0 | debt_truncation_suspected + cross_source_mismatch (China VIE). |
 | 12 ⬇ | JDZG | 避开 | fcf_cap | null | false | 1 | cross_source_mismatch; ~-99% dilution flag (micro China name). |

@@ -16,8 +16,8 @@
 | Stage | Count | Notes |
 |---|---|---|
 | Raw discovery (FTS ∪ SIC-recall, after cheap_pass + SIC gate) | **49** | candidates JSON, `candidates_coal_metcoal.json` |
-|, band split | 30 deep / 17 watch / 2 unknown | watch/unknown not deep-dived by design |
-|, kill-flag ≥1 in deep band | 8 | (LAKE, EAF, FWRD, METC, CHNR, CMCL, MFIC, SID) excluded from BUY set |
+| - band split | 30 deep / 17 watch / 2 unknown | watch/unknown not deep-dived by design |
+| - kill-flag ≥1 in deep band | 8 | (LAKE, EAF, FWRD, METC, CHNR, CMCL, MFIC, SID) excluded from BUY set |
 | Deep band, kill=0 | 22 | candidate pool for theme-fit |
 | LLM theme-fit survivors (true coal membership) | **5** | NC, SXC, KOP, HNRG, NRP |
 | Deep-dived (full data + valuation) | **5** | zero `*_ERROR.json` crash files |

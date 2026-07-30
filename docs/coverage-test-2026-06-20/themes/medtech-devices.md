@@ -8,7 +8,7 @@
 - **Date:** 2026-06-21 (run executed under cov label)
 - **Verdict in one line:** **0 mechanical BUYs. Correct "nothing found."** The small-cap
   medical-device universe is dominated by pre-profit, cash-burning growth-stage names whose
-  negative normalized FCF makes a DCF intrinsic band, and therefore a margin of safety ,
+  negative normalized FCF makes a DCF intrinsic band, and therefore a margin of safety,
   uncomputable. The handful that are FCF-positive trade well above intrinsic value.
 
 ---

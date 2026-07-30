@@ -21,7 +21,7 @@
 | Deep-dive data pulls (no ERROR files) | 18 | every deep-band survivor; 0 crashes |
 | Valuations (`--json` + `--ticker`) | 18 | all exit 0 |
 | **Mechanical BUYs** | **0** | none clear the v0.3.0 BUY rule |
-| **BUYs surviving adversarial verification** | **0** |, |
+| **BUYs surviving adversarial verification** | **0** | n/a |
 
 **Gate-2 drops (27 misrecalls, not deep-dived) and why:**
 - Mining/metals **producers** (not machinery makers): DC, NEXA, URG, CHNR, SND, TMC*, PPTA*, CGAU*, SID (steel).

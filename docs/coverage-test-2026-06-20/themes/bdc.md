@@ -20,7 +20,7 @@
 | Deep-band survivors (deep-dived, FULL, no sampling) | 18 | `candidates_bdc_deep.json` |
 | Gate-2 theme members retained | 15 | LLM theme-fit (14 pure_play BDC + 1 partial REFI) |
 | Mechanical BUYs | **0** | BUY rule applied to valuation blocks |
-| Clean BUYs (post-adversarial) | **0** |, |
+| Clean BUYs (post-adversarial) | **0** | n/a |
 
 Deep-dive coverage: **18 / 18** deep-band survivors, **0 errors**, **0 ERROR.json** crashes.
 Valuation produced for all 18 (CICB required a ticker re-resolution to `CION` after yfinance
@@ -130,7 +130,7 @@ n_buy_clean = **0**.
   MoS is None. The BUY rule's separate numeric-MoS clause catches it, but a consumer reading
   `buy_eligible` alone would be misled. Worth a guard that forces `buy_eligible=False` when MoS is
   null.
-- **Empty blurbs** for NMFC, BBDC, GBDC, OTF (FTS returned no business-description snippet) ,
+- **Empty blurbs** for NMFC, BBDC, GBDC, OTF (FTS returned no business-description snippet),
   theme-fit judged from name + known sector; low risk for well-known BDCs.
 
 ---
@@ -156,7 +156,7 @@ undervalued" / NAV-trap profile the skill is designed to refuse to call a BUY.
 
 **Usable: YES.** The run is a clean, correct demonstration of the BDC no-SIC fallback routing
 under test. The fallback let all 16 SIC-less BDCs into the funnel (recall preserved), then the
-v0.3.0 financial-SIC structural guard correctly disqualified every one from the FCF/NAV BUY model ,
+v0.3.0 financial-SIC structural guard correctly disqualified every one from the FCF/NAV BUY model,
 including the four with tempting NAV discounts (PNNT/CICB/RWAY/WHF). The single `buy_eligible=True`
 (GRUSF) is a theme misrecall with negative FCF and is correctly blocked by the numeric-MoS clause.
 **0 clean BUYs is the right answer.** Minor caveats: the CICB ticker-resolution gap and the

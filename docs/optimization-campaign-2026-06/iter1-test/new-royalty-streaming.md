@@ -54,9 +54,9 @@ Ranked output: `reports/smallcap/2026-06-20_royalty-streaming/RANKING.md`.
 | 1 | **INVA** | Innoviva | partial | $1,660M | fcf_cap | **+30.3%** | **true** | **买入 / BUY** |
 | 2 | NRP | Natural Resource Partners | partial | $1,336M | fcf_cap | +36.8% | true (mech.) | 观察 (judgment downgrade) |
 | 3 | DMLP | Dorchester Minerals | pure | $1,206M | fcf_cap | −12.1% | false (`fcf_sustainability_uncertain`) | 观察 |
-| 4 | KRP | Kimbell Royalty Partners | pure | $1,592M | abstain |, | true | 观察 |
-| 5 | CRT | Cross Timbers Royalty Trust | pure | $54M | abstain |, | false (`financial_sic`) | 观察 |
-| 6 to 18 | ELE, GROY, MTA, TMCR, UROY, VOXR (gold/metals royalty); NRT, PBT, SBR, PVL, PRT (oil royalty trusts); MSB (iron-ore trust); VMET (metals royalty) | | pure | $28M,$1,307M | fcf_cap (null FCF) / abstain |, | mixed | 观察 |
+| 4 | KRP | Kimbell Royalty Partners | pure | $1,592M | abstain | n/a | true | 观察 |
+| 5 | CRT | Cross Timbers Royalty Trust | pure | $54M | abstain | n/a | false (`financial_sic`) | 观察 |
+| 6 to 18 | ELE, GROY, MTA, TMCR, UROY, VOXR (gold/metals royalty); NRT, PBT, SBR, PVL, PRT (oil royalty trusts); MSB (iron-ore trust); VMET (metals royalty) | | pure | $28M,$1,307M | fcf_cap (null FCF) / abstain | n/a | mixed | 观察 |
 | 19 | FRPH | FRP Holdings | partial | $455M | nav | ~0% | true | 观察 |
 | 20 | NC | NACCO Industries | partial | $376M | nav | ~0% | true | 观察 |
 | 21 | XOMA | XOMA Royalty | pure | $741M | nav | −94.7% | false (`wrong_entity_suspected`) | 观察 |
@@ -125,7 +125,7 @@ is required. Recorded as a judgment override on the report with full reasoning.
 
 CRT, NRT, PBT, SBR (oil royalty trusts), MSB (iron-ore trust), VMET (metals royalty, SIC 6795),
 KRP (oil&gas mineral LP). These routed to **abstain** via `financial_sic_forced_unsuitable` (or NAV
-uncomputable for the LP). This is the **right** outcome: a royalty trust is a pass-through vehicle ,
+uncomputable for the LP). This is the **right** outcome: a royalty trust is a pass-through vehicle,
 its value is the PV of remaining reserves/streams, not book equity or an FCF-cap perpetuity, and its
 XBRL uses trust-specific concepts (royalty income, distributable income) that `deepdive_data` does not
 map. The ranking shows `$0M revenue/OCF` for these names precisely because the extractor cannot read
@@ -140,7 +140,7 @@ to pretend it can value a trust it cannot read). Ranked on EV multiples where av
   `buy_eligible = false` via **`wrong_entity_suspected`** (NI/revenue ratio 3.1x, absurd because the
   royalty holdco books milestone/royalty income in a way that breaks the heuristic). NAV MoS −94.7%
   (book equity $49M vs $741M mktcap, but book equity badly understates a royalty portfolio's PV).
-  Correct to NOT BUY, though XOMA is a candidate where the NAV path *materially understates* value ,
+  Correct to NOT BUY, though XOMA is a candidate where the NAV path *materially understates* value,
   flagged as a data-quality limitation, not a thesis.
 - **FRPH, NC** (partial: real-estate + mining royalty / coal operator + mineral royalty): `nav` basis,
   NAV MoS ~0% (< 30 threshold) → WATCH. Analyzable, just not cheap enough.
@@ -208,7 +208,7 @@ Clearly labeled T2 analyst context (TrendsMCP, demand/attention only):
   model) but **−66% over the last 3 months**, the spike has faded. Consistent with the "hot theme =
   casino" prior: the gold-royalty narrative had its moment and is cooling, which raises the bar for the
   early-stage gold royalty pure-plays (GROY/MTA/ELE/VOXR) that are still pre-FCF.
-- **"music royalties investment" rising off ~zero** (nascent retail interest, low absolute volume) ,
+- **"music royalties investment" rising off ~zero** (nascent retail interest, low absolute volume),
   a genuinely emerging theme, but with no SEC-listed small-cap pure-play to express it (see §6.6).
 - **"soda ash" search interest flat YoY (+1.4%)**, attention-neutral industrial commodity; does not
   contradict the filing-documented oversupply/price collapse that underpins the NRP downgrade. T2

@@ -39,7 +39,7 @@ KROS, SGMT, ALT, VTVT, CRBP, AMRN, VNDA, LXRX, MNKD, ESPR, RIGL, IOVA, SRPT, GER
 ARDX, VIR, GLUE, MGTX, INBX…), **weight-loss services / consumer** (WW, MED/Medifast, XPOF, LFMD, GDRX),
 **foods** (LWAY, NOMD, MGPI, FTLF, LFVN), **apparel/retail** (CURV, RCKY, DXLG), **non-GLP devices**
 (OM dialysis, CARL spine, MOBI vagus-nerve, AORT cardiac, TNDM/insulin, TCMD), **EMS** (KTCC, KE, NSYS),
-a **battery** maker (ELVA), a restaurant (PZZA) and an **insurer** (ANG-PD). Classic FTS over-recall ,
+a **battery** maker (ELVA), a restaurant (PZZA) and an **insurer** (ANG-PD). Classic FTS over-recall,
 Gate 2 is load-bearing; skipping it would have sent the whole small-cap biopharma sector to deep-dive.
 
 **The crucial theme-discipline call (developer ≠ supplier).** Several names are GLP-1/obesity *plays* but
@@ -69,7 +69,7 @@ MNKD / GRCE / MGNX / KRRO (drug developers delivering their *own* molecules), KT
 | 2 | EMBC | Embecta | pen needles / injection devices (partial) | 观察 WATCH | 50% | $185M | $1,080M | +$95M | +$192M | −4% | 1.23x | **4.69x** | nav | −100% | 2 (MW + fund-decline) |
 | 3 | KRMD | KORU Medical | subcutaneous infusion drug-delivery (partial) | 观察 WATCH | 45% | $179M | $41M | −$3M | +$0M | +22% | 4.15x | n/a | nav | −92.5% | 0 |
 | 4 | LFCR | Lifecore Biomedical | **fully-integrated CDMO, aseptic fill-finish** (pure) | 观察 WATCH | 45% | $208M | $76M | −$18M | +$7M | +772%* | 2.49x | n/a | nav | −100% | 1 (MW) |
-| 5 | STSS | Sharps Technology | syringes / drug-delivery systems (pure) | 观察 WATCH | 35% | $78M | $0.2M | −$282M† | −$11M |, | 332x | n/a | nav | +83.6%† | 0 |
+| 5 | STSS | Sharps Technology | syringes / drug-delivery systems (pure) | 观察 WATCH | 35% | $78M | $0.2M | −$282M† | −$11M | n/a | 332x | n/a | nav | +83.6%† | 0 |
 
 \* LFCR's +772% "revenue growth" is an XBRL artifact of a fiscal-year/segment-reclassification base, not
 real organic growth, read with the `debt_truncation_suspected` and data-quality caveats below.
@@ -133,10 +133,10 @@ businesses. The result is informative, and exposes one real seam between the two
 | Ticker | text customer-concentration flag (`tenk`) | magnitude `concentration_flag` (XBRL) | `top_customer_pct` | `top_program_pct` | net effect |
 |---|---|---|---|---|---|
 | **LFCR** | **True** (10-K risk-factor language) | **null** | null | null | buy_eligible blocked by `debt_truncation_suspected`, NOT by concentration |
-| STSS | False | null | null | null |, |
-| KRMD | False | null | null | null |, |
-| EMBC | False | null | null | null |, |
-| AMPH | False | null | null | null |, |
+| STSS | False | null | null | null | none |
+| KRMD | False | null | null | null | none |
+| EMBC | False | null | null | null | none |
+| AMPH | False | null | null | null | none |
 
 **Finding (the seam).** **LFCR is the canonical few-customer CDMO**, it historically derives a large
 share of revenue from a handful of HA/aesthetic-injectable customers, and its 10-K *risk-factor text*
@@ -290,7 +290,7 @@ loss-makers; **(d)** no silent skips, no crashes, no `ERROR.json`. **Two rough e
 tool change, neither of which produced a wrong rating here:** (1) the **concentration seam** (§4), the
 magnitude-based kill returns null for filers (LFCR) who disclose customer concentration in narrative text
 but not in XBRL segment members, so the text flag and the magnitude flag can disagree silently; a
-`concentration_unquantified` advisory would close it; and (2) the **STSS reason-string** (§6) ,
+`concentration_unquantified` advisory would close it; and (2) the **STSS reason-string** (§6),
 `wrong_entity_suspected` co-firing with `low_revenue_loss_ratio` on a real-but-tiny producer gives the PM
 a slightly misleading "wrong entity" label even though the *decision* (WATCH) is correct. The 0-BUY output
 is the honest, defensible answer for a hot, cooling theme.

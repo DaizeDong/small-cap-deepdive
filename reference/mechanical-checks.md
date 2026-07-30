@@ -56,7 +56,7 @@ This guard is listed separately because it is the single most impactful mechanic
 - The phrase `going concern` AND
 - The phrase `substantial doubt`
 
-both present in the same 10-K filing (full text). No proximity constraint is applied in code ,
+both present in the same 10-K filing (full text). No proximity constraint is applied in code,
 both phrases must appear anywhere in the same document for the flag to fire.
 
 **Why this matters:** Of the original kill-flag signals, going-concern had the highest false-positive rate when measured by raw keyword count. After applying the double-hit rule, false positives dropped from approximately 60% to under 10% in test runs.
@@ -72,7 +72,7 @@ both phrases must appear anywhere in the same document for the flag to fire.
 **Bug (Phase 1 audit finding):** 4 out of 4 companies flagged `has_material_weakness = True`
 in a production audit run were false positives. All four had boilerplate risk-factor language
 such as "our failure to maintain effective internal controls could result in a material weakness"
-, not actual ICFR findings. Agents overturned every one manually, wasting deep-dive time.
+not actual ICFR findings. Agents overturned every one manually, wasting deep-dive time.
 
 **Root cause:** The prior rule fired on the bare phrase `material weakness` anywhere in the 10-K.
 Risk-factor sections routinely describe *hypothetical* weaknesses as a standard disclosure.

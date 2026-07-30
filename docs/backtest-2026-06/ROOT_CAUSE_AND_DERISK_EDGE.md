@@ -14,7 +14,7 @@ backtest + cluster-robust statistics decide. Adversarially reviewed by a second 
   mission).** A point-in-time fundamental **distress rank** concentrates forward-12mo blowups
   (return < −40%) far above base rate: top-quintile **lift 2.56×**, recall 51%, **ticker-cluster
   bootstrap 95% CI on lift = [1.73, 3.00]**, P(lift ≤ 1) = 0.000 over 5,000 ticker resamples,
-  robust across leave-one-year-out folds. This is the "significantly better than random" result ,
+  robust across leave-one-year-out folds. This is the "significantly better than random" result,
   on the metric a de-risk scanner exists for.
 
 ## 1. Root cause: the engine computes a usable signal; the decision layer throws it away

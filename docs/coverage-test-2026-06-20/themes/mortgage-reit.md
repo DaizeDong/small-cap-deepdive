@@ -33,7 +33,7 @@ behaved exactly as the v0.3.0 guards intend.
 | Deep-band candidates | 35 | the 35 with band=deep |
 | **Gate-2 LLM theme-fit (my call)** | **22 pass / 13 misrecall** | 20 pure_play + 2 partial; 13 misrecall (8 banks, 4 insurers, 1 asset-manager) |
 | Deep-dived (deepdive + valuation + report) | 22 | every Gate-2 survivor; **0 ERROR files**, 0 missing |
-| **Clean mechanical BUYs** | **0** |, |
+| **Clean mechanical BUYs** | **0** | n/a |
 
 `finalize_run` reconciliation: `deep-band candidates: 35, reports: 22, gate2-misrecall (resolved): 13, missing: 0`.
 

@@ -16,8 +16,8 @@
 | Stage | Count | Notes |
 |---|---:|---|
 | FTS raw recall | 169 | EDGAR full-text on the 3 keyword phrases (forms 10-K/10-Q/20-F/40-F) |
-|, deep band (<$2.0B) | 67 | market-cap resolved |
-|, watch band ($2.0 to 5.0B) | 10 | theme-fit only, no deep-dive (out of small-cap scope) |
+| - deep band (<$2.0B) | 67 | market-cap resolved |
+| - watch band ($2.0 to 5.0B) | 10 | theme-fit only, no deep-dive (out of small-cap scope) |
 | cheap_pass survivors | 43 | mechanical health screen (going-concern / death-spiral / ICFR / concentration) |
 | SIC gate (Gate 1) | 43 | keep=12, review=31, **no drops** (review forwarded to LLM gate) |
 | **Deep band into theme-fit** | **36** | the candidates that are small-cap AND survived cheap_pass |
@@ -141,7 +141,7 @@ under-valued industrial beneficiary right now. Every operator is either (a) pric
 value, (b) carrying a data-integrity or value-trap flag, or (c) carrying a cheap_pass kill-flag.
 
 Spot-check of the "closest to interesting" names (adversarial, for the record):
-- **CBRL** (buy_eligible, but MoS −55%): genuinely overvalued on normalized FCF, not an artifact ,
+- **CBRL** (buy_eligible, but MoS −55%): genuinely overvalued on normalized FCF, not an artifact,
   Cracker Barrel's earnings are depressed mid-turnaround while the market caps a recovery. Correct AVOID-of-BUY.
 - **BH** (Biglari): the `financial_sic_forced_unsuitable` + `insurance_concepts_present` gate is the
   *correct* call, BH consolidates a P&C insurer, so an FCF-cap restaurant valuation is structurally

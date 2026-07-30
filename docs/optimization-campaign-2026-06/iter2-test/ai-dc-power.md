@@ -135,7 +135,7 @@ guards without a single false positive on this fast-growth-heavy cohort. **Stres
 - **`material_weakness` (ICFR) fired on TGEN and LTRX**, both correctly carried `killflag_count: 1`
   and are capped (Dim 1 ≤ 2). TGEN combines MW with a 0.9-yr cash runway; LTRX has MW plus declining
   revenue (−23%). Genuine red flags, not artifacts.
-- **`financial_sic` forced-unsuitable: did NOT fire** on any of the 8 (none is a bank/insurer by SIC ,
+- **`financial_sic` forced-unsuitable: did NOT fire** on any of the 8 (none is a bank/insurer by SIC,
   Gate 2 already removed the ~40 banks and ~10 insurers that the financial-SIC guard is the backstop for).
   The guard's silence here is correct; its work was done upstream by Gate 2.
 - **`peak_contamination_flag` / `fundamental_decline_flag`: did NOT fire** (section 4), the desired result.
@@ -193,7 +193,7 @@ deterministic MoS / kill-flag / `buy_eligible` layer with the market-intel feed 
   near-zero base. TGEN pairs a *material weakness* with a 0.9-yr runway and negative OCF. Neither is
   investable regardless of the theme tailwind.
 
-**Process verdict on the skill (iter2):** the run is clean and the new machinery behaved correctly ,
+**Process verdict on the skill (iter2):** the run is clean and the new machinery behaved correctly,
 the V-shape veto added zero false positives on a deliberately fast-growth-heavy cohort (the explicit
 stress target), the `low_revenue_loss_ratio` label correctly re-cased HYLN instead of the old
 "wrong entity" misfire, the EBITDA cascade refused to fabricate multiples for loss-makers, and the

@@ -58,7 +58,7 @@ Funnel object: `{raw: 429, deepdived: 41, survivors: 37}`.
 |---|---|---|
 | **nav** | 38 | 37 banks + CVU (asset-heavy aerospace). Financial-SIC → `fcf_cap_model_unsuitable=True` → routed to NAV. |
 | **fcf_cap** | 3 | ICCC, LGIH, SMID, the 3 non-financial-SIC names (SIC captured as None or non-60xx) |
-| abstain | 0 |, |
+| abstain | 0 | n/a |
 
 `buy_ineligible_reasons` frequency across the 41 valuations:
 

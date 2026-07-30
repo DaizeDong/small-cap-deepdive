@@ -166,7 +166,7 @@ WATCH thesis for a human, not a filing-derived MoS BUY.
 
 ## 4. Code-paths exercised
 
-- SIC reverse-recall floor: present in pipeline but **no dedicated SIC floor for this theme** ,
+- SIC reverse-recall floor: present in pipeline but **no dedicated SIC floor for this theme**,
   the 8000-block is in `hard_exclude`, and `sic_classify` tri-state keep/review (no drop).
 - Mktcap fallback chain (SEC shares×price when yfinance null) + four-band tagging (deep 133 /
   unknown 207 / watch 21 / large 40).
