@@ -9,7 +9,8 @@ instead of erroring loudly). PII is NEVER echoed — only presence / shape is re
 Discovery order (config-spec E2):
   1. $SMALL_CAP_DEEPDIVE_CONFIG_DIR (or $SMALL_CAP_DEEPDIVE_CONFIG) -> <dir>/config.json
   2. ~/.small-cap-deepdive-config/config.json   3. ~/.config/small-cap-deepdive-config/config.json
-  4. reference/config.json (in-repo legacy/default)
+  4. nothing found -> NOT INITIALIZED. There is no in-repo step: a fallback into the repo is
+     not a convenience, it IS the leak (see tools/datadir.py).
 
 Usage:
   python scripts/verify_config.py [--config-dir <dir>]
@@ -37,8 +38,31 @@ _NUMERIC = {
 }
 _STR = ("output_dir", "python_cmd", "insider_source")
 
+# Same shape as tools/datadir.py's DataDirNotInitialized text, and byte-identical in intent to
+# tools/_common.py:CONFIG_SETUP_HINT. This script is stdlib-only and does not import the tools
+# package, so the text is restated rather than shared.
+_SETUP_HINT = (
+    "small-cap-deepdive has no config.json outside this repo, so it is UNINITIALIZED.\n"
+    "That is the correct state for a freshly cloned public skill. Point it at your own:\n"
+    "    mkdir -p ~/.small-cap-deepdive-config\n"
+    "    cp reference/config.example.json ~/.small-cap-deepdive-config/config.json\n"
+    "    (or set SMALL_CAP_DEEPDIVE_CONFIG_DIR to a dir OUTSIDE this repo)\n"
+    "Then set sec_user_agent (your real name + email) in that file.\n"
+    "There is deliberately NO in-repo fallback: reference/config.json was the documented\n"
+    "'legacy fallback', and a real SEC contact address ended up committed in it. A fallback\n"
+    "into the repo is not a convenience, it IS the leak."
+)
+_NOT_INITIALIZED = "NOT INITIALIZED (no config.json outside the repo)"
+
 
 def discover(override):
+    """Return (config.json path, how). The path is None when the tool is UNINITIALIZED.
+
+    The old final step returned `reference/config.json` and called it the "in-repo default", so a
+    fresh clone reported a phantom, gitignored, in-repo path as its config location, and the
+    obvious next move was to create one, i.e. to put an EDGAR identity inside a public repo. It
+    now reports not-initialized instead, the way tools/datadir.py:resolve_data_dir() returns None.
+    """
     if override:
         p = Path(os.path.expanduser(override)) / "config.json"
         return p, "explicit (--config-dir)"
@@ -53,7 +77,7 @@ def discover(override):
         p = d / "config.json"
         if p.exists():
             return p, "default:%s" % d
-    return (_REF / "config.json"), "in-repo default (reference/config.json)"
+    return None, _NOT_INITIALIZED
 
 
 def main():
@@ -69,11 +93,14 @@ def main():
     cfg_path, how = discover(a.config_dir)
     print("Config doctor for small-cap-deepdive")
     print("  discovery -> %s" % how)
-    print("  config.json: %s%s" % (cfg_path, "" if cfg_path.exists() else "  (NOT FOUND)"))
+    if cfg_path is None:
+        print("  config.json: (none)")
+    else:
+        print("  config.json: %s%s" % (cfg_path, "" if cfg_path.exists() else "  (NOT FOUND)"))
 
     cfg = dict(defaults)
     overlay = {}
-    if cfg_path.exists():
+    if cfg_path is not None and cfg_path.exists():
         try:
             overlay = json.loads(cfg_path.read_text(encoding="utf-8"))
             cfg.update(overlay)
@@ -91,6 +118,12 @@ def main():
 
     def check(name, ok, detail="", level=FAIL):
         results.append((name, ok, detail, level))
+
+    # --- initialization: the tool is uninitialized until a config.json exists OUTSIDE the repo.
+    # This used to resolve to a phantom in-repo reference/config.json and the doctor happily went on
+    # validating it. Not finding one is a real, nameable state, not a cue to look inside the repo. ---
+    check("config.json found outside the repo", cfg_path is not None,
+          "uninitialized, see the setup block below")
 
     # --- schema_version: structural contract tag (config-spec E1). Soft, defaults supply it. ---
     sv = cfg.get("schema_version")
@@ -140,14 +173,18 @@ def main():
     check(".gitignore blocks config.json + *.env + secrets/",
           all(s in gi_txt for s in ("config.json", "*.env", "secrets/")),
           "harden .gitignore (config-spec E6)")
-    # if the active config.json sits inside the repo, confirm it is the gitignored in-repo one
-    try:
-        inside = _REPO in cfg_path.resolve().parents
-    except Exception:
-        inside = False
-    if inside and cfg_path.exists():
-        check("in-repo config.json is gitignored (not committed)", "config.json" in gi_txt,
-              "config.json not in .gitignore")
+    # An in-repo config.json is now a FAIL, not a "is it at least gitignored?" question. Gitignore
+    # is advisory (`git add -f` walks through it), and a real EDGAR identity inside a public
+    # working tree is a leak waiting for one careless add. Only reachable via --config-dir now.
+    inside = False
+    if cfg_path is not None:
+        try:
+            inside = _REPO in cfg_path.resolve().parents
+        except Exception:
+            inside = False
+    if inside:
+        check("config.json lives OUTSIDE the repo", False,
+              "%s is inside the skill repo, move it to ~/.small-cap-deepdive-config/" % cfg_path)
 
     # report
     n_fail = sum(1 for _, ok, _, lvl in results if not ok and lvl == FAIL)
@@ -160,8 +197,11 @@ def main():
         print(line)
     print("-" * 64)
     if n_fail:
+        if cfg_path is None:
+            print(_SETUP_HINT)
+            print("-" * 64)
         print("NOT READY: %d check(s) failed. Fix the above, then re-run verify_config.py." % n_fail)
-        print("  Tip: python scripts/init_config.py   # stamp a fresh config.json from the template")
+        print("  Tip: python scripts/init_config.py   # stamp a fresh config.json outside the repo")
         return 1
     if n_warn:
         # Structure conforms (hot-swappable) but the runtime PII is not yet set: name it loudly,

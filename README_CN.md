@@ -97,16 +97,20 @@ git clone https://github.com/DaizeDong/small-cap-deepdive.git ~/.claude/plugins/
 ```bash
 cd ~/.claude/plugins/small-cap-deepdive
 pip install -r tools/requirements.txt
-cp reference/config.example.json reference/config.json
+mkdir -p ~/.small-cap-deepdive-config
+cp reference/config.example.json ~/.small-cap-deepdive-config/config.json
 ```
 
-打开 `config.json`，将 `"sec_user_agent"` 设为你的真实姓名和邮箱：
+打开 `~/.small-cap-deepdive-config/config.json`，将 `"sec_user_agent"` 设为你的真实姓名和邮箱：
 
 ```json
 "sec_user_agent": "张三 zhangsan@example.com"
 ```
 
 这是唯一必填字段。EDGAR 要求每次请求带有效 `User-Agent` 头（SEC 政策），缺失或使用假值会导致 `efts.sec.gov` 返回 403。
+
+注意 config 位于**仓库之外**，这是刻意的：`sec_user_agent` 是你的真实姓名和邮箱，而这是一个公开仓库。
+仓内已不存在任何 config 位置，工具也会拒绝在仓内创建。
 
 若不走 `/plugin install`，也可建立 junction/symlink 部署为 Claude Code skill：
 
@@ -127,18 +131,21 @@ ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 
 - **挂载（发现顺序）：** `$SMALL_CAP_DEEPDIVE_CONFIG_DIR/config.json` → `$SMALL_CAP_DEEPDIVE_CONFIG/config.json`
   → `~/.small-cap-deepdive-config/config.json` → `~/.config/small-cap-deepdive-config/config.json` →
-  仓内 `reference/config.json`（零配置默认）。命中第一个即用；有效配置 = `config.example.json` 默认值
+  全都没有则报 **NOT INITIALIZED（未初始化）**。命中第一个即用；有效配置 = `config.example.json` 默认值
   ◁ 你的 `config.json` ◁ `SMALLCAP_*` 环境变量覆盖。
+  **发现链上没有任何一步落在仓内。** 它过去以仓内 `reference/config.json` 收尾，真实的 EDGAR 联系
+  地址就是这样被提交进公开仓的。回落到仓内不是便利，它就是泄漏。
 - **首次配置：**
   ```bash
-  python scripts/init_config.py      # 从示例模板生成 config.json（确定性）
-  # 编辑 config.json：把 "sec_user_agent" 设为你的真实姓名+邮箱（唯一硬性必填）
+  python scripts/init_config.py      # 在 ~/.small-cap-deepdive-config 生成 config.json（确定性）
+  # 编辑该 config.json：把 "sec_user_agent" 设为你的真实姓名+邮箱（唯一硬性必填）
   python scripts/verify_config.py    # doctor：逐字段 PASS/FAIL，明确报缺什么
   ```
 - **切换 config（即插即用）：** 把环境变量指向另一个 config 目录即可, config 自包含（`output_dir`
   仓内相对路径、无硬编码绝对路径）：`export SMALL_CAP_DEEPDIVE_CONFIG_DIR=~/configs/A` ↔ `~/configs/B`。
-- **密钥 / PII：** Mode B, `config.json`、`*.env`、`secrets/*` 均已 gitignore，永不入库。把
-  `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` 指向**仓库之外**的目录即可实现 config 仓与 skill 仓完全分离。
+- **密钥 / PII：** Mode B, 你的 `config.json` 位于仓库之外；`config.json`、`*.env`、`secrets/*` 同时
+  也在 gitignore 里作为兜底。`init_config.py` 拒绝往仓内写，`verify_config.py` 对仓内的
+  `--config-dir` 直接判 FAIL。
 
 ---
 
