@@ -132,11 +132,11 @@ These are empirical base rates to use when anchoring Section 0 of the deep-dive 
 | Reference class | Zero / wipeout rate | Mediocre outcome rate | Reasonable return rate | Source / Notes |
 |---|---|---|---|---|
 | Micro-cap universe (all, 5-yr) | ~40 to 50% fail, delist, or go to zero | ~35% flat / minimal return | ~15 to 25% meaningful return | Shumway (1997) + Kailash 35-yr study; delisting bias understates failure rate in standard databases |
-| Lowest-quality-quintile small-cap growth | ~70% underperform Russell 2000 over 5 years |, |, | Kailash Capital research on small-cap quality |
-| De-SPAC companies (2 to 3 yr post-merger) | Median return: -29% from SPAC price |, |, | Klausner, Ohlrogge & Ruan (2022) |
-| Going-concern finding → bankruptcy correlation | ~85% of companies with going-concern audit opinion file for bankruptcy within 3 years |, |, | Standard audit research |
-| Companies with ≥3 kill-flags (cluster) | Near-certain value destruction |, |, | Empirical from real run: BNAI, CXApp, Fusemachines all had ≥3 kill-flags and subsequently collapsed |
-| Pre-revenue micro-cap with AI/theme positioning (2025 to 2026) | High; exact rate unclear but theme ETF data suggests significant premium has been paid by retail |, |, | Ben-David et al. (2023) thematic ETF study |
+| Lowest-quality-quintile small-cap growth | ~70% underperform Russell 2000 over 5 years | n/a | n/a | Kailash Capital research on small-cap quality |
+| De-SPAC companies (2 to 3 yr post-merger) | Median return: -29% from SPAC price | n/a | n/a | Klausner, Ohlrogge & Ruan (2022) |
+| Going-concern finding → bankruptcy correlation | ~85% of companies with going-concern audit opinion file for bankruptcy within 3 years | n/a | n/a | Standard audit research |
+| Companies with ≥3 kill-flags (cluster) | Near-certain value destruction | n/a | n/a | Empirical from real run: BNAI, CXApp, Fusemachines all had ≥3 kill-flags and subsequently collapsed |
+| Pre-revenue micro-cap with AI/theme positioning (2025 to 2026) | High; exact rate unclear but theme ETF data suggests significant premium has been paid by retail | n/a | n/a | Ben-David et al. (2023) thematic ETF study |
 
 **Usage instruction:** Pick the most specific applicable reference class. Do not use "micro-cap universe (all)" for a company that clearly belongs to the "going-concern" or "de-SPAC" class, those have worse base rates and the specific class must be used.
 

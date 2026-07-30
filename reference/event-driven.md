@@ -82,7 +82,7 @@ in the small/micro-cap band where index-fund pressure is largest relative to flo
 
 ### Parsing Notes
 
-`discover_events.py --spinoffs` uses the EDGAR EFTS response with no keyword query ,
+`discover_events.py --spinoffs` uses the EDGAR EFTS response with no keyword query,
 only the `forms=10-12B` filter.  This is structurally high-precision by definition.
 
 EFTS `display_names` entries have two variants:
@@ -137,7 +137,7 @@ An insider purchasing shares at market price with personal capital is qualitativ
 different from any other ownership increase:
 - It is **voluntarily funded** (unlike RSU vesting or option exercise).
 - It signals that the insider believes the current market price is **below intrinsic value**.
-- When **multiple** insiders buy within a short window, the signal strength compounds ,
+- When **multiple** insiders buy within a short window, the signal strength compounds,
   the probability that all of them are miscalibrated simultaneously is lower.
 
 The Form 4 filing requirement ensures **T1-sourced, audited evidence** of the purchase.
