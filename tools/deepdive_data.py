@@ -896,7 +896,9 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         "cross_source_detail": _cs_detail,
         # de-risk: CORE-4 PIT distress rank (OOS-validated; _deepdive_flags.distress_core4).
         # distress_kill (score>=3) is counted as a kill-flag -> AVOID. The single validated
-        # predictive de-risk signal in the skill (top-quintile blowup lift 2.56x, cluster CI [1.73,3.00]).
+        # predictive de-risk signal in the skill. Numbers by cutoff (never mix them): shipped
+        # score>=3 cutoff = precision 35.4% vs 13.3% base (lift 2.65x) at recall 62%; per-year
+        # top-quintile cutoff = lift 2.56x at recall 51%, cluster CI [1.73,3.00].
         "distress_score": _distress["distress_score"],
         "distress_flags": _distress["distress_flags"],
         "distress_kill": _distress["distress_kill"],

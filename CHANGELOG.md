@@ -38,16 +38,21 @@ A 25-cell survivorship-safe point-in-time backtest study (5 themes × 5 as-of da
   implies it can. Per-year edge: +10.5pt (2020) … −1.1pt (2024).
 - **Two `buy_eligible` gates are anti-predictive noise.** `cross_source_mismatch` (fires 66%,
   blowup lift 0.86×) and `debt_truncation_suspected` (fires 48%, lift 0.67×) carry no downside
-  signal and shrink eligibility on healthy names. (Demotion to advisory: tracked for v0.3.4.)
+  signal and shrink eligibility on healthy names. (Demotion to advisory is **not** shipped here;
+  both still gate `buy_eligible`. It is planned for v0.3.4, see the v0.3.4 section of `ROADMAP.md`.)
 - **A real, OOS, cluster-robust de-risk edge** (the tool's actual mission, downside avoidance).
 
 ### Added
 - **CORE-4 PIT distress kill-flag** (`_deepdive_flags.distress_core4`): `distress_score` =
   count of `neg_ocf`, `neg_margin`, `accum_deficit`, `low_altman` (Altman Z″ < 1.1).
   `distress_kill = score ≥ 3` is counted in `_killflag_count`, so a distressed name routes to
-  **AVOID** in both the live rating and the backtest grader, regardless of cheapness. OOS-validated:
-  top-quintile blowup lift 2.56×, recall 62%, ticker-cluster bootstrap 95% CI [1.73, 3.00],
-  P(lift≤1)=0; sharp cliff (score 0 to 2 ≈5 to 9% blowup, 3 = 25%, 4 = 41.7%). Banks/insurers out of
+  **AVOID** in both the live rating and the backtest grader, regardless of cheapness. OOS-validated
+  on a 25-cell survivorship-safe PIT panel (non-financial, n=412, 55 forward-12mo blowups below
+  −40%, base rate 13.3%). **Two cutoffs were measured and each number belongs to exactly one of
+  them:** at the shipped `score ≥ 3` kill cutoff, blowup precision 35.4% vs the 13.3% base
+  (lift 2.65×) at recall 62%; at the per-year top-quintile cutoff, lift 2.56× at recall 51%, with a
+  ticker-cluster bootstrap 95% CI on that top-quintile lift of [1.73, 3.00] and P(lift≤1)=0. Sharp
+  cliff (score 0 to 2 ≈5 to 9% blowup, 3 = 25%, 4 = 41.7%). Banks/insurers out of
   scope. `deepdive_data` now also pulls retained earnings + current assets/liabilities.
 - Reproducible study artifacts under `docs/backtest-2026-06/` (PIT feature pullers, cluster-robust
   validator), adversarially reviewed by a second model (codex); caveats honored in the write-up.
@@ -267,6 +272,17 @@ committed; none mature until 2027-06, correct state is "calibration unknown."
 
 **P7, Bug fixes**
 
+- **Run-3 audit P1, fiscal-year≠calendar-year revenue anchors** (`tools/_deepdive_concepts.py`,
+  `tools/deepdive_data.py`). The annual-fact filter used a 350-380-day span window, which mis-read
+  filers whose fiscal year is not the calendar year (BUKS revenue stuck at FY2018 $48M vs real
+  ~$84M; WLFC unit leakage 730 vs real $569M; LNN $659M vs $676M). The filter now keys on the XBRL
+  fiscal-period tags (`fp == "FY"` AND `form` starts with `10-K`), with the day-span test kept only
+  as a fallback for untagged facts, on both the live and the point-in-time path. Adds BUKS and WLFC
+  regression selftests (the prior selftest covered only EGAN, which passed while these failed) and
+  the shares fallback chain `us-gaap:CommonStockSharesOutstanding` →
+  `dei:EntityCommonStockSharesOutstanding` → diluted WANSO. Two sub-items of the original P1 remain
+  open and are tracked in `ROADMAP.md`: recomputing `fy` from `end`, and passing discover's
+  `avg_dollar_vol` through as `liquidity_adv`.
 - C1: `skills/small-cap-deepdive/reference/config.json` untracked from git; setup
   instructions now clearly state a fresh clone has no config.json and directs user
   to copy `config.example.json`.

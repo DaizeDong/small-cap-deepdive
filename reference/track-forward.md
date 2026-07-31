@@ -21,12 +21,23 @@ This ambiguity cannot be resolved by narrative argument, by examining the rubric
 consistency, or by debating the efficient market hypothesis. **It can only be resolved by tracking
 verdicts forward against realized returns and computing a calibration measure.**
 
-The Brier score + calibration table is the instrument. Without a populated `metrics/verdicts.jsonl`,
-the skill is running blind on its own judgment quality.
+The Brier score + calibration table is the instrument. Without a populated verdict log the skill is
+running blind on its own judgment quality.
+
+**Where the verdict log lives.** It is real-run output, so it is written **outside this repo**, never
+into it. `tools/datadir.py:resolve_data_dir("small-cap-deepdive")` resolves the private store in
+order: `$SMALL_CAP_DEEPDIVE_DATA_DIR` → `~/.small-cap-deepdive-config/data/` →
+`~/.small-cap-deepdive-data/` → nothing, which raises `DataDirNotInitialized` with setup
+instructions. The two files are `<private data dir>/metrics/verdicts.jsonl` and
+`<private data dir>/metrics/scorecard.md`. There is deliberately **no in-repo fallback**: a
+git-tracked `metrics/verdicts.jsonl` is how hundreds of real positions (ticker, entry date, entry
+price) once accumulated in a public repo. The repo's own `metrics/` holds only the schema files
+`verdicts.jsonl.example` and `scorecard.md.example`. Every bare `metrics/...` path below is
+shorthand for the private path above.
 
 ---
 
-## `metrics/verdicts.jsonl` Schema
+## `verdicts.jsonl` Schema
 
 Append-only. One JSON object per line. Fields:
 
@@ -312,8 +323,10 @@ Phase 6 is that it converts uncertainty from "permanent / unresolvable" to
 ## Cross-References
 
 - **`tools/track_forward.py`**, implementation (record, score, scorecard, status, selftest)
-- **`metrics/verdicts.jsonl`**, the append-only verdict log
-- **`metrics/scorecard.md`**, generated calibration report
+- **`<private data dir>/metrics/verdicts.jsonl`**, the append-only verdict log (out-of-repo; schema
+  in the repo at `metrics/verdicts.jsonl.example`)
+- **`<private data dir>/metrics/scorecard.md`**, generated calibration report (out-of-repo; schema
+  in the repo at `metrics/scorecard.md.example`)
 - **`reference/cognitive-priors.md`**, epistemic priors that this calibration loop is designed to test
 - **`reference/judgment-rubric.md`**, the rubric whose outputs populate verdicts.jsonl
 - **`SKILL.md §Track-forward`**, operational instructions for running the loop

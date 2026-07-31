@@ -53,7 +53,7 @@ Only `sec_user_agent` is required at runtime; every other field has a default in
 | `watch_band_max` | int | no | `5000000000` | Watch band ceiling (USD). |
 | `micro_cap_max` | int | no | `500000000` | Micro-cap tag threshold (USD). |
 | `min_dollar_vol` | int | no | `100000` | Min avg daily dollar volume liquidity floor. |
-| `sic_hard_exclude` | string[] | no | (regulated/biotech/financial SIC list) | Global SIC kill-list. Per-theme override via `sic_exclusion_blocks` (SKILL.md §Gate 1). |
+| `sic_hard_exclude` | string[] | no | (regulated/biotech/financial SIC list) | SIC prefixes that put a company in Gate 1's **`review` tier**, not a kill-list: a match still passes to Gate 2 (`filter_by_sic.sic_classify`; SKILL.md §Two-Stage Precision Gate). **Global, with no per-theme key.** To run a theme against a different list, point `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` at a second config dir (see "Switching between two configs"). |
 | `python_cmd` | string | no | `python` | Interpreter used for spawned sub-tools. |
 | `insider_source` | string | no | `openinsider` | `openinsider` (default, tested) or `edgar` (roadmap stub). |
 | `wacc` | float | no | `0.10` | Reverse-DCF discount rate. |

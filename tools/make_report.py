@@ -92,7 +92,10 @@ def _killflag_count(deep: dict) -> int:
     if der.get("concentration_flag") == "kill":
         kf += 1
     # de-risk: CORE-4 distress (score>=3) is a kill-flag. OOS-validated blowup predictor
-    # (lift 2.65x, recall 62%, cluster CI [1.73,3.00]); see docs/backtest-2026-06/.
+    # (at the shipped score>=3 cutoff: precision 35.4% vs 13.3% base = lift 2.65x, recall 62%;
+    # the separate per-year top-quintile cutoff: lift 2.56x, recall 51%, cluster CI [1.73,3.00]).
+    # See docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md; never mix a lift and a recall
+    # across the two cutoffs.
     if der.get("distress_kill"):
         kf += 1
     return kf
