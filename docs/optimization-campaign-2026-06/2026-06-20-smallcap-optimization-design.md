@@ -1,6 +1,8 @@
 # Iteration 1 Design, small-cap-deepdive core-capability optimization
 
-> Derived from a 10-lens independent reflection audit (synthesis: `.git/sdd/reflection/_synthesis.md`).
+> Derived from a 10-lens independent reflection audit. The audit's synthesis note was local build
+> scratch, never tracked and not reproducible from a clone, so this document is the record: every
+> finding it carries forward is restated here.
 > Every claim is code/ticker/number-verified. This is the approval artifact + implementation plan for
 > iteration 1 of the optimization campaign.
 

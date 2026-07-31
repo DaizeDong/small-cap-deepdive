@@ -22,7 +22,7 @@ brainstorming skill 硬性要求:实施前需呈现设计并获批准。这是�
 ### 迭代 1
 | 阶段 | 状态 | 产出 |
 |---|---|---|
-| 1 Reflect | ✅ | 10 透镜+综合(1.7M tok),notes `.git/sdd/reflection/`;**核心发现:立论未被度量,MoS≡reverse_dcf,19/19 BUY 按构造定价衰退=价值陷阱生成器** |
+| 1 Reflect | ✅ | 10 透镜+综合(1.7M tok),透镜 notes 属本地构建临时文件,未入库、克隆不可复现,不作为可引用来源;**核心发现:立论未被度量,MoS≡reverse_dcf,19/19 BUY 按构造定价衰退=价值陷阱生成器** |
 | 2 Design+门 | 🔄 审批中 | 设计 `docs/optimization-campaign-2026-06/2026-06-20-smallcap-optimization-design.md`;P1-P14 philosophy-safe + 3 个 gated 决策待批 |
 | 3 Implement | ✅ | 工作流 ws8ka7t8b(11 agent,phased+contract+review)。16 文件+2 新工具。**review 抓到真 bug:P6 轨迹否决在真实 SIGA 失效(原始系列被 9 月 stub+错标 FY 污染→全时 slope +1);两 reviewer 分歧,主控裁定后修复(annualize+trailing-5)+ 加真实 SIGA 回归 crystal。** 全 selftest PASS;SIGA 现 slope=-1/decline_flag=True/concentration=kill 双重 block;VSNT 大盘 block;MGPI 不误杀。 |
 | 4 Test | ✅ | 工作流 wozfowakg。旧 before/after + 新主题。**P5 召回验证:regbank 0→271、shipping 12→219(静默丢已修);SIGA 双重 block;假阳队列全 buy_eligible=false;royalty→1 干净 BUY(INVA)+诚实 abstain 尾;uranium→正确 0-BUY。** 4/6 新主题完成(ai-dc-power/glp1/defense-drones/title-insurance 因 agent 异步执行 run_theme 未完成→并入迭代2 同步重跑)|

@@ -37,7 +37,7 @@ tail of robustness/hygiene fixes.
 
 ## 3. Per-iteration log
 
-- **Reflection** (workflow `wtndselbs`, 10 lenses + synth, 1.7M tok). Diagnosis above. Notes in `.git/sdd/reflection/`.
+- **Reflection** (workflow `wtndselbs`, 10 lenses + synth, 1.7M tok). Diagnosis above. The lens notes were local build scratch under `.git/`, which is never cloned and was never tracked, so they are **not a citable source**; the diagnosis above and the design doc below are the record.
 - **Design + the one human gate** (`acf16d9`). Approved: operationalize thesis; build firewalled side-channel; freeze catalyst MoS-waiver.
 - **Iter 1, trust spine** (`e0f0039`; test `0877b99`). P1 buy_eligible · P2 OCF-proxy · P3 concentration · P4 finalize_run/verdicts · P5 mktcap (recall 0→271 regbank, 12→219 shipping) · P6 trajectory veto · P9 EBIT cascade · P12 calibration · P13 honest composite · P11-freeze. **Review caught & fixed a P6 contaminated-series bug the unit test masked.** Verdict: usable for core mission.
 - **Iter 2, harden core** (`2599d66`; test `c88fb60`). P-A `peak_contamination_flag` (V-shape veto, independent of slope), kills NRP by machine, not judgment; P-B label fix; P-C…H hygiene. **0 false fires across 22 fast-growth names** (ESOA spared by the NI<0 guard). Verdict: defensible real-world-usable.
@@ -87,7 +87,7 @@ controller adjudicated a genuine reviewer disagreement:
 
 ## 8. Artifacts
 - Design + gate: `docs/optimization-campaign-2026-06/2026-06-20-smallcap-optimization-design.md`
-- Reflection notes: `.git/sdd/reflection/` (10 lenses + `_synthesis.md`)
+- Reflection notes: local build scratch only, never tracked and not reproducible from a clone. Everything load-bearing from them was carried into the design doc above.
 - Test reports: `docs/optimization-campaign-2026-06/iter1-test/` , `iter2-test/`
 - Progress tracker: `docs/optimization-campaign-2026-06/2026-06-20-optimization-campaign-progress.md`
 - Per-run batches (local, gitignored): `reports/smallcap/2026-06-*/` each with a `_run.json` manifest (skill commit + config) for cross-version comparison.

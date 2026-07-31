@@ -57,18 +57,22 @@ disconfirmation, and ranks surviving candidates. What it does, step by step:
    with a `_run.json` manifest (skill git commit + valuation config snapshot) so runs stay
    comparable across versions. `export SMALLCAP_RUN=$(python tools/new_run.py --label <theme>)`.
 
-1. **Enumerates the SEC universe** for a theme using EDGAR full-text search (FTS), UNIONed with a
-   **SIC reverse-recall floor** (`discover.py` + `filter_by_sic.py`), for themes with a dedicated SIC
-   code, every registrant in that SIC is enumerated so low-keyword-density true members aren't missed.
+1. **Enumerates the SEC universe** for a theme using EDGAR full-text search (FTS), optionally
+   UNIONed with a **SIC reverse-recall floor** (`discover.py --sic-reverse`, which calls into
+   `filter_by_sic.py`): for a theme with a dedicated SIC code, every registrant in that SIC is
+   enumerated so low-keyword-density true members are not missed. The floor is opt-in per theme.
    Market cap is resolved with a fallback chain (SEC shares×price when yfinance is null); names that
    still can't be priced flow through as `band="unknown"` instead of being silently dropped.
 
-2. **Two-stage precision gate (mandatory).** Gate 1 (`filter_by_sic.py`): coarse SIC-code
-   exclusion of definitively off-theme sectors. Gate 2 (LLM): reads each company's 10-K
-   business description and classifies it as `pure_play / partial / misrecall`. The
-   canonical failure mode without this gate: keyword `refractory` for a railcar insulation
-   theme swept the entire oncology biotech sector. Zero railcar companies. Recall is *measured*
-   via `recall@gold` against hand-built true-member lists, not assumed.
+2. **Two-stage precision gate (mandatory).** Gate 1 (`filter_by_sic.sic_classify`, applied inline by
+   `run_theme.py`): a coarse SIC **review tier**, not an exclusion. A hard-excluded SIC tags the
+   company `sic_tier="review"` and it still passes to Gate 2; Gate 1 never drops anything. Gate 2
+   (LLM) reads each company's 10-K business description and classifies it `pure_play / partial /
+   misrecall`, and dropping `misrecall` is the only theme-fit removal in the pipeline. The canonical
+   failure mode without Gate 2: keyword `refractory` for a railcar insulation theme swept the entire
+   oncology biotech sector, zero railcar companies, and Gate 1 forwarded every one of them because a
+   pharma SIC only earns `review`. Recall is *measured* via `recall@gold` against hand-built
+   true-member lists, not assumed.
 
 3. **Mechanical de-risk** (`cheap_pass.py`): hard kill-flags from SEC filings, going-concern
    auditor paragraphs, death-spiral convertibles, ICFR material weaknesses, magnitude-based
@@ -97,7 +101,9 @@ disconfirmation, and ranks surviving candidates. What it does, step by step:
    reports with a data-quality **trust banner** under each rating, an auto-emitted verdict fed into the
    track-forward loop, and `RANKING.md` with funnel counts, kill-flag eliminations, and coverage gaps.
 
-8. **Track-forward calibration** (`track_forward.py`): verdicts logged to `metrics/verdicts.jsonl`,
+8. **Track-forward calibration** (`track_forward.py`): verdicts logged to
+   `<private data dir>/metrics/verdicts.jsonl` (resolved **outside** this repo by `tools/datadir.py`,
+   never into it; the repo carries only `metrics/verdicts.jsonl.example` as the schema),
    Brier-scored vs IWM at maturity, with de-risk-native metrics (blowup-avoidance / downside-capture).
 
 9. **Diagnostic signals, firewalled** (`signals.py`): a strictly diagnostic side-channel that
@@ -127,9 +133,13 @@ horizon) tested the skill's claims on held-out data. Honest result, write-up in
   tool **cannot pick market-beaters and does not claim to**, this is *why* it never issues a "buy."
 - **A real downside-avoidance edge** (its actual mission). The OOS-validated **CORE-4 distress
   kill-flag** (operating-cash-flow loss, operating loss, accumulated deficit, Altman Z″ < 1.1)
-  routes distressed names to AVOID with top-quintile blowup **lift 2.56×**, recall 62%, and a
-  ticker-cluster bootstrap 95% CI on the lift of **[1.73, 3.00]** (P(lift≤1)=0). A 0-BUY scan is
-  still valid; the value is in the landmines you *don't* step on.
+  routes distressed names to AVOID. Two cutoffs are measured on the same panel and each number
+  belongs to exactly one of them, so quote them together or not at all: at the **shipped
+  `distress_score >= 3` kill cutoff**, blowup precision is 35.4% against a 13.3% base
+  (**lift 2.65×**) at **recall 62%**; at the **per-year top-quintile cutoff**, lift is **2.56×** at
+  **recall 51%**, with a ticker-cluster bootstrap 95% CI on that top-quintile lift of
+  **[1.73, 3.00]** (P(lift≤1)=0). A 0-BUY scan is still valid; the value is in the landmines you
+  *don't* step on.
 
 ---
 
@@ -322,7 +332,7 @@ bundled data layer (deterministic Python — never makes investment judgments)
   tools/_common.py       — config, EDGAR session, per-tool sleep + http_get retry/backoff, batch routing
   tools/new_run.py       — open a timestamped run batch + _run.json manifest
   tools/discover.py      — EDGAR FTS enumeration + SIC reverse-recall + mktcap fallback
-  tools/filter_by_sic.py — Gate 1 coarse SIC exclusion + SIC reverse-recall floor
+  tools/filter_by_sic.py — Gate 1 SIC review tier + SIC reverse-recall floor (LIBRARY; CLI is --selftest only)
   tools/cheap_pass.py    — mechanical kill-flags from SEC filings (incl. concentration)
   tools/deepdive_data.py — XBRL + Form 4 + shelf status + data-integrity guards + second-source check
   tools/valuation.py     — reverse-DCF / NAV / EV-EBITDA + the buy_eligible mechanical gate

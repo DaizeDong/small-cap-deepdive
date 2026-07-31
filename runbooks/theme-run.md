@@ -86,10 +86,11 @@ Expected output:
 
 ---
 
-## Step 2, Gate 1: SIC Coarse Exclusion
+## Step 2, Gate 1: SIC Coarse Review
 
-Gate 1 is applied automatically by `run_theme.py` (via `filter_by_sic.sic_ok`).
-`filter_by_sic.py` is a library module, not a standalone pipeline step.
+Gate 1 is applied automatically by `run_theme.py` (via `filter_by_sic.sic_classify`).
+`filter_by_sic.py` is a library module, not a standalone pipeline step; its only CLI is
+`--selftest`.
 
 To verify the SIC logic:
 
@@ -97,8 +98,11 @@ To verify the SIC logic:
 python tools/filter_by_sic.py --selftest
 ```
 
-**What it does:** Drops companies whose SIC code definitively places them outside plausible
-theme membership. Companies with no SIC on file are kept, not dropped, do not over-exclude.
+**What it does:** tags each survivor with a `sic_tier`. **It drops nothing.** A SIC in
+`sic_hard_exclude` yields `sic_tier="review"`, and a `review` company still goes to Gate 2, the
+tier is a hint about how suspicious the SIC is, not a verdict. Everything else yields
+`sic_tier="keep"`. Companies with no SIC on file are kept. The third value, `drop`, is reserved and
+never returned, so Gate 2 is the only place a company leaves the funnel for theme-fit reasons.
 
 **Token magnitude:** Negligible, deterministic lookup against SEC company data.
 

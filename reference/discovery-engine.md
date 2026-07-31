@@ -28,11 +28,26 @@ The keyword `refractory` was used for a railcar insulation theme (refractory lin
 
 These two gates run sequentially before any deepdive computation. They cannot be skipped or combined.
 
-### Gate 1, SIC Coarse Exclusion (`filter_by_sic.py`)
+### Gate 1, SIC Coarse Review (`filter_by_sic.sic_classify`, applied inline by `run_theme.py`)
 
-**What it does:** Drops companies whose SIC code definitively places them outside plausible theme membership.
+**What it does:** tags each company with a `sic_tier` so Gate 2 knows how suspicious its SIC is.
+**It does not drop anything.** `sic_classify` is tri-state and returns only two values in practice:
 
-**SIC exclusion blocks (hard-coded defaults):**
+- `keep`, the SIC is not in `sic_hard_exclude`. Passes to Gate 2 normally.
+- `review`, the SIC **is** in `sic_hard_exclude`. The company is tagged `sic_tier="review"` and
+  **still passes to Gate 2**, because a hard-excluded SIC on a company that already matched the
+  theme keywords is a question for the LLM, not a verdict. TITN (SIC 5990, a farm-equipment dealer)
+  and SNFCA (SIC 6199, a real deathcare segment) are why.
+- `drop` is reserved for future explicit-drop logic and **is never returned**.
+
+**Caller contract:** `sic_classify` does not check theme-keyword membership itself, so `review` is
+safe to forward only because `run_theme.py` calls it on a post-FTS universe. A caller that skips the
+FTS pre-filter reopens the over-recall hole.
+
+**Invocation:** `filter_by_sic.py` is a library module, not a pipeline step. Its only CLI is
+`--selftest`, which runs the unit assertions and exits.
+
+**SIC review blocks (hard-coded defaults):**
 
 | SIC Range | Description | Why excluded |
 |---|---|---|
@@ -46,7 +61,7 @@ These two gates run sequentially before any deepdive computation. They cannot be
 
 **SIC missing → keep for LLM:** Companies with no SIC code on file are retained and passed to Gate 2. Do not auto-exclude them. Historical examples: NL Industries (NL, SIC 2810 chemicals) and VHI were initially misflagged, they are legitimate theme candidates with unusual SIC codes.
 
-**Important:** These exclusion blocks are defaults and should be reviewed for each theme. A software theme would not exclude 737x. Config key `sic_exclusion_blocks` in `config.json` overrides defaults.
+**Important:** These blocks are defaults and should be reviewed for each theme. A software theme has no business sending 737x to the `review` tier. The config key is **`sic_hard_exclude`** (`string[]` of SIC prefixes); there is no key named `sic_exclusion_blocks`. It is global, with no per-theme override: to run a theme against a different list, point `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` at a second config dir whose `config.json` sets its own `sic_hard_exclude`. See `CONFIG.md`.
 
 ### Gate 2, LLM Theme-Fit (`theme-fit-gate.js` / natural language subagent)
 
@@ -117,12 +132,16 @@ For reference, the complete failure mode and fix:
 
 1. Keyword `refractory` submitted to FTS
 2. FTS returns ~80 hits including biotech, oncology, pharma companies
-3. Without Gate 1: all 80 pass to deepdive (wasted compute, contaminated ranking)
-4. With Gate 1 (SIC 2833-2836, 80xx excluded): field drops to ~30
-5. With Gate 2 (LLM reads business descriptions): field drops to 3 to 5 true members
-6. True members: companies manufacturing refractory ceramics, castables, or high-temperature industrial linings
+3. Gate 1 (SIC 2833-2836, 80xx in `sic_hard_exclude`): the field **does not shrink**. Those SICs
+   yield `sic_tier="review"`, and a `review` company still passes to Gate 2. What Gate 1 buys is a
+   label on ~50 of the 80 saying "this SIC has no business being in this theme, look hard."
+4. Gate 2 (LLM reads business descriptions): field drops to 3 to 5 true members. **This is the only
+   step that removes anything.**
+5. True members: companies manufacturing refractory ceramics, castables, or high-temperature industrial linings
 
-The case established the two-stage gate as a mandatory invariant, not an optional enhancement.
+The case established Gate 2 as a mandatory invariant, not an optional enhancement: with Gate 2
+skipped, all ~80 names reach the deep-dive queue no matter how confidently Gate 1 tagged them, and
+Gate 1 alone can never prevent that.
 
 ---
 
