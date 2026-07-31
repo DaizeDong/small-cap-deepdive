@@ -56,14 +56,11 @@ disclosure non-filers, before any analyst time is spent.
 > ```
 > Leaving `SMALLCAP_RUN` unset writes flat to `reports/smallcap/` (legacy behaviour).
 >
-> **Concurrency isolation.** Multiple theme runs may execute concurrently (the coverage harness
-> fans out dozens of agents at once), so two shared paths are namespaced per run: (a) the run-state
-> file is **PID-unique / per-`SMALLCAP_RUN`**, never a single shared `/tmp` path that concurrent
-> agents clobber; and (b) the SIC-reverse-recall sidecar is written **under the active run/slug**
-> (into the current `SMALLCAP_RUN` batch dir, slug-prefixed), never a fixed cross-theme path, so one
-> theme's floor output cannot land in another theme's run dir. See the SIC reverse-recall floor note
-> under "Two-Stage Precision Gate" and `tools/_common.py` / `tools/new_run.py` /
-> `tools/filter_by_sic.py`.
+> **Concurrency isolation.** Theme runs execute concurrently (the coverage harness fans out dozens
+> of agents at once), so the two shared paths are namespaced per run rather than clobbered: the
+> run-state file is **PID-unique / per-`SMALLCAP_RUN`**, the SIC-reverse-recall sidecar goes **under
+> the active run/slug**. Full statement, war-story and file list: "Sidecar isolation" under
+> "Two-Stage Precision Gate".
 
 ### Entry 1, `theme <主题>` (thematic universe screen)
 
@@ -103,7 +100,8 @@ disclosure non-filers, before any analyst time is spent.
 3. **Deep-dive.** For surviving candidates, run `tools/deepdive_data.py --ticker <T>` to retrieve
    the full financial series, insider trade record, and disclosure timeline. Spawn one Agent per
    candidate, instructing it to apply the 7-dimension scorecard from `reference/judgment-rubric.md`,
-   preamble first (base-rate anchor + disconfirmation search + staleness check) before any scoring.
+   preamble first (base-rate anchor + disconfirmation search + staleness check + the
+   `tools/valuation.py` run) before any scoring.
 
 4. **Rank.** Run `tools/rank.py` on the scored outputs to produce the ranked shortlist.
    Report includes: gate survival counts, kill-flag eliminations, score distribution,
@@ -129,8 +127,11 @@ Optionally pass `--theme X` to anchor the theme-fit scoring.
    insider trades, filing timeline, and kill-flag detail.
 
 3. **Judgment pass.** Apply the 7-dimension scorecard from `reference/judgment-rubric.md` in full.
-   Required preamble: (a) state the reference-class base rates from `reference/cognitive-priors.md`;
-   (b) run disconfirmation WebSearch; (c) check data staleness.
+   Required preamble, all four steps: (a) state the reference-class base rates from
+   `reference/cognitive-priors.md`; (b) run disconfirmation WebSearch; (c) check data staleness;
+   (d) run `python tools/valuation.py --json <deepdive_json> --ticker <代码>` and record `mos_basis`,
+   the MoS fields, `buy_eligible` and `buy_ineligible_reasons`. Nothing else in the pipeline runs
+   it, and a rating without it has no margin of safety.
 
 4. **Output.** Single-company report with dimension scores, evidence tier per claim, kill-flag
    detail, disconfirmation findings, and a composite rating with the hard-rule ceilings applied
@@ -263,8 +264,8 @@ alongside the FTS recall) is namespaced under the **active run/slug**, written i
 could land in the wrong run dir (a machinery run dir once picked up a 63-name
 `candidates_railcar_leasing.json`, which `finalize_run` would then have falsely demanded reports
 for). Each concurrent agent's floor output is isolated to its own run, and the run-state file is
-per-`SMALLCAP_RUN` / PID-unique rather than a shared `/tmp` path (see "Concurrency isolation" in the
-run-batch setup above). Files: `tools/filter_by_sic.py` + `tools/_common.py` / `tools/new_run.py`.
+per-`SMALLCAP_RUN` / PID-unique rather than a shared `/tmp` path that concurrent agents clobber.
+Files: `tools/filter_by_sic.py` + `tools/_common.py` / `tools/new_run.py`.
 
 **Gate 2, LLM Theme-Fit Gate**
 For each Gate 1 survivor, prompt an LLM subagent with the company's 10-K business description.

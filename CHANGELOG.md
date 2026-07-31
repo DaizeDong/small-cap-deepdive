@@ -326,7 +326,13 @@ the data layer, all prevented from contaminating judgment output by the architec
 - `tools/_common.py`, shared config loader, EDGAR session with rate discipline (per-tool
   sleep ~150ms inter-request, exponential backoff on 429 via http_get retry wrapper).
 - `tools/discover.py`, EDGAR FTS universe enumeration with zero-hit guard and FTS retry.
-- `tools/filter_by_sic.py`, Gate 1 SIC coarse exclusion with per-theme override support.
+- `tools/filter_by_sic.py`, Gate 1 SIC coarse review.
+  **Correction (2026-07-31):** this entry read "coarse exclusion with per-theme override support".
+  Neither half was ever true, at this release or any later one. `sic_classify` returns `keep` or
+  `review` and never drops a company, and `sic_hard_exclude` is read once from the global config
+  (`tools/filter_by_sic.py` `HARD_EXCLUDE = CFG["sic_hard_exclude"]`) with no per-theme key, see
+  `CONFIG.md`. The wrong claim is recorded here rather than deleted, because an entry describing a
+  capability the code never had is not history worth preserving silently.
 - `tools/cheap_pass.py`, mechanical kill-flags: going-concern (double-confirmation required),
   death-spiral convertibles, ICFR material weaknesses; amendment (`10-K/A`) exclusion.
 - `tools/deepdive_data.py`, XBRL financials (revenue, OCF, EV series), Form 4 insider trades,
