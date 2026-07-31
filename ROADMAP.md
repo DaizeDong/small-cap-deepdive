@@ -1,6 +1,73 @@
 # Roadmap
 
-Current: **v0.3.3**
+Current: **v0.3.3**. Every released version has a shipped section below, newest first; anything not
+yet released sits under "Planned" or "Next". Per-change detail lives in `CHANGELOG.md`, this file
+carries only the shape of each release and what remains open.
+
+## v0.3.4, Planned (not released)
+
+- **Demote `cross_source_mismatch` and `debt_truncation_suspected` from `buy_eligible` blockers to
+  advisory data-quality labels.** The v0.3.3 backtest measured both as anti-predictive: they fire on
+  66% and 48% of the universe respectively, at blowup lifts of 0.86x and 0.67x, so they shrink
+  eligibility on healthy names while carrying no downside signal. This is the one open item
+  `CHANGELOG.md` defers to v0.3.4. Both are currently still ANDed into `buy_eligible`; changing that
+  changes ratings, so it ships as its own version with a regression pass.
+
+## v0.3.3, Out-of-sample backtest and the CORE-4 distress kill-flag (2026-06-24) ✓ SHIPPED
+
+A 25-cell survivorship-safe point-in-time backtest (5 themes × 5 as-of dates 2020 to 2024, 12mo
+horizon) tested the skill's claims on held-out data. Write-up:
+`docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md`.
+
+- **The honest negative ✓** No durable alpha. The Margin-of-Safety cheapness signal is a 2020 to 21
+  post-COVID-recovery regime artifact: it vanishes on the 2023 to 24 holdout (permutation p=0.72)
+  and on a drop-2020 re-test (p=0.35). The skill does not pick market-beaters and no longer implies
+  it can.
+- **CORE-4 PIT distress kill-flag ✓** (`_deepdive_flags.distress_core4`) `distress_score` = count of
+  `neg_ocf`, `neg_margin`, `accum_deficit`, `low_altman` (Altman Z″ < 1.1); `distress_kill` at
+  `score >= 3` counts in `killflag_count`, so a distressed name routes to AVOID in both the live
+  rating and the backtest grader, regardless of cheapness. At that shipped cutoff: blowup precision
+  35.4% vs 13.3% base (lift 2.65x) at recall 62%. At the separate per-year top-quintile cutoff: lift
+  2.56x at recall 51%, ticker-cluster bootstrap 95% CI [1.73, 3.00], P(lift≤1)=0. Banks and insurers
+  are out of scope.
+- **Reproducible study artifacts ✓** under `docs/backtest-2026-06/`, adversarially reviewed by a
+  second model, caveats honored in the write-up rather than dropped.
+
+## v0.3.2, Coverage-test backlog cleanup (2026-06-20) ✓ SHIPPED
+
+- **Lessor NAV routing ✓ (#8)** `lessor_asset_heavy` (leasing/rental SIC, lease-income concept, or a
+  high PP&E / lease-fleet ratio with rental revenue) forces the NAV basis **even below the 0.62
+  debt/assets threshold**, so GBX (0.41) and RAIL (0.35) are valued on lease-fleet NAV instead of
+  trough-cycle FCF.
+- **Concurrency isolation ✓ (#10)** the SIC-floor sidecar is run/slug-namespaced and kept out of the
+  `candidates_*.json` glob; run-state is per-`SMALLCAP_RUN` / PID-unique. No cross-theme
+  contamination when many agents run at once.
+- **Foreign-filer IFRS cascade ✓ (#11)** the XBRL concept cascade covers `ifrs-full` as well as
+  `us-gaap`, recovering some 20-F/40-F filers; when a foreign filer is still empty after the
+  cascade, `foreign_filer_unvaluable` labels the abstain explicitly instead of leaving a silent null.
+- **Docs ✓** Skill Repo Spec v1 structure, philosophy-first README order, 1:1 EN/CN sections,
+  `.claude-plugin/plugin.json`, single-sourced version across plugin.json / README badges / ROADMAP
+  / CHANGELOG.
+
+## v0.3.1, Full-coverage-test remediation (2026-06-20) ✓ SHIPPED
+
+Driven by the v0.3.0 full-coverage test (53 themes across all GICS sectors plus niche; report in
+`docs/coverage-test-2026-06-20/`). The test confirmed 0 false BUYs leaked but found one critical
+mechanical hole plus precision and recall bugs.
+
+- **Degenerate-base hole ✓ (#1, CRITICAL)** `normalization_masks_current_loss` blocks
+  `buy_eligible` when `normalized_fcf > 0` while current OCF/FCF is negative or
+  `contamination_ratio < 0`. Closes the TUSK +55.1% phantom BUY that only the human adversarial
+  layer had caught.
+- **SEC debt truncation ✓ (#2, CRITICAL)** `total_debt` is summed across the standard debt concepts,
+  falling back to implied (liabilities − equity) when the sum still under-reads the balance sheet.
+- **Null-MoS guard ✓ (#9)** `buy_eligible` can no longer be True with a null MoS; the absence emits
+  `not_assessable_no_intrinsic_band`.
+- **Precision and recall ✓** ASC842 lease adjustment on the cross-source comparison (#3); insurance
+  precision requires a financial SIC or ≥2 insurance concepts (#4); SIC recall floors for ~30 more
+  themes (#5); `recall@gold` measures against the universe set, not the post-filter file (#6);
+  concentration segment-vs-customer guard (#7); mktcap fallback fires before size-exclusion (#12);
+  banner off-by-one and `mos_pct` percent display (#13).
 
 ## v0.3.0, Optimization campaign (2026-06-20) ✓ SHIPPED
 
@@ -50,8 +117,12 @@ iterate). Closed all four top structural diagnoses from a 10-lens reflection. Fu
 - **P5 ✓** Event-driven discovery (`discover_events.py`): spinoffs (Form 10-12B) +
   cluster insider buys (openinsider). Four entry modes: theme / ticker / rank / events.
   CIK-first processing for pre-listing spinoffs.
-- **P6 ✓** Track-forward calibration (`tools/track_forward.py`): `metrics/verdicts.jsonl`,
+- **P6-buildout ✓** Track-forward calibration (`tools/track_forward.py`): the verdict log at
+  `<private data dir>/metrics/verdicts.jsonl` (out-of-repo, see `reference/track-forward.md`),
   Brier scoring vs IWM, 40 seeded verdicts (none mature until 2027-06, calibration unknown).
+  Not to be confused with **P6-audit** (the run-3 `material_weakness` false-positive fix) or with
+  **P6** in `SKILL.md` / the rubric (the `fundamental_decline_flag` veto): the three numbering
+  schemes are independent, which is why each is prefixed here.
 - **P7 integration fixes ✓** (see CHANGELOG v0.2.0 for detail):
   - C1: config.json gitignored + setup instructions clarified.
   - C2: material_weakness → Dim 1 ceiling fix (was incorrectly capping Dim 5).
@@ -77,6 +148,9 @@ iterate). Closed all four top structural diagnoses from a 10-lens reflection. Fu
 
 ## Next
 
+Open work only. A completed item moves to its version's shipped section above, it does not stay
+here with a checkmark.
+
 ### edgartools Form 4 direction parser hardening
 
 **Status:** `insider_source: openinsider` is the current default; `insider_source: edgar` is
@@ -91,13 +165,6 @@ edgar` and deprecate the openinsider path.
 
 **Trigger for landing:** 3 production runs with `insider_source: edgar` produce no direction
 parsing errors.
-
-### Track-forward Brier scoring of verdicts ✓ DONE (v0.2.0 / P6)
-
-`tools/track_forward.py` ships in v0.2.0. Verdicts logged to `metrics/verdicts.jsonl`;
-`--score` pulls realized prices at maturity; `--scorecard` writes `metrics/scorecard.md`.
-Benchmark: IWM (not SPY). 40 seeded verdicts from 2026-06 runs; none mature until 2027-06.
-Rubric tuning gated on ≥20 matured verdicts, see `reference/track-forward.md`.
 
 ### More themes and sector-specific precision gates
 
@@ -122,45 +189,53 @@ which are already over-indexed by retail, and which have an identifiable small-c
 pool. Automating that selection would optimize for novelty, not investment merit.
 
 When to revisit: if a systematic evidence base emerges that LLM-selected themes produce
-better outcomes than human-selected themes in this context (requires the track-forward
-Brier scoring above as a prerequisite).
+better outcomes than human-selected themes in this context. Prerequisite: matured track-forward
+Brier scores, which ship in v0.2.0 but cannot be computed until 2027-06.
 
 ---
 
 ## Run-3 audit synthesis (2026-06-18), prioritized
 
 Four parallel audits (recall / rubric-calibration / hunting-grounds / pipeline) on the
-4-theme run. Prioritized; the first is a **bug**, the rest are improvements. Honest caveat
+4-theme run. Prioritized; the first was a **bug**, the rest improvements. Honest caveat
 up front: three runs / ~40 deep dives produced **0 BUY**; part is genuine market efficiency,
 part is the calibration gap below. None of this is guaranteed to surface a BUY.
 
-**P1, Mechanical data-correctness bug (highest; this is a defect, not a feature).**
-`concept_series`'s 350-380-day annual window mis-handles fiscal-year≠calendar-year filers →
-wrong revenue anchors in run-3 (BUKS revenue stuck at FY2018 $48M vs real ~$84M; WLFC unit
-leakage 730 vs real $569M; LNN $659M vs $676M). Agents caught these via WebSearch but should
-not have to. Fix: use XBRL `fp`/`frame` (fiscal period) not a day-count window; recompute `fy`
-from `end`; add **BUKS + WLFC regression selftests** (current selftest only covers EGAN, which
-passes while these fail); shares fallback chain (`CommonStockSharesOutstanding` →
-`dei:EntityCommonStockSharesOutstanding` → diluted WANSO); pass discover's `avg_dollar_vol`
-through to the deepdive JSON (`liquidity_adv`). ~1 day, single file (`deepdive_data.py`).
+**This section has its own P-numbering, independent of the v0.2.0 phase numbering above and of the
+P-numbers in `SKILL.md` / `reference/judgment-rubric.md`.** The same label means three different
+things across the three schemes, so items here are prefixed `P<n>-audit`. Only `P7-audit` is still
+open.
 
-**P2 ✓ DONE (v0.2.0)**, Valuation engine (`tools/valuation.py`): reverse-DCF, EV/EBITDA,
+**P1-audit ✓ DONE (mostly), Mechanical data-correctness bug.** `concept_series`'s 350-380-day
+annual window mis-handled fiscal-year≠calendar-year filers → wrong revenue anchors in run-3 (BUKS
+revenue stuck at FY2018 $48M vs real ~$84M; WLFC unit leakage 730 vs real $569M; LNN $659M vs
+$676M). Shipped: the annual test keys on the XBRL fiscal-period tags
+(`is_annual_tagged = fp == "FY" and form.startswith("10-K")`, with the day-span test only as a
+fallback for untagged facts) in `tools/_deepdive_concepts.py` on both the live and the PIT path;
+**BUKS and WLFC regression selftests** in `tools/deepdive_data.py`; and the shares fallback chain
+`us-gaap:CommonStockSharesOutstanding` → `dei:EntityCommonStockSharesOutstanding` → diluted WANSO in
+`_deepdive_concepts.py`. **Two sub-items of the original P1 are still open:** `fy` is carried
+through from the XBRL fact rather than recomputed from `end`, and discover's `avg_dollar_vol` is
+still not passed through to the deepdive JSON as `liquidity_adv` (that field name appears nowhere in
+the codebase). Neither affects the revenue-anchor defect this item was raised for.
+
+**P2-audit ✓ DONE (v0.2.0)**, Valuation engine (`tools/valuation.py`): reverse-DCF, EV/EBITDA,
 cyclical-trough EBITDA, NAV path.
 
-**P3 ✓ DONE (v0.2.0)**, Symmetric BUY trigger (MoS ≥ 30%) + closed-list catalyst axis
+**P3-audit ✓ DONE (v0.2.0)**, Symmetric BUY trigger (MoS ≥ 30%) + closed-list catalyst axis
 (four forced-trading categories) + perpetual-veto prohibition.
 
-**P4 ✓ DONE (v0.2.0)**, 20-F/40-F fallback, SIC downgrade-to-review (not drop), dual
+**P4-audit ✓ DONE (v0.2.0)**, 20-F/40-F fallback, SIC downgrade-to-review (not drop), dual
 market-cap band, per-theme keyword guidance.
 
-**P5 ✓ DONE (v0.2.0)**, Event-driven discovery: spinoffs (Form 10-12B) + cluster insider
+**P5-audit ✓ DONE (v0.2.0)**, Event-driven discovery: spinoffs (Form 10-12B) + cluster insider
 buys (openinsider). Four entry modes: theme / ticker / rank / events. CIK-first for
 pre-listing spinoffs.
 
-**P6 ✓ DONE (v0.2.0)**, material_weakness false-positive fix: affirmative ICFR finding
+**P6-audit ✓ DONE (v0.2.0)**, material_weakness false-positive fix: affirmative ICFR finding
 required; bare risk-factor boilerplate does not fire the flag.
 
-**P7 (theme-fit gate redundancy)**, run_theme.py candidates JSON omits `json_path`, so the
+**P7-audit (theme-fit gate redundancy, STILL OPEN)**, run_theme.py candidates JSON omits `json_path`, so the
 gate always WebSearches, then deepdive re-judges `theme_fit` anyway. Either pass `json_path`
 through, or fold theme-fit into the deep-dive and drop the separate gate for the single-pass
 path. (Deferred to future release.)

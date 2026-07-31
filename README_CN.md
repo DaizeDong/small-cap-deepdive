@@ -39,9 +39,9 @@
 
 0. **开运行批次**（`new_run.py`）：每次运行写入 `reports/smallcap/<日期>_<label>/`，附 `_run.json` manifest（skill git commit + 估值 config 快照），便于按版本对比。`export SMALLCAP_RUN=$(python tools/new_run.py --label <主题>)`。
 
-1. **枚举 SEC 全库**：用 EDGAR 全文检索（FTS），并 UNION 一个 **SIC 反向召回底**（`discover.py` + `filter_by_sic.py`）,对有专属 SIC 码的主题,枚举该 SIC 下全部注册人,避免漏掉低关键词密度的真实成员。市值用 fallback 链解析（yfinance 为空时用 SEC 股数×价格）；仍无法定价的归 `band="unknown"` 流过,而非静默丢弃。
+1. **枚举 SEC 全库**：用 EDGAR 全文检索（FTS），可选 UNION 一个 **SIC 反向召回底**（`discover.py --sic-reverse`，内部调用 `filter_by_sic.py`）,对有专属 SIC 码的主题,枚举该 SIC 下全部注册人,避免漏掉低关键词密度的真实成员；该召回底按主题 opt-in。市值用 fallback 链解析（yfinance 为空时用 SEC 股数×价格）；仍无法定价的归 `band="unknown"` 流过,而非静默丢弃。
 
-2. **两阶段精度门（强制）**：门 1（`filter_by_sic.py`）：基于 SIC 行业码粗排除明显无关行业。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / partial / misrecall`。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司。召回用 `recall@gold`（对照手工真实成员清单）**度量**,而非假设。
+2. **两阶段精度门（强制）**：门 1（`filter_by_sic.sic_classify`，由 `run_theme.py` 内联调用）：SIC **复核层**，不是排除层。命中硬排除 SIC 的公司被标为 `sic_tier="review"`，**仍然进入门 2**；门 1 永不丢弃任何公司。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / partial / misrecall`，丢弃 `misrecall` 是全流程中唯一一次按主题契合度剔除。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司,而门 1 把它们全部放行了,因为 pharma SIC 只会拿到 `review`。召回用 `recall@gold`（对照手工真实成员清单）**度量**,而非假设。
 
 3. **机械避雷**（`cheap_pass.py`）：直接读 SEC 申报的硬红线,持续经营审计段、死亡螺旋可转债、内控重大缺陷、magnitude 级客户/政府单一项目集中度。触发的公司不进入判断,无论叙事质量如何。
 
@@ -53,7 +53,7 @@
 
 7. **收尾 + 排序**（`finalize_run.py`、`make_report.py`、`rank.py`）：确定性逐票报告,每个评级下附数据质量**信任 banner**,自动生成 verdict 喂入 track-forward,并产出 `RANKING.md`（漏斗计数、淘汰原因、数据盲区）。
 
-8. **前向校准**（`track_forward.py`）：verdict 记入 `metrics/verdicts.jsonl`,到期对 IWM 做 Brier 评分,含 de-risk 指标（避免暴雷/下行捕获）。
+8. **前向校准**（`track_forward.py`）：verdict 记入 `<私有数据目录>/metrics/verdicts.jsonl`（由 `tools/datadir.py` 解析到**仓库之外**，绝不落回仓内；仓内只带 `metrics/verdicts.jsonl.example` 作为 schema）,到期对 IWM 做 Brier 评分,含 de-risk 指标（避免暴雷/下行捕获）。
 
 9. **诊断信号,防火墙隔离**（`signals.py`）：严格诊断的侧信道,度量"延迟信息扩散"立论,**价格背离**（基本面轨迹 vs 滚动价格回报 → `unpriced_improvement` / `melting_ice_cube_priced` / `aligned`）与**持仓**（13D/13G + 做空)。它**永不**触碰 `buy_eligible` 或买入决策,仅记录供未来 per-signal 校准。
 
@@ -74,9 +74,11 @@
 - **无持久 alpha。** 便宜度（安全边际 MoS）在样本内跑赢市场，但那是 2020 to 21 后疫情反弹的 regime 假象，
   在留出集上消失（holdout permutation p=0.72）。**工具无法选出跑赢者，也不声称能**,这正是它从不发出"买入"的原因。
 - **真实的避崩盘 edge**（它的本职）。经 OOS 验证的 **CORE-4 困境 kill-flag**（经营现金流为负、经营亏损、
-  累计赤字、Altman Z″ < 1.1）把困境股打入 AVOID：top-quintile 崩盘 **lift 2.56×**、recall 62%，
-  ticker 聚类 bootstrap 对 lift 的 95% CI = **[1.73, 3.00]**（P(lift≤1)=0）。0-BUY 的扫描结果依然有效,
-  价值在于你**没有**踩到的雷。
+  累计赤字、Altman Z″ < 1.1）把困境股打入 AVOID。同一份面板上量了**两个不同的 cutoff**，每个数字只属于其中一个，
+  引用时必须连同 cutoff 一起给出：在**实际上线的 `distress_score >= 3` cutoff** 上，崩盘 precision 35.4%
+  对 13.3% 基准（**lift 2.65×**）、**recall 62%**；在**按年 top-quintile cutoff** 上，lift **2.56×**、
+  **recall 51%**，ticker 聚类 bootstrap 对该 top-quintile lift 的 95% CI = **[1.73, 3.00]**（P(lift≤1)=0）。
+  0-BUY 的扫描结果依然有效,价值在于你**没有**踩到的雷。
 
 ---
 
@@ -259,7 +261,7 @@ skill 触发于小盘/微盘价值研究、主题选股、单公司深度尽调�
   tools/_common.py       — 配置、EDGAR session、per-tool sleep + http_get 重试退避、批次路由
   tools/new_run.py       — 开时间戳运行批次 + _run.json manifest
   tools/discover.py      — EDGAR FTS 枚举 + SIC 反向召回 + 市值 fallback
-  tools/filter_by_sic.py — 门 1：SIC 粗排除 + SIC 反向召回底
+  tools/filter_by_sic.py — 门 1：SIC 复核层 + SIC 反向召回底（库模块；CLI 只有 --selftest）
   tools/cheap_pass.py    — 机械避雷硬红线（含集中度）
   tools/deepdive_data.py — XBRL + Form 4 + 货架状态 + 数据完整性守卫 + 二次源校验
   tools/valuation.py     — 反向 DCF / NAV / EV-EBITDA + buy_eligible 机械门
