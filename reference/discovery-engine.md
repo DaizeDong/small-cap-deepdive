@@ -15,7 +15,7 @@ SEC full-text search (`efts.sec.gov`) returns every 10-K filing that mentions yo
 - 94% of filings mentioned the keyword in unrelated contexts
 
 **Real case, refractory swept all of biotech:**
-The keyword `refractory` was used for a railcar insulation theme (refractory linings). In oncology, "refractory" means treatment-resistant cancer, every biotech and oncology company uses this word. The single-keyword FTS returned the entire biotech sector. Zero of these were railcar companies. The SIC gate reduced the field substantially, and the LLM theme-fit gate eliminated the remainder.
+The keyword `refractory` was used for a railcar insulation theme (refractory linings). In oncology, "refractory" means treatment-resistant cancer, every biotech and oncology company uses this word. The single-keyword FTS returned the entire biotech sector. Zero of these were railcar companies. **Gate 1 did not cut them:** a pharma SIC is in `sic_hard_exclude`, so Gate 1 tagged those names `review` and forwarded them anyway. Gate 2 is the step that cleared the field, and with Gate 2 skipped the entire biotech sector would have reached the deep-dive queue. This is the case that shows Gate 2 can never be skipped or merged into Gate 1: Gate 1 has no power to remove a keyword hit. Full step-by-step below, §Refractory Case: Full Reconstruction.
 
 **Real case, railcar swept commodity logistics:**
 `railcar` is used by grain, ethanol, potash, and other commodity shippers to describe their logistics. Build-A-Bear's annual report mentions railcar delivery. The term does not uniquely identify railcar manufacturers or lessors.
@@ -38,14 +38,16 @@ These two gates run sequentially before any deepdive computation. They cannot be
   **still passes to Gate 2**, because a hard-excluded SIC on a company that already matched the
   theme keywords is a question for the LLM, not a verdict. TITN (SIC 5990, a farm-equipment dealer)
   and SNFCA (SIC 6199, a real deathcare segment) are why.
-- `drop` is reserved for future explicit-drop logic and **is never returned**.
+- `drop` is reserved for future explicit-drop logic and **is never returned**. The
+  `sic_tier != "drop"` filter in `run_theme.py` is therefore a no-op today. Do not read it as
+  evidence that Gate 1 removes anything.
 
 **Caller contract:** `sic_classify` does not check theme-keyword membership itself, so `review` is
 safe to forward only because `run_theme.py` calls it on a post-FTS universe. A caller that skips the
 FTS pre-filter reopens the over-recall hole.
 
-**Invocation:** `filter_by_sic.py` is a library module, not a pipeline step. Its only CLI is
-`--selftest`, which runs the unit assertions and exits.
+**Invocation:** `filter_by_sic.py` is a library module, not a pipeline step. The invocation rule and
+its self-test are stated once, in `SKILL.md` §Entry 1 step 1c.
 
 **SIC review blocks (hard-coded defaults):**
 

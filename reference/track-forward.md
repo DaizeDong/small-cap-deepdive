@@ -31,9 +31,10 @@ order: `$SMALL_CAP_DEEPDIVE_DATA_DIR` â†’ `~/.small-cap-deepdive-config/data/` â
 instructions. The two files are `<private data dir>/metrics/verdicts.jsonl` and
 `<private data dir>/metrics/scorecard.md`. There is deliberately **no in-repo fallback**: a
 git-tracked `metrics/verdicts.jsonl` is how hundreds of real positions (ticker, entry date, entry
-price) once accumulated in a public repo. The repo's own `metrics/` holds only the schema files
-`verdicts.jsonl.example` and `scorecard.md.example`. Every bare `metrics/...` path below is
-shorthand for the private path above.
+price) once accumulated in a public repo, and a fallback into the repo is not a convenience, it is
+the leak. The repo's own `metrics/` holds only the schema files `verdicts.jsonl.example` and
+`scorecard.md.example`, which are the shape you are expected to produce. Every bare `metrics/...`
+path below is shorthand for the private path above.
 
 ---
 
