@@ -66,6 +66,8 @@ This skill does not identify the next ten-bagger. It identifies which companies 
 
 A batch ranking that produces "0 BUY, 3 WATCH, 7 AVOID" is not a failed run. It is the honest result when the theme quality is low. The absence of BUY candidates on bad batches is the strongest proof that the skill is not in the business of generating bullish stories.
 
+**What a top-ranked name actually means:** it cleared every kill flag and has real theme exposure, so it now deserves full human due diligence. That is all it means. The value sits in the three classes the scan removes before an analyst spends any time: going-concern candidates, death-spiral diluters, and disclosure non-filers.
+
 **Empirical regularity (3 real runs, ~40 deep dives):** theme quality correlates with
 *survivor cleanliness*, not with buy count. A hot, crowded theme (AI-agent) yielded many
 AVOIDs (going-concern / death-spiral garbage). Well-chosen boring, neglected themes
