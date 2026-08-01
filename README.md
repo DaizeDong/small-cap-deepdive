@@ -17,18 +17,13 @@ Mechanically de-risk the SEC small-cap universe for a theme or ticker, kill the 
 
 **Being neglected is not the same as being undervalued.**
 
-Small-caps with zero analyst coverage have cleared a necessary but not sufficient condition.
-Neglect is efficiently priced. What creates exploitable inefficiency is delayed information
-diffusion around a real fundamental change. This tool exists to find companies where that
-condition might hold, and to mechanically eliminate the ones where it cannot, before any
-analyst time is spent.
+Why that is true, and what it takes for a neglected name to also be mis-priced:
+[`reference/cognitive-priors.md`](reference/cognitive-priors.md) §1.
 
 **The output is a landmine-scanner, not a buy list.**
 
-A company at the top of the ranked output means it survived all kill-flags, has genuine theme
-exposure, and warrants full human due diligence. It does not mean buy it. The primary value is
-in what the tool eliminates, going-concern candidates, death-spiral diluters, disclosure
-non-filers, before any judgment begins.
+What a top-ranked name does and does not entitle you to conclude:
+[`reference/cognitive-priors.md`](reference/cognitive-priors.md) §5.
 
 **Zero buys is a feature, not a bug.**
 
@@ -199,9 +194,9 @@ required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-fie
   → `~/.small-cap-deepdive-config/config.json` → `~/.config/small-cap-deepdive-config/config.json` →
   nothing found, the skill reports **NOT INITIALIZED**. First that exists wins; effective config =
   `config.example.json` defaults ◁ your `config.json` ◁ `SMALLCAP_*` env overrides.
-  **No step lands inside the repo.** The chain used to end at in-repo `reference/config.json`, and a
-  real EDGAR contact address got committed through it. A fallback into the repo is not a
-  convenience, it is the leak.
+  **No step lands inside the repo**, and none may be added. What the in-repo step used to be, what
+  leaked through it, and what the resolver raises instead: [CONFIG.md](CONFIG.md) §Discovery
+  convention.
 - **First time:**
   ```bash
   python scripts/init_config.py      # stamp config.json into ~/.small-cap-deepdive-config (deterministic)
@@ -275,11 +270,9 @@ python tools/discover_events.py --spinoffs
 python tools/discover_events.py --insider-clusters
 ```
 
-Spinoff catalyst: passive index-fund holders of the parent are forced to sell the spun-off
-child if it falls outside their index mandate, temporary supply overhang, no natural buyer.
-
-Insider-cluster catalyst: multiple insiders purchasing at market price with personal capital
-is the strongest available management-conviction signal (Form 4, open-market cash only).
+Both axes hunt a forced-trading or conviction catalyst rather than a keyword. The mechanism
+behind each one, and the honest caveats on both, are stated once in
+[`reference/event-driven.md`](reference/event-driven.md).
 
 No theme-fit gate needed, form-type enumeration is structurally precise. Kill-flag scan
 still mandatory (`cheap_pass.py --universe <candidates_event_*.json>`). Pre-listing spinoffs

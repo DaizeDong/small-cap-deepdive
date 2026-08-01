@@ -1,7 +1,7 @@
 # Runbook: Batch Re-Rank
 
-> Entry mode 3, `rank`. Use when you have already run a theme screen and want to re-sort
-> an existing scored candidate set without re-running discovery or deep-dive.
+> Entry mode 3, `rank`. When to use it: `SKILL.md` §Entry 3.
+> This runbook is the operational how-to for that entry, not a second statement of it.
 
 This entry mode is instant (no network, no LLM). It operates on `report_*.md` files written
 by the deep-dive judgment step. Use it to produce a clean ranked table from a prior session's

@@ -215,35 +215,22 @@ theme-fit gate needed, form-type enumeration replaces keyword over-recall):
 Single-keyword FTS over-recalls severely. Measured production result: 192 raw candidates for
 "AI agent" → 13 true theme members after the gate (6.8% precision; 94% false-positives).
 
-**The canonical cautionary case:** the keyword `refractory` was used for a railcar insulation
-theme. In oncology, "refractory" means treatment-resistant cancer, the single-keyword search
-swept the entire biotech sector. Zero of these were railcar companies. Gate 1 did not cut them:
-a pharma SIC is in the hard-exclude list, so Gate 1 tags those names `review` and forwards them.
-**Gate 2 is what cleared the field**, and skipping it would have sent the entire biotech sector to
-the deep-dive queue. This is the case that shows why Gate 2 can never be skipped or merged into
-Gate 1: Gate 1 has no power to remove a keyword hit.
+The canonical cautionary case (the `refractory` keyword sweeping all of biotech), the worked
+reconstruction of that run, and the three-value contract for `sic_classify` are told once, in
+`reference/discovery-engine.md`: §The Core Problem, §Gate 1, and §Refractory Case: Full
+Reconstruction. Read them before designing new theme keywords.
 
 **Gate 1, SIC coarse review + reverse-recall floor** (`filter_by_sic.sic_classify`, applied inline
-by `tools/run_theme.py`). **Gate 1 never drops a company.** `sic_classify` is tri-state and returns
-only two of its three values in the current configuration:
-- `keep`, the SIC is not in the hard-exclude list. Passes to Gate 2 normally.
-- `review`, the SIC **is** in the hard-exclude list (pharma, medical devices, finance, retail,
-  toys; the blocks are listed in `discovery-engine.md §Gate 1`). The company is tagged
-  `sic_tier="review"` and **still passes to Gate 2**, because a hard-exclude SIC on a company that
-  already matched the theme keywords is a question for the LLM, not a verdict. TITN (SIC 5990,
-  a farm-equipment dealer) and SNFCA (SIC 6199, a real deathcare segment) are why.
-- `drop` is reserved for future explicit-drop logic and **`sic_classify` never returns it**. The
-  `sic_tier != "drop"` filter in `run_theme.py` is therefore a no-op today.
+by `tools/run_theme.py`).
 
-Companies with no SIC on file: **keep** for Gate 2, do not auto-exclude. The hard-exclude list is
-the config key **`sic_hard_exclude`** (a `string[]` of SIC prefixes; there is no key named
-`sic_exclusion_blocks`). It is global, not per-theme: to run a theme against a different list, point
-`$SMALL_CAP_DEEPDIVE_CONFIG_DIR` at a second config dir whose `config.json` sets its own
-`sic_hard_exclude`. See `CONFIG.md`.
+RULE, and the only part of Gate 1 you need loaded to run one:
 
-**Caller contract.** `sic_classify` does not itself check theme-keyword membership, so `review` is
-safe to forward only because `run_theme.py` calls it on a post-FTS universe where every company is
-already a keyword hit. A caller that skips the FTS pre-filter reopens the over-recall hole.
+- **Gate 1 never drops a company.** It only tags `sic_tier`. Every survivor of Gate 1, `keep` and
+  `review` alike, goes to Gate 2. If a run removes a name at Gate 1, that run is wrong.
+- **Test:** a name whose SIC is hard-excluded must still appear in the Gate 2 input set. If it does
+  not, stop and read `discovery-engine.md` §Gate 1 before continuing.
+- Which SIC blocks are hard-excluded, why `review` is not a verdict, the caller contract that makes
+  `review` safe to forward, and the `sic_hard_exclude` config key: `discovery-engine.md` §Gate 1.
 
 **SIC reverse-recall floor (P8).** For a theme that maps to dedicated SIC code(s), SIC is not used
 *only* as a precision coarse-review, it is also a recall **FLOOR**. `discover.py --sic-reverse`
@@ -349,17 +336,12 @@ Full routing guide, rate-limit discipline, blind spots, and anti-recursion rule:
 After any deep-dive run, log all verdicts so they can be scored against realized returns when
 the horizon matures. This is the only way to determine if the rubric is correctly calibrated.
 
-**Where the verdict log lives (read this before citing a path).** Verdicts and the generated
-scorecard are **real-run output, so they are written OUTSIDE this repo**, never into it.
-`tools/datadir.py:resolve_data_dir("small-cap-deepdive")` resolves the private store in this order:
-`$SMALL_CAP_DEEPDIVE_DATA_DIR` → `~/.small-cap-deepdive-config/data/` → `~/.small-cap-deepdive-data/`
-→ nothing, which raises `DataDirNotInitialized` with setup instructions. The files are
-`<private data dir>/metrics/verdicts.jsonl` and `<private data dir>/metrics/scorecard.md`. There is
-deliberately **no in-repo fallback**: an in-repo `metrics/verdicts.jsonl` is how hundreds of real
-positions (ticker, entry date, entry price) once accumulated in a public repo, and a fallback into
-the repo is not a convenience, it is the leak. The repo's own `metrics/` directory carries only the
-two schema files `verdicts.jsonl.example` and `scorecard.md.example`, which are the shape you are
-expected to produce.
+**Where the verdict log lives (read this before citing a path).** RULE: verdicts and the generated
+scorecard are real-run output, so they are written **outside this repo**, never into it. Never write
+a verdict to a repo-relative path, and never add an in-repo fallback if the resolver refuses.
+**Test:** if a path you are about to write starts with this repo's directory, you have the wrong
+path. The resolver, its exact search order, what it raises when uninitialized, and why the
+no-fallback rule exists: `reference/track-forward.md` §Where the verdict log lives.
 
 **Operational steps:**
 

@@ -4,6 +4,37 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ## [Unreleased]
 
+### Changed
+- **P7 load budget is green: 5.82% duplicated prose to 0.27%, against a 2.0% budget.** The gate went
+  red on its first armed run (185 of 3181 SKILL.md shingles also present in a reference). One side
+  of each pair was cut and replaced with a pointer, per the layering rule: `reference/<topic>.md`
+  owns a methodology invariant, `SKILL.md` and `README.md` point at it and never restate it.
+  - `reference/discovery-engine.md` keeps the refractory war story, the `sic_classify` tri-state,
+    the caller contract, the SIC blocks, and the `sic_hard_exclude` naming note. `SKILL.md` keeps
+    only the always-loaded RULE ("Gate 1 never drops a company") plus its test, and points.
+  - `reference/track-forward.md` keeps the datadir resolution order and the no-in-repo-fallback
+    rule. `SKILL.md` keeps the RULE (never write a verdict to a repo-relative path) plus its test.
+  - `reference/cognitive-priors.md` keeps the world-view exposition; `README.md` points at §1 and
+    §5. `reference/event-driven.md` keeps both catalyst mechanisms; `README.md` points at it.
+    `CONFIG.md` keeps the config-discovery leak history; `README.md` points at it.
+  - `SKILL.md` §Entry 1 step 1c keeps the `filter_by_sic.py --selftest` invocation rule;
+    `discovery-engine.md` now points back to it instead of restating it.
+  - `runbooks/batch-rank.md` points at `SKILL.md` §Entry 3 for when to use entry mode 3.
+  - The 2.0% threshold was NOT raised, and no directory was excluded from the measurement.
+- **`README_CN.md` deliberately keeps its full world-view prose.** It is the only Chinese-language
+  statement of those commitments; cutting it would leave no path to the content in that language,
+  and the gate's word shingles do not see it either way.
+
+### Fixed
+- `reference/discovery-engine.md` §Real case contradicted its own §Refractory Case: Full
+  Reconstruction. It said "the SIC gate reduced the field substantially"; the reconstruction says
+  the field **does not shrink** at Gate 1, because a hard-excluded SIC yields `sic_tier="review"`
+  and a `review` company still passes to Gate 2. The reconstruction is right. Corrected in place,
+  in the shard that owns the invariant, before the duplicate copy in `SKILL.md` was removed.
+- `reference/discovery-engine.md` now records that the `sic_tier != "drop"` filter in
+  `run_theme.py` is a no-op today. That fact existed only in `SKILL.md`, so deleting the SKILL.md
+  copy would have lost it.
+
 ### Security
 - **The in-repo config fallback is gone.** Config discovery used to end at `reference/config.json`,
   documented in three docstrings and four docs as the "in-repo legacy/default" step 4. That is the
