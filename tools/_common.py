@@ -32,6 +32,37 @@ CONFIG_SETUP_HINT = (
 )
 
 
+def _companion_root():
+    """Ask tools/datadir.py where this skill's companion repo is. None when there is none.
+
+    Loaded by path rather than by `import datadir`, because these tools are run both as scripts and
+    as modules and sys.path is not the same in both. An import that works in one and not the other
+    would fail exactly the way this function exists to prevent: quietly.
+
+    ONLY ImportError-shaped problems are swallowed, and only because a missing datadir.py is a
+    legitimate state for a partially vendored checkout. Anything else, above all a bug in this
+    function, propagates: a broad `except Exception` here would hide a NameError in this very body
+    and leave the sibling probe permanently dead with nothing to show for it. That is not
+    hypothetical; the first draft of this function referenced an unimported module and the broad
+    except would have made it undetectable.
+    """
+    p = Path(__file__).resolve().parent / "datadir.py"
+    if not p.is_file():
+        return None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_dd_for_config", p)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    fn = getattr(mod, "resolve_companion_root", None)
+    if fn is None:
+        # An older vendored datadir.py predates this helper. Degrade to the probes below rather
+        # than crashing, but do not pretend the question was asked.
+        return None
+    return fn("small-cap-deepdive")
+
+
 def resolve_config_json() -> Path | None:
     """Locate the user's config.json OUTSIDE this repo, or None if the tool is uninitialized.
 
@@ -53,6 +84,23 @@ def resolve_config_json() -> Path | None:
             p = Path(os.path.expanduser(d)) / "config.json"
             if p.exists():
                 return p
+    # THE SIBLING COMPANION, asked through tools/datadir.py rather than re-derived here.
+    #
+    # This function used to know only the two dotfile locations below, while datadir.py also probes
+    # the fleet convention: a directory named <skill>-config BESIDE this repo. Two resolvers, two
+    # discovery orders, one question. Measured 2026-08-30: resolve_data_dir found the companion at
+    # CodesClaude/small-cap-deepdive-config/data, this function returned None, and with no config
+    # the run fell back to config.example.json's `./reports/smallcap`, which is inside this repo.
+    # 4029 real-run files were sitting there, held out of git by one .gitignore line that the
+    # boundary guard's own docstring calls advisory.
+    #
+    # Delegating rather than adding a fourth branch is the point: a second copy of the order is
+    # what produced the split in the first place, and it would drift again.
+    root = _companion_root()
+    if root is not None:
+        p = Path(root) / "config.json"
+        if p.exists():
+            return p
     for d in (Path(os.path.expanduser("~/.small-cap-deepdive-config")),
               Path(os.path.expanduser("~/.config/small-cap-deepdive-config"))):
         p = d / "config.json"
@@ -91,7 +139,47 @@ UA = {"User-Agent": CFG["sec_user_agent"]}
 # per-run subdir so each run's candidates/cheappass/deepdive/valuation/reports stay
 # together and runs (and skill versions) can be compared. Unset => flat (legacy).
 _RUN = os.environ.get("SMALLCAP_RUN", "").strip().strip("/\\")
-REPORTS = (Path(CFG["output_dir"]) / _RUN) if _RUN else Path(CFG["output_dir"])
+
+
+def _resolve_output_dir(raw):
+    """Turn the configured `output_dir` into a path, and refuse one inside this repo.
+
+    A RELATIVE output_dir is resolved against the COMPANION repo, not the current directory. That
+    is what makes a config.json portable: `data/reports/smallcap` means the same thing on any
+    machine where the companion is discoverable, while an absolute path is a machine's private
+    detail that breaks on restore. An absolute value still wins, for the case where output belongs
+    somewhere neither this repo nor the companion.
+
+    THE REFUSAL IS THE POINT. `reference/config.example.json` shipped `./reports/smallcap`, which is
+    inside this repo, and nothing objected: 4029 real-run files accumulated there, out of git only
+    because one .gitignore line happened to cover them, and .gitignore is advisory. Every route
+    into this state, the shipped default, a config.json copied from it, or SMALLCAP_OUTPUT_DIR, ends
+    here, so one check closes all of them.
+
+    Raising rather than silently relocating: a tool that quietly writes somewhere other than where
+    its config says would be a different and worse surprise, and the operator is the only one who
+    can decide where this skill's output belongs.
+    """
+    p = Path(os.path.expanduser(str(raw)))
+    if not p.is_absolute():
+        root = _companion_root()
+        p = (Path(root) / p) if root is not None else (Path.cwd() / p)
+    p = p.resolve()
+    try:
+        p.relative_to(_REPO)
+    except ValueError:
+        return p
+    raise ConfigNotInitialized(
+        "output_dir resolves INSIDE this repo (%s).\n"
+        "A public skill repo ships the tool; everything a real run produces belongs in the private\n"
+        "companion repo beside it. Set output_dir in the companion's config.json to a path relative\n"
+        "to that companion, for example \"data/reports/smallcap\", or to an absolute path outside\n"
+        "this repo.\n%s" % (p, CONFIG_SETUP_HINT))
+
+
+REPORTS = _resolve_output_dir(CFG["output_dir"])
+if _RUN:
+    REPORTS = REPORTS / _RUN
 REPORTS.mkdir(parents=True, exist_ok=True)
 
 def init_edgar() -> None:
