@@ -80,6 +80,11 @@ from _recall import (
 # public repo -- hundreds of them, before the 2026-07 audit. No content scanner catches that; there is no
 # email or phone in it, just a life, correctly formatted. So the path resolves to the private store
 # and there is deliberately NO in-repo fallback: a fallback is not a convenience, it IS the leak.
+# datadir moved into the guards submodule: one copy for the fleet instead of one per repo,
+# which had already begun to drift. The insert above stays, because sibling modules in this
+# same tools/ directory are still imported by bare name.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "guards", "tools"))
 from datadir import resolve_data_dir, DataDirNotInitialized  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
