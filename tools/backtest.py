@@ -412,8 +412,13 @@ def run_cell(theme: str, asof: str, horizon: int = DEFAULT_HORIZON_MONTHS,
     benchmark_fn = benchmark_fn or benchmark_return
 
     universe = universe_fn(theme, asof)
+    universe_full = len(universe)
     if limit is not None:
         universe = universe[:limit]
+    truncated = universe_full > len(universe)
+    if truncated:
+        print(f"[backtest] --limit {limit}: processing {len(universe)} of {universe_full} universe "
+              f"names (smoke test, NOT a full-panel cell)", file=sys.stderr)
 
     rows: list[dict] = []
     for ent in universe:
