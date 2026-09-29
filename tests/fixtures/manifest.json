@@ -1,0 +1,8 @@
+{
+  "origin": "tools/make_fixtures.py:private_run_scenario",
+  "synthetic_only": true,
+  "files": {
+    "private_runs.json": "ea819ece5da7c87c0898cf4f5e58f7901bc6451ced511a122d71694bf052862d",
+    "finalizer.json": "01fb0818cdeffc2e5fd5864df39ce7d9ca6807981f51fdf32414c2e5fd285266"
+  }
+}

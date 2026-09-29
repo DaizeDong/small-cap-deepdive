@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pandas as pd
 from _common import REPORTS, today
+from _output_paths import prove_output_path
 
 RATING_MAP = {"买入": 3, "buy": 3, "观察": 2, "watch": 2, "hold": 2,
               "避开": 1, "avoid": 1, "sell": 1}
@@ -57,14 +58,15 @@ def extract_rating(md: str) -> dict:
     finalize_run.parse_rating_block 是单一权威解析器。仅当报告没有围栏块(旧版自由文本报告)
     时回退到旧的散文正则(旧正则在 11 份报告里有 5 份置信度解析失败 — ergonomics G2)。
     """
-    out = {"rating": None, "rating_score": 0, "confidence": None}
+    out = {"rating": None, "rating_score": 0, "confidence": None, "killflags": 0}
 
     # 1) Fenced front-matter contract (preferred, deterministic).
-    try:
-        from finalize_run import parse_rating_block
-        fm = parse_rating_block(md)
-    except Exception:
-        fm = {"found": False}
+    from finalize_run import parse_rating_block
+    fm = parse_rating_block(md)
+    if fm.get("found"):
+        if not fm.get("rating"):
+            raise ValueError("Unfinished or invalid authoritative rating; finalize the decision first")
+        out["killflags"] = fm.get("killflag_count", 0)
     if fm.get("found") and fm.get("rating"):
         r = fm["rating"]
         out["rating"] = r
@@ -92,7 +94,7 @@ def load_hard_data(ticker: str, reports_dir=None) -> dict:
     # reports_dir defaults to REPORTS, but MUST honor --input so finalize_run's
     # `rank.py --input <run>` finds the run's deepdive JSONs (previously it always
     # globbed REPORTS, so an --input run had no hard data -> missing 'killflags' column).
-    base = reports_dir if reports_dir is not None else REPORTS
+    base = Path(reports_dir if reports_dir is not None else REPORTS)
     files = glob.glob(str(base / f"deepdive_{ticker}_*.json"))
     if not files:
         return {}
@@ -144,7 +146,7 @@ def compute_funnel_stats(reports_dir=None) -> dict:
     Counts that can't be derived are None so the template can omit that stage rather than print a
     contradictory number.
     """
-    base = reports_dir if reports_dir is not None else REPORTS
+    base = Path(reports_dir if reports_dir is not None else REPORTS)
     reports = glob.glob(str(base / "report_*.md"))
     # v0.3.1 #13: count ONLY per-ticker deepdive_<TICKER>_<DATE>.json files; the run dir also
     # contains deepdive_verdicts/queue/targets.json sidecars that a bare glob would over-count by
@@ -201,8 +203,8 @@ def rank_frame(df: pd.DataFrame) -> pd.DataFrame:
     """Apply the ranking rule: AVOID (rating_score<=1) OR kill-flag>=2 sinks to the bottom;
     survivors order by rating_score * confidence. Pure function — used by main() and selftest."""
     df = df.copy()
-    # Defensive: a report with no matching deepdive JSON yields no 'killflags' column.
-    # Treat absent hard-data as 0 kill-flags rather than KeyError-ing the whole rebuild.
+    # Direct callers may have neither report nor sidecar risk counts.
+    # The complete caller reconciles both sources before creating this frame.
     if "killflags" not in df.columns:
         df["killflags"] = 0
     df["sink"] = (df["rating_score"] <= 1) | (df["killflags"].fillna(0) >= 2)
@@ -328,7 +330,8 @@ def main():
         _selftest()
         return
 
-    reports_dir = Path(args.input) if args.input else REPORTS
+    reports_dir = prove_output_path(Path(args.input) if args.input else REPORTS)
+    prove_output_path(reports_dir / "RANKING.md")
 
     # Slug-scoped pattern: prefer report_<slug>_*.md; fall back to all report_*.md
     if args.slug:
@@ -343,7 +346,10 @@ def main():
         md = read_text_utf8(rp)
         rec = {"ticker": ticker}
         rec.update(extract_rating(md))
+        report_killflags = rec["killflags"]
         rec.update(load_hard_data(ticker, reports_dir))
+        # Disagreement must not erase risk already identified by either source.
+        rec["killflags"] = max(report_killflags, rec["killflags"])
         rows.append(rec)
     df = pd.DataFrame(rows)
 
@@ -380,7 +386,7 @@ def main():
               f"- **沉底(避开/kill-flag≥2):** {df['sink'].sum()} 家", "",
               "各家完整尽调见 `report_<ticker>.md`(含可证伪多空论点+pre-mortem+反方)。"]
 
-    out = reports_dir / "RANKING.md"
+    out = prove_output_path(reports_dir / "RANKING.md")
     out.write_text("\n".join(lines), encoding="utf-8")
     print(df[["ticker", "rating", "confidence", "killflags", "sink", "combined"]].to_string())
     print(f"\n排序: {out}")

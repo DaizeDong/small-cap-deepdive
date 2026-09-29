@@ -1,15 +1,14 @@
-"""_deepdive_concepts.py — XBRL concept-series pull layer extracted from deepdive_data.py.
+"""XBRL concept-series fetching, annual selection, and filing-date provenance.
 
-Pure refactor: the XBRL companyconcept fetchers, the concept-cascade constants, the us-gaap +
-ifrs-full merge helpers, and the SEC company_tickers cache. No behavior change — every symbol here
-was moved verbatim from deepdive_data.py and is re-exported there so the public module path is
-unchanged. Imports only from _common (and stdlib); NEVER from deepdive_data (no circular import).
+Concept constants, taxonomy merge helpers, and the SEC ticker cache are re-exported by
+deepdive_data. Imports only from _common and stdlib to avoid circular imports.
 
 The single low-level fetcher `_one_concept` is the monkeypatch point used by deepdive_data's
 selftest (it patches _deepdive_concepts._one_concept). Every concept/flag helper that pulls XBRL
 resolves the fetcher through this module's namespace so a single patch covers them all.
 """
 from __future__ import annotations
+from datetime import date
 import time
 from pathlib import Path
 import sys
@@ -169,6 +168,21 @@ INSURANCE_CONCEPTS = [
 ]
 
 
+# Only known instant concepts may omit a start date. New concepts with unknown
+# period type need duration evidence until their instant semantics are registered.
+_INSTANT_CONCEPTS = {
+    *DEBT_SUM_CONCEPTS, *OPERATING_LEASE_CONCEPTS, *PPE_FLEET_CONCEPTS,
+    DEBT_CONCEPT_FALLBACK1, DEBT_CONCEPT_FALLBACK1B, DEBT_CONCEPT_FALLBACK1C,
+    DEBT_CONCEPT_FALLBACK2,
+    "Assets", "AssetsCurrent", "LiabilitiesCurrent", "StockholdersEquity",
+    "LiabilitiesAndStockholdersEquity", "CashAndCashEquivalentsAtCarryingValue",
+    "Goodwill", "IntangibleAssetsNetExcludingGoodwill", "RetainedEarningsAccumulatedDeficit",
+    "CommonStockSharesOutstanding", "EntityCommonStockSharesOutstanding",
+    "LiabilityForClaimsAndClaimsAdjustmentExpense", "PolicyholderFunds",
+    "LiabilityForFuturePolicyBenefits", "DeferredPolicyAcquisitionCosts", "UnearnedPremiums",
+}
+
+
 # PIT (backtest, FIX 1), as-of filed-date accumulator. When a point-in-time pull runs (asof set),
 # _one_concept records the max "filed" date of the facts it actually KEPT (filed<=asof, the latest-
 # filed-per-end-date disclosures an investor at `asof` could have seen) into this module-level
@@ -178,7 +192,7 @@ INSURANCE_CONCEPTS = [
 # asserts asof_max_filing_date <= asof). The accumulator is process-global but ALWAYS reset by the
 # caller via reset_asof_filed_tracker() at the top of an as-of pull, so concurrent live (asof=None)
 # pulls, which NEVER touch it, cannot corrupt it. The asof=None path does not record anything, so
-# the live default stays byte-identical.
+# live pulls do not alter this accumulator.
 _asof_max_filed: str | None = None
 
 
@@ -203,13 +217,35 @@ def _record_asof_filed(filed: str | None) -> None:
         _asof_max_filed = filed
 
 
+def _annual_entry(fact: dict, *, allow_instant: bool) -> dict | None:
+    """Keep annual flows and instant balances with their original date evidence."""
+    try:
+        end = fact["end"]
+        date.fromisoformat(end)
+        entry = {"end": end, "val": fact["val"], "fy": fact.get("fy"),
+                 "filed": fact.get("filed")}
+        if "start" not in fact and not allow_instant:
+            return None
+        if "start" in fact:
+            start = fact["start"]
+            days = (date.fromisoformat(end) - date.fromisoformat(start)).days
+            if not 330 <= days <= 400:
+                return None
+            entry.update(start=start, duration_days=days,
+                         fp=fact.get("fp", ""), form=fact.get("form", ""))
+        return entry
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap", asof: str | None = None) -> list:
     """拉单个 XBRL 概念的年度序列。
 
-    Annual selection: prefer entries where fp=='FY' AND form starts with '10-K'.
-    Secondary guard: for flow concepts (revenue/income) with start+end dates, also accept
-    day-span 330-400 as fallback when fp/form fields are absent.
-    Instant concepts (balance-sheet items without 'start') are always included.
+    Flow facts require a 330-400 day span, regardless of annual filing labels. Quarterly
+    comparatives and short transition periods in annual filings are excluded, not annualized.
+    Registered instant concepts (balances and period-end shares) do not need a duration.
+    A missing start date alone cannot establish that a concept is an instant balance.
+    Returned facts retain filing dates, and flows retain start dates and duration.
 
     Same end-date dedup within one concept: last entry in API response order wins,
     which aligns with EDGAR ordering (restated/amended values appear after originals).
@@ -219,9 +255,8 @@ def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap", asof: str | 
         with filed <= asof (drops facts disclosed after the as-of date — no look-ahead);
       * per end-date, pick the LATEST-FILED fact <= asof (the most recent disclosure that an
         investor standing at `asof` could have seen — restatements filed after asof are ignored).
-    `asof=None` is the live default: behavior is BYTE-IDENTICAL to the pre-PIT code path (the
-    asof block is never entered, dedup stays "last in API order wins"). A fact missing a "filed"
-    field is conservatively DROPPED in the asof path (cannot be dated <= T safely).
+    `asof=None` keeps the last eligible fact in API order. A fact missing a valid "filed"
+    date is conservatively dropped in the asof path (cannot be dated <= T safely).
     """
     if taxonomy == "us-gaap":
         url = FACTS.format(cik=str(cik).zfill(10), concept=concept)
@@ -235,69 +270,27 @@ def _one_concept(cik: str, concept: str, taxonomy: str = "us-gaap", asof: str | 
             return []
         units = r.json().get("units", {})
         vals = units.get("USD") or units.get("USD/shares") or units.get("shares") or []
-        from datetime import date
-        if asof is None:
-            # --- LIVE DEFAULT PATH (byte-identical to pre-PIT behavior) ---
-            seen_end: dict = {}  # dedup by end date; last wins (restated overrides original)
-            for v in vals:
-                if "start" in v and "end" in v:
-                    try:
-                        s = date.fromisoformat(v["start"])
-                        e = date.fromisoformat(v["end"])
-                        days = (e - s).days
-                        fp = v.get("fp", "")
-                        form = v.get("form", "")
-                        # Accept: fp==FY AND form is annual (10-K or 10-K/A)
-                        is_annual_tagged = (fp == "FY" and form.startswith("10-K"))
-                        # Fallback: day span ~annual when tags absent
-                        is_annual_span = (330 <= days <= 400)
-                        if is_annual_tagged or is_annual_span:
-                            seen_end[v["end"]] = {
-                                "end": v["end"], "val": v["val"],
-                                "fy": v.get("fy"), "fp": fp, "form": form,
-                            }
-                    except Exception:
-                        pass
-                elif "end" in v:  # instant (balance-sheet item, no start date)
-                    seen_end[v["end"]] = {"end": v["end"], "val": v["val"], "fy": v.get("fy")}
-            return list(seen_end.values())
-        # --- PIT (as-of) PATH, filed<=asof, latest-filed-per-end-date wins ---
-        seen_pit: dict = {}  # end-date -> {entry, _filed} ; keep the latest-filed <= asof
-        for v in vals:
-            filed = v.get("filed")
-            if not filed or filed > asof:  # drop undated or future-filed facts (no look-ahead)
+        seen: dict = {}
+        for fact in vals:
+            entry = _annual_entry(fact, allow_instant=concept in _INSTANT_CONCEPTS)
+            if entry is None:
                 continue
-            if "start" in v and "end" in v:
+            if asof is not None:
+                filed = entry["filed"]
                 try:
-                    s = date.fromisoformat(v["start"])
-                    e = date.fromisoformat(v["end"])
-                    days = (e - s).days
-                    fp = v.get("fp", "")
-                    form = v.get("form", "")
-                    is_annual_tagged = (fp == "FY" and form.startswith("10-K"))
-                    is_annual_span = (330 <= days <= 400)
-                    if not (is_annual_tagged or is_annual_span):
-                        continue
-                    entry = {
-                        "end": v["end"], "val": v["val"],
-                        "fy": v.get("fy"), "fp": fp, "form": form,
-                    }
-                except Exception:
+                    date.fromisoformat(filed)
+                except (TypeError, ValueError):
                     continue
-            elif "end" in v:  # instant (balance-sheet item, no start date)
-                entry = {"end": v["end"], "val": v["val"], "fy": v.get("fy")}
-            else:
-                continue
-            prev = seen_pit.get(v["end"])
-            # Latest-filed wins; tie on filed -> later API-order wins (mirrors live dedup).
-            if prev is None or filed >= prev["_filed"]:
-                seen_pit[v["end"]] = {"_filed": filed, "entry": entry}
-        # FIX 1, record the max "filed" date of the facts actually KEPT (the latest-filed-per-end
-        # disclosures that feed the returned values). This is the look-ahead-audit evidence: every
-        # recorded date is, by construction, <= asof. Live (asof=None) path never reaches here.
-        for x in seen_pit.values():
-            _record_asof_filed(x["_filed"])
-        return [x["entry"] for x in seen_pit.values()]
+                if filed > asof:
+                    continue
+                previous = seen.get(entry["end"])
+                if previous is not None and filed < previous["filed"]:
+                    continue
+            seen[entry["end"]] = entry
+        if asof is not None:
+            for entry in seen.values():
+                _record_asof_filed(entry["filed"])
+        return list(seen.values())
     except Exception:
         return []
 

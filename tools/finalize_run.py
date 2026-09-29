@@ -20,25 +20,30 @@ output boundary deterministically:
      same parsed ratings (deterministic, not agent-authored).
 
 Usage:
-    export SMALLCAP_RUN=2026-06-20_validation-v0.2.1
+    export SMALLCAP_RUN=<run-name>
     python tools/finalize_run.py                       # finalize the active run dir
-    python tools/finalize_run.py --input reports/smallcap/2026-06-20_validation-v0.2.1/
+    python tools/finalize_run.py --input "<private-companion>/reports/smallcap/<run-name>"
     python tools/finalize_run.py --no-rank             # skip the rank.py rebuild
     python tools/finalize_run.py --selftest
 """
 from __future__ import annotations
 import argparse
 import glob
+import hashlib
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
+from datetime import date
 
 # Add tools dir to path for _common import
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _common import REPORTS, today
+from _output_paths import prove_output_path
 
 # English -> canonical Chinese rating (reports/track_forward/rank speak 中文 internally).
 _RATING_NORM = {"buy": "买入", "watch": "观察", "hold": "观察",
@@ -97,37 +102,57 @@ def repair_nested_run_tree(reports_dir: Path) -> list[Path]:
     If reports_dir contains a nested `reports/smallcap/<run>/` subtree (the path-doubling
     artifact), move every file from the deepest nested leaf up into reports_dir (without
     clobbering an existing same-named file) and remove the now-empty nested skeleton.
+    Directory links and nested repositories are preserved without traversal. The
+    caller must prove the canonical output directory PRIVATE before invoking repair.
     Returns the list of files relocated. No-op (empty list) when no nested tree exists.
     """
     moved: list[Path] = []
-    nested_root = reports_dir / "reports" / "smallcap"
-    if not nested_root.is_dir():
+
+    def linked(path):
+        try:
+            status = path.lstat()
+        except FileNotFoundError:
+            return False
+        return (stat.S_ISLNK(status.st_mode) or
+                (os.name == "nt" and bool(status.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)))
+
+    def ordinary_directory(path):
+        return (not linked(path) and path.is_dir() and not os.path.lexists(path / ".git")
+                and not ((path / "HEAD").is_file() and (path / "objects").is_dir()))
+
+    def prune_empty(directory):
+        if not any(directory.iterdir()):
+            directory.rmdir()
+
+    def lift(directory):
+        for src in sorted(directory.iterdir()):
+            if linked(src):
+                continue
+            if src.is_dir():
+                if ordinary_directory(src):
+                    lift(src)
+            elif src.is_file():
+                dest = reports_dir / src.name
+                if os.path.lexists(dest):
+                    sys.stderr.write(
+                        f"WARNING: nested-tree repair skipped {src} (dest {dest} already exists)\n")
+                    continue
+                src.replace(dest)
+                moved.append(dest)
+        prune_empty(directory)
+
+    # Check each prefix before descending: resolving only the leaf could hide a junction.
+    prefix = reports_dir / "reports"
+    if not ordinary_directory(prefix):
         return moved
-    # Each child of nested_root is a doubled <run> dir; lift its files (recursively) up.
+    nested_root = prefix / "smallcap"
+    if not ordinary_directory(nested_root):
+        return moved
     for run_sub in sorted(nested_root.iterdir()):
-        if not run_sub.is_dir():
-            continue
-        for src in sorted(run_sub.rglob("*")):
-            if not src.is_file():
-                continue
-            dest = reports_dir / src.name
-            if dest.exists():
-                # Don't clobber a correctly-placed artifact; leave the dupe in place but report.
-                sys.stderr.write(
-                    f"WARNING: nested-tree repair skipped {src} (dest {dest} already exists)\n")
-                continue
-            src.replace(dest)
-            moved.append(dest)
-    # Prune the now-empty nested skeleton (reports/smallcap[/<run>...]).
-    try:
-        for d in sorted(nested_root.rglob("*"), reverse=True):
-            if d.is_dir() and not any(d.iterdir()):
-                d.rmdir()
-        for d in (nested_root, reports_dir / "reports"):
-            if d.is_dir() and not any(d.iterdir()):
-                d.rmdir()
-    except OSError:
-        pass
+        if ordinary_directory(run_sub):
+            lift(run_sub)
+    prune_empty(nested_root)
+    prune_empty(prefix)
     return moved
 
 
@@ -184,6 +209,7 @@ def parse_rating_block(md: str) -> dict:
         "mos_basis": "abstain", "mos_pct": None, "buy_eligible": None,
         "killflag_count": 0, "concentration_flag": None,
         "fundamental_decline_flag": False, "found": False,
+        "verdict_date": None,
     }
     m = _FENCE_RE.search(md)
     if not m:
@@ -217,12 +243,35 @@ def parse_rating_block(md: str) -> dict:
             out["concentration_flag"] = None if low in _UNSET else val
         elif key == "fundamental_decline_flag":
             out["fundamental_decline_flag"] = bool(_coerce_bool(val))
+        elif key == "verdict_date":
+            out["verdict_date"] = None if low in _UNSET else val
     return out
 
 
 # ---------------------------------------------------------------------------
 # Candidate / report discovery
 # ---------------------------------------------------------------------------
+
+def _candidate_rows(path: str | Path) -> list[dict]:
+    """Read a present candidate artifact without treating invalid evidence as empty."""
+    try:
+        data = read_json_utf8(path)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Cannot read candidate JSON: {Path(path).name}") from exc
+    if isinstance(data, list):
+        rows = data
+    elif isinstance(data, dict) and ("candidates" in data or "results" in data):
+        rows = data.get("candidates", data.get("results"))
+    else:
+        raise ValueError(f"Invalid candidate schema: {Path(path).name}")
+    if not isinstance(rows, list):
+        raise ValueError(f"Invalid candidate rows: {Path(path).name}")
+    for row in rows:
+        ticker = (row.get("ticker") or row.get("symbol")) if isinstance(row, dict) else None
+        if not isinstance(ticker, str) or not ticker.strip():
+            raise ValueError(f"Candidate row has no ticker: {Path(path).name}")
+    return rows
+
 
 def deep_band_tickers(reports_dir: Path) -> set[str]:
     """Tickers that earned a full deep-dive (band='deep') from the run's candidates JSON(s).
@@ -237,16 +286,8 @@ def deep_band_tickers(reports_dir: Path) -> set[str]:
     cand_files = (glob.glob(str(reports_dir / "candidates_*.json"))
                   + glob.glob(str(reports_dir / "all_candidates.json")))
     for cf in cand_files:
-        try:
-            data = read_json_utf8(cf)
-        except Exception:
-            continue
-        rows = data if isinstance(data, list) else data.get("candidates", [])
-        if not isinstance(rows, list):
-            continue
+        rows = _candidate_rows(cf)
         for row in rows:
-            if not isinstance(row, dict):
-                continue
             band = row.get("band")
             if band is not None:
                 saw_band = True
@@ -256,10 +297,9 @@ def deep_band_tickers(reports_dir: Path) -> set[str]:
     if not saw_band:
         # Legacy fallback: a deepdive JSON existing means a deep-dive happened.
         for f in glob.glob(str(reports_dir / "deepdive_*.json")):
-            stem = Path(f).stem  # deepdive_<ticker>_<date>
-            parts = stem.split("_")
-            if len(parts) >= 2:
-                deep.add(parts[1].upper())
+            match = re.fullmatch(r"deepdive_(.+)_\d{4}-\d{2}-\d{2}", Path(f).stem)
+            if match:
+                deep.add(match.group(1).upper())
     return deep
 
 
@@ -271,21 +311,8 @@ def report_tickers(reports_dir: Path) -> set[str]:
 
 
 def _tickers_from_json(path: str) -> set[str]:
-    """Best-effort: collect ticker/symbol values from a list-or-{candidates:[...]} JSON file."""
-    out: set[str] = set()
-    try:
-        data = read_json_utf8(path)
-    except Exception:
-        return out
-    rows = data if isinstance(data, list) else data.get("results", data.get("candidates", []))
-    if not isinstance(rows, list):
-        return out
-    for row in rows:
-        if isinstance(row, dict):
-            tk = row.get("ticker") or row.get("symbol")
-            if tk:
-                out.add(str(tk).upper())
-    return out
+    """Collect tickers from a validated, possibly empty candidate artifact."""
+    return {(row.get("ticker") or row.get("symbol")).upper() for row in _candidate_rows(path)}
 
 
 def gate2_misrecall_tickers(reports_dir: Path) -> set[str]:
@@ -318,13 +345,7 @@ def gate2_misrecall_tickers(reports_dir: Path) -> set[str]:
     _VERDICT_KEYS = ("theme_fit", "fit", "verdict", "decision", "gate2", "gate2_result", "status")
     _RETAINED_KEYS = ("retained", "kept", "keep", "passed", "pass", "survived", "is_member")
     for gf in glob.glob(str(reports_dir / "gate2_results.json")):
-        try:
-            data = read_json_utf8(gf)
-        except Exception:
-            continue
-        rows = data if isinstance(data, list) else data.get("results", data.get("candidates", []))
-        if not isinstance(rows, list):
-            continue
+        rows = _candidate_rows(gf)
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -351,8 +372,7 @@ def gate2_misrecall_tickers(reports_dir: Path) -> set[str]:
         survivors: set[str] = set()
         for sf in survivor_files:
             survivors |= _tickers_from_json(sf)
-        if survivors:
-            out |= {t for t in deep_band_tickers(reports_dir) if t not in survivors}
+        out |= {t for t in deep_band_tickers(reports_dir) if t not in survivors}
 
     return out
 
@@ -382,7 +402,31 @@ def _find_json(reports_dir: Path, prefix: str, ticker: str) -> dict:
     return obj if isinstance(obj, dict) else {}
 
 
-def build_verdict(ticker: str, reports_dir: Path, run_date: str) -> dict:
+def _decision_date(md: str, parsed: dict, explicit: str | None) -> tuple[str, str]:
+    """Keep a persisted decision date; an explicit date may initialize an undated legacy report."""
+    values = []
+    if parsed.get("verdict_date"):
+        values.append((parsed["verdict_date"], "rating.verdict_date"))
+    heading = re.search(r"^# .+ Deep Dive [—-] (\d{4}-\d{2}-\d{2}) \(timestamp-locked\)\s*$", md, re.M)
+    if heading:
+        values.append((heading.group(1), "timestamp-locked report heading"))
+    if explicit:
+        values.append((explicit, "explicit verdict date"))
+    if not values:
+        raise ValueError("Decision has no persisted verdict_date; date the report or pass --verdict-date")
+    for value, _ in values:
+        try:
+            valid = date.fromisoformat(value).isoformat() == value
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            raise ValueError("Decision verdict_date must be YYYY-MM-DD")
+    if len({value for value, _ in values}) != 1:
+        raise ValueError("Conflicting decision dates; explicitly revise the dated report before finalizing")
+    return values[0]
+
+
+def build_verdict(ticker: str, reports_dir: Path, run_date: str | None) -> dict:
     """Build one verdict dict from a report's fenced rating block + its deepdive/valuation JSON.
 
     Field names match track_forward.py:_build_verdicts_from_json EXACTLY (ticker, rating,
@@ -390,7 +434,14 @@ def build_verdict(ticker: str, reports_dir: Path, run_date: str) -> dict:
     theme, kill_flags). track_forward fills entry/benchmark prices + scoring at --record time.
     """
     rp = reports_dir / f"report_{ticker}.md"
-    parsed = parse_rating_block(read_text_utf8(rp)) if rp.exists() else parse_rating_block("")
+    md = read_text_utf8(rp) if rp.exists() else ""
+    parsed = parse_rating_block(md)
+    if not parsed["found"] or parsed["rating"] is None:
+        raise ValueError(f"Unfinished or invalid decision rating for {ticker}")
+    confidence = parsed["confidence"]
+    if not isinstance(confidence, int) or not 0 <= confidence <= 100:
+        raise ValueError(f"Unfinished or invalid decision confidence for {ticker}")
+    verdict_date, date_source = _decision_date(md, parsed, run_date)
     deep = _find_json(reports_dir, "deepdive", ticker)
     val = deep.get("valuation") if isinstance(deep.get("valuation"), dict) else {}
     if not val:
@@ -413,27 +464,38 @@ def build_verdict(ticker: str, reports_dir: Path, run_date: str) -> dict:
                           ("death_spiral", tk.get("has_death_spiral"))):
         if present:
             kill_flags.append(name)
-    if der.get("concentration_flag") == "kill":
+    if der.get("concentration_flag") == "kill" or parsed["concentration_flag"] == "kill":
         kill_flags.append("concentration_kill")
-    if der.get("fundamental_decline_flag"):
+    if der.get("fundamental_decline_flag") or parsed["fundamental_decline_flag"]:
         kill_flags.append("fundamental_decline")
+    report_count = parsed["killflag_count"]
+    structured_count = deep.get("killflag_count", 0)
+    if (type(report_count) is not int or report_count < 0
+            or type(structured_count) is not int or structured_count < 0):
+        raise ValueError(f"Invalid decision risk count for {ticker}")
+    risk_count = max(report_count, structured_count, len(kill_flags))
 
     return {
         "ticker": ticker,
         "cik": str(deep.get("cik")) if deep.get("cik") else None,
         "theme": deep.get("theme") or deep.get("theme_slug"),
-        "verdict_date": run_date,
-        "rating": parsed["rating"] or "观察",  # default WATCH when report not finalized
+        "verdict_date": verdict_date,
+        "verdict_date_source": date_source,
+        "report_sha256": hashlib.sha256(rp.read_bytes()).hexdigest(),
+        "rating": parsed["rating"],
         "confidence": parsed["confidence"],
         "margin_of_safety_pct": mos,
         "mos_basis": parsed["mos_basis"],
         "buy_eligible": parsed["buy_eligible"],
         "kill_flags": kill_flags,
+        "killflag_count": risk_count,
+        "unresolved_killflag_count": risk_count - len(kill_flags),
+        "risk_evidence": {"report_count": report_count, "structured_count": structured_count},
         "catalyst": None,
     }
 
 
-def emit_verdicts(reports_dir: Path, tickers: set[str], run_date: str) -> Path:
+def emit_verdicts(reports_dir: Path, tickers: set[str], run_date: str | None) -> Path:
     verdicts = [build_verdict(t, reports_dir, run_date) for t in sorted(tickers)]
     out = reports_dir / "deepdive_verdicts.json"
     out.write_text(json.dumps(verdicts, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -456,13 +518,14 @@ def rebuild_ranking(reports_dir: Path) -> bool:
     return res.returncode == 0
 
 
-def main() -> None:
+def main() -> int:
     ap = argparse.ArgumentParser(
         description="finalize_run.py — assert reports complete, emit verdict block, rebuild RANKING."
     )
     ap.add_argument("--input", default="",
                     help="run directory (default: REPORTS / active SMALLCAP_RUN)")
     ap.add_argument("--no-rank", action="store_true", help="skip the rank.py RANKING rebuild")
+    ap.add_argument("--verdict-date", help="YYYY-MM-DD for a legacy report without a persisted decision date")
     ap.add_argument("--allow-missing", action="store_true",
                     help="warn instead of failing when a deep-band candidate lacks a report")
     ap.add_argument("--selftest", action="store_true",
@@ -471,12 +534,14 @@ def main() -> None:
 
     if args.selftest:
         _selftest()
-        return
+        return 0
 
     # P-C: standardize run-dir resolution so a run-relative prefix is never doubled. REPORTS
     # already carries SMALLCAP_RUN; an explicit --input may double it across invocation styles.
-    reports_dir = collapse_run_path(Path(args.input) if args.input else REPORTS)
-    run_date = today()
+    reports_dir = prove_output_path(collapse_run_path(Path(args.input) if args.input else REPORTS))
+    # Verify the final file too, before repair can mutate any existing artifacts.
+    prove_output_path(reports_dir / "deepdive_verdicts.json")
+    run_date = args.verdict_date
 
     # P-C: repair any nested reports/smallcap/.../reports/smallcap/... tree left by a doubled
     # write before asserting completeness (so lifted reports/valuations count as present).
@@ -498,16 +563,19 @@ def main() -> None:
 
     # Emit verdicts for every report present (the completeness check governs deep-band coverage).
     have = report_tickers(reports_dir)
+    prove_output_path(reports_dir / "deepdive_verdicts.json")
     vout = emit_verdicts(reports_dir, have, run_date)
     print(f"verdicts emitted: {vout} ({len(have)} report(s))")
 
+    ranking_ok = True
     if not args.no_rank:
-        ok = rebuild_ranking(reports_dir)
-        print(f"RANKING rebuilt: {reports_dir / 'RANKING.md'}" if ok else "RANKING rebuild FAILED")
+        ranking_ok = rebuild_ranking(reports_dir)
+        print(f"RANKING rebuilt: {reports_dir / 'RANKING.md'}" if ranking_ok else "RANKING rebuild FAILED")
 
     gated = gate2_misrecall_tickers(reports_dir)
     print(f"deep-band candidates: {len(deep)}, reports: {len(have)}, "
           f"gate2-misrecall (resolved, not deep-dived): {len(gated)}, missing: {len(missing)}")
+    return 0 if ranking_ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -625,9 +693,13 @@ def _selftest() -> None:
         except Exception:
             pass
 
-        # Verdict for a missing report -> still emitted, defaults to WATCH.
-        v_missing = build_verdict("MGPI", rd, "2026-06-20")
-        assert v_missing["rating"] == "观察", "missing report defaults to WATCH"
+        # A missing report cannot produce a completed-looking decision.
+        try:
+            build_verdict(next(iter(missing)), rd, "2026-06-20")
+        except ValueError as exc:
+            assert "rating" in str(exc), str(exc)
+        else:
+            raise AssertionError("Missing report was finalized")
 
         # P-F: a deep-band name flagged Gate-2 misrecall is RESOLVED, not 'missing'.
         # Mark MGPI as misrecall in gate2_results.json; it should drop out of `missing`.
@@ -725,4 +797,4 @@ def _selftest() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

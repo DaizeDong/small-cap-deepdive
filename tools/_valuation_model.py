@@ -1,9 +1,8 @@
 """
 _valuation_model.py — valuation model primitives for valuation.py.
 
-Extracted (pure mechanical move, ZERO behavior change) from valuation.py so the
-orchestrator stays focused on compute_valuation() + CLI + selftest. This module
-holds the deterministic model inputs/transforms:
+This module holds deterministic model inputs and transforms. Missing CapEx
+remains explicit in the period evidence used by the valuation orchestrator:
 
   * config defaults + _val_cfg() merge
   * market-cap resolution (_get_market_cap)
@@ -41,6 +40,8 @@ def _val_cfg() -> dict:
     for k in defaults:
         if k in CFG:
             defaults[k] = float(CFG[k])
+    if "equity_discount_rate" in CFG:
+        defaults["equity_discount_rate"] = float(CFG["equity_discount_rate"])
     return defaults
 
 
@@ -137,13 +138,12 @@ def _build_ebitda_series(ebit_series: list[dict], da_series: list[dict]) -> tupl
 
 
 def _build_fcf_series(ocf_series: list[dict], capex_series: list[dict], fcf_is_proxy: bool) -> tuple[list[dict], bool]:
-    """Construct year-by-year FCF = OCF - CapEx series.
+    """Pair OCF and CapEx by period, retaining unknown FCF as a null value.
 
-    If capex_series is empty (proxy mode), returns OCF series as FCF with is_proxy=True.
-    Otherwise matches by end date; years without a capex match use OCF alone.
+    The boolean marks incomplete/proxy evidence anywhere in the returned series.
+    Callers selecting a shorter window must inspect the selected period records.
+    Reported zero CapEx is complete; an absent observation is not zero spending.
     """
-    if fcf_is_proxy or not capex_series:
-        return [{"end": v["end"], "val": v["val"]} for v in ocf_series], True
     ocf_map = {v["end"]: v["val"] for v in ocf_series}
     capex_map = {v["end"]: v["val"] for v in capex_series}
     # CapEx in XBRL PaymentsToAcquire... is stored as positive dollar outflow
@@ -151,8 +151,7 @@ def _build_fcf_series(ocf_series: list[dict], capex_series: list[dict], fcf_is_p
     for end in sorted(ocf_map):
         ocf_val = ocf_map[end]
         cx = capex_map.get(end)
-        if cx is not None:
-            result.append({"end": end, "val": ocf_val - cx})
-        else:
-            result.append({"end": end, "val": ocf_val})  # no capex matched
-    return result, False
+        complete = ocf_val is not None and cx is not None and not fcf_is_proxy
+        result.append({"end": end, "val": ocf_val - cx if complete else None,
+                       "ocf": ocf_val, "capex": cx, "capex_complete": complete})
+    return result, any(not row["capex_complete"] for row in result)

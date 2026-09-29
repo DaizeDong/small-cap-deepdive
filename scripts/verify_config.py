@@ -1,217 +1,97 @@
 #!/usr/bin/env python3
-"""Doctor for small-cap-deepdive's config (config-spec E3). Resolves config.json via the
-documented discovery order, validates the merged config against the schema, and prints
-PASS/FAIL per check naming exactly what is wrong. Exit 0 = ready, 1 = not ready, 2 = usage error.
+"""Check local config, PRIVATE output proof and dependencies without writing DATA.
 
-It catches the #1 silent failure: a placeholder/empty sec_user_agent (which 403s against EDGAR
-instead of erroring loudly). PII is NEVER echoed — only presence / shape is reported.
-
-Discovery order (config-spec E2):
-  1. $SMALL_CAP_DEEPDIVE_CONFIG_DIR (or $SMALL_CAP_DEEPDIVE_CONFIG) -> <dir>/config.json
-  2. ~/.small-cap-deepdive-config/config.json   3. ~/.config/small-cap-deepdive-config/config.json
-  4. nothing found -> NOT INITIALIZED. There is no in-repo step: a fallback into the repo is
-     not a convenience, it IS the leak (see tools/datadir.py).
-
-Usage:
-  python scripts/verify_config.py [--config-dir <dir>]
-Stdlib only. Never prints secret/PII values.
+--json prints one object. Offline checks do not establish live SEC, market or
+model readiness. Config values containing identity are never echoed.
 """
 import argparse
+import importlib.metadata
+import importlib.util
 import json
 import os
-import sys
 from pathlib import Path
+import re
+import sys
 
-_HERE = Path(__file__).resolve().parent
-_REPO = _HERE.parent
-_REF = _REPO / "reference"
-_EXAMPLE = _REF / "config.example.json"
-_PLACEHOLDER_UA = "small-cap-deepdive research your-email@example.com"
-PASS, FAIL, WARN = "PASS", "FAIL", "WARN"
-
-# field -> (python type, required), mirrors config.example.json schema (config-spec E1).
-_NUMERIC = {
-    "market_cap_max": int, "watch_band_max": int, "micro_cap_max": int,
-    "min_dollar_vol": int, "normalize_years": int,
-    "wacc": float, "cap_rate_low": float, "cap_rate_high": float,
-    "cyclical_cv_threshold": float,
-}
-_STR = ("output_dir", "python_cmd", "insider_source")
-
-# Same shape as tools/datadir.py's DataDirNotInitialized text, and byte-identical in intent to
-# tools/_common.py:CONFIG_SETUP_HINT. This script is stdlib-only and does not import the tools
-# package, so the text is restated rather than shared.
-_SETUP_HINT = (
-    "small-cap-deepdive has no config.json outside this repo, so it is UNINITIALIZED.\n"
-    "That is the correct state for a freshly cloned public skill. Point it at your own:\n"
-    "    mkdir -p ~/.small-cap-deepdive-config\n"
-    "    cp reference/config.example.json ~/.small-cap-deepdive-config/config.json\n"
-    "    (or set SMALL_CAP_DEEPDIVE_CONFIG_DIR to a dir OUTSIDE this repo)\n"
-    "Then set sec_user_agent (your real name + email) in that file.\n"
-    "There is deliberately NO in-repo fallback: reference/config.json was the documented\n"
-    "'legacy fallback', and a real SEC contact address ended up committed in it. A fallback\n"
-    "into the repo is not a convenience, it IS the leak."
-)
-_NOT_INITIALIZED = "NOT INITIALIZED (no config.json outside the repo)"
+_REPO = Path(__file__).resolve().parents[1]
+_NUMERIC = ('market_cap_max', 'watch_band_max', 'micro_cap_max', 'min_dollar_vol',
+            'normalize_years', 'wacc', 'cap_rate_low', 'cap_rate_high', 'cyclical_cv_threshold')
 
 
-def discover(override):
-    """Return (config.json path, how). The path is None when the tool is UNINITIALIZED.
-
-    The old final step returned `reference/config.json` and called it the "in-repo default", so a
-    fresh clone reported a phantom, gitignored, in-repo path as its config location, and the
-    obvious next move was to create one, i.e. to put an EDGAR identity inside a public repo. It
-    now reports not-initialized instead, the way tools/datadir.py:resolve_data_dir() returns None.
-    """
-    if override:
-        p = Path(os.path.expanduser(override)) / "config.json"
-        return p, "explicit (--config-dir)"
-    for var in ("SMALL_CAP_DEEPDIVE_CONFIG_DIR", "SMALL_CAP_DEEPDIVE_CONFIG"):
-        d = os.environ.get(var)
-        if d:
-            p = Path(os.path.expanduser(d)) / "config.json"
-            if p.exists():
-                return p, "env:%s" % var
-    for d in (Path(os.path.expanduser("~/.small-cap-deepdive-config")),
-              Path(os.path.expanduser("~/.config/small-cap-deepdive-config"))):
-        p = d / "config.json"
-        if p.exists():
-            return p, "default:%s" % d
-    return None, _NOT_INITIALIZED
+def _version(value):
+    match = re.match(r'(\d+)\.(\d+)(?:\.(\d+))?', value)
+    if match is None:
+        raise ValueError('unrecognized installed version')
+    return tuple(int(part or 0) for part in match.groups())
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Validate small-cap-deepdive config.")
-    ap.add_argument("--config-dir", default=None)
-    a = ap.parse_args()
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--config-dir')
+    parser.add_argument('--json', action='store_true')
+    args = parser.parse_args(argv)
+    if args.config_dir:
+        os.environ['SMALL_CAP_DEEPDIVE_CONFIG_DIR'] = args.config_dir
+    checks = []
+    reports_root = None
 
-    if not _EXAMPLE.is_file():
-        print("ERROR: %s missing (run from the skill repo)." % _EXAMPLE)
-        return 2
-    defaults = json.loads(_EXAMPLE.read_text(encoding="utf-8"))
+    def check(name, ok, detail='', warning=False):
+        checks.append({'name': name, 'status': 'pass' if ok else ('warn' if warning else 'fail'),
+                       'diagnostic': detail if not ok else ''})
 
-    cfg_path, how = discover(a.config_dir)
-    print("Config doctor for small-cap-deepdive")
-    print("  discovery -> %s" % how)
-    if cfg_path is None:
-        print("  config.json: (none)")
+    sys.path.insert(0, str(_REPO/'tools'))
+    try:
+        from _common import load_config, output_root
+        config = load_config()
+        reports_root = str(output_root())
+        check('PRIVATE companion, config and output root', True)
+        check('schema_version', config.get('schema_version') == 1, 'schema_version must equal 1')
+        for name in _NUMERIC:
+            try:
+                float(config[name])
+                check(name+' numeric', True)
+            except (KeyError, TypeError, ValueError):
+                check(name+' numeric', False, 'set a numeric '+name)
+        for name in ('output_dir', 'python_cmd', 'insider_source'):
+            check(name+' present', bool(str(config.get(name, '')).strip()), 'missing '+name)
+        check('sic_hard_exclude list', isinstance(config.get('sic_hard_exclude'), list),
+              'sic_hard_exclude must be a list')
+        identity = str(config.get('sec_user_agent', ''))
+        check('SEC identity configured', '@' in identity and 'your-email@example.com' not in identity,
+              'set sec_user_agent privately before live SEC use; no live check was performed', warning=True)
+    except (OSError, RuntimeError, ValueError, KeyError, ImportError) as exc:
+        check('PRIVATE companion, config and output root', False, str(exc))
+
+    try:
+        requirements = (_REPO/'tools/requirements.txt').read_text(encoding='utf-8').splitlines()
+        for requirement in requirements:
+            if not requirement.strip() or requirement.lstrip().startswith('#'):
+                continue
+            distribution, minimum = requirement.strip().split('>=', 1)
+            module = 'edgar' if distribution == 'edgartools' else distribution
+            try:
+                found = importlib.util.find_spec(module) is not None
+                installed = importlib.metadata.version(distribution)
+                ok = found and _version(installed) >= _version(minimum)
+                check('dependency '+distribution, ok, 'requires '+requirement.strip())
+            except (ImportError, ValueError, importlib.metadata.PackageNotFoundError):
+                check('dependency '+distribution, False, 'install declared requirement '+requirement.strip())
+    except (OSError, ValueError) as exc:
+        check('dependency declarations', False, str(exc))
+
+    ready = not any(item['status'] == 'fail' for item in checks)
+    report = {'status': 'ready' if ready else 'not_ready', 'reports_root': reports_root,
+              'scope': 'local_configuration_only', 'live_services_checked': False, 'checks': checks}
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False))
     else:
-        print("  config.json: %s%s" % (cfg_path, "" if cfg_path.exists() else "  (NOT FOUND)"))
-
-    cfg = dict(defaults)
-    overlay = {}
-    if cfg_path is not None and cfg_path.exists():
-        try:
-            overlay = json.loads(cfg_path.read_text(encoding="utf-8"))
-            cfg.update(overlay)
-        except Exception as e:
-            print("  [%s] config.json valid JSON -> %s" % (FAIL, e))
-            return 1
-    # apply SMALLCAP_* env overrides (same as load_config) so doctor matches runtime.
-    for k in list(cfg):
-        env = os.environ.get("SMALLCAP_" + k.upper())
-        if env is not None:
-            cfg[k] = env
-    print("-" * 64)
-
-    results = []
-
-    def check(name, ok, detail="", level=FAIL):
-        results.append((name, ok, detail, level))
-
-    # --- initialization: the tool is uninitialized until a config.json exists OUTSIDE the repo.
-    # This used to resolve to a phantom in-repo reference/config.json and the doctor happily went on
-    # validating it. Not finding one is a real, nameable state, not a cue to look inside the repo. ---
-    check("config.json found outside the repo", cfg_path is not None,
-          "uninitialized, see the setup block below")
-
-    # --- schema_version: structural contract tag (config-spec E1). Soft, defaults supply it. ---
-    sv = cfg.get("schema_version")
-    check("schema_version present (== 1)", sv == 1, "got %r (expected 1)" % sv, WARN)
-
-    # --- sec_user_agent: the one runtime-required PII (never echoed). Per Mode B the PII is filled
-    # as a SEPARATE step AFTER the structural skeleton is stamped, so a missing/placeholder UA is a
-    # loud WARN (named per E3, not silently OK) rather than a structural FAIL. This lets a freshly
-    # init'd config verify as structurally READY (config-spec E5 hot-swap) while still telling you
-    # exactly what to set before any live EDGAR call. Runtime still hard-needs it (EDGAR 403s loudly
-    # on a placeholder UA), so the protection is preserved, just relocated to where the secret is used. ---
-    ua = cfg.get("sec_user_agent")
-    if not ua or not str(ua).strip():
-        check("sec_user_agent set", False,
-              "empty/missing -> set real name+email before any live EDGAR call or it 403s", WARN)
-    elif str(ua).strip() == _PLACEHOLDER_UA:
-        check("sec_user_agent set", False,
-              "still the example PLACEHOLDER -> set real name+email or EDGAR will 403", WARN)
-    elif "@" not in str(ua):
-        check("sec_user_agent has an email", False,
-              "no '@' (EDGAR needs 'Name email@domain')", WARN)
-    else:
-        check("sec_user_agent set (real name+email)", True)  # value intentionally NOT printed
-
-    # --- type checks for known scalar fields (config-spec E1) ---
-    for key, typ in _NUMERIC.items():
-        v = cfg.get(key)
-        if v is None:
-            check("%s present" % key, False, "missing (no default applied)")
-            continue
-        try:
-            float(v)
-            ok = True
-        except (TypeError, ValueError):
-            ok = False
-        check("%s is numeric" % key, ok, "got %r" % v)
-    for key in _STR:
-        v = cfg.get(key)
-        check("%s present" % key, v is not None and str(v).strip() != "", "missing/empty")
-
-    sic = cfg.get("sic_hard_exclude")
-    check("sic_hard_exclude is a list", isinstance(sic, list), "type %s" % type(sic).__name__)
-
-    # --- E6: secrets isolation, overlay file must be gitignored / out-of-tree ---
-    gi = _REPO / ".gitignore"
-    gi_txt = gi.read_text(encoding="utf-8", errors="replace") if gi.is_file() else ""
-    check(".gitignore blocks config.json + *.env + secrets/",
-          all(s in gi_txt for s in ("config.json", "*.env", "secrets/")),
-          "harden .gitignore (config-spec E6)")
-    # An in-repo config.json is now a FAIL, not a "is it at least gitignored?" question. Gitignore
-    # is advisory (`git add -f` walks through it), and a real EDGAR identity inside a public
-    # working tree is a leak waiting for one careless add. Only reachable via --config-dir now.
-    inside = False
-    if cfg_path is not None:
-        try:
-            inside = _REPO in cfg_path.resolve().parents
-        except Exception:
-            inside = False
-    if inside:
-        check("config.json lives OUTSIDE the repo", False,
-              "%s is inside the skill repo, move it to ~/.small-cap-deepdive-config/" % cfg_path)
-
-    # report
-    n_fail = sum(1 for _, ok, _, lvl in results if not ok and lvl == FAIL)
-    n_warn = sum(1 for _, ok, _, lvl in results if not ok and lvl == WARN)
-    for nm, ok, detail, lvl in results:
-        tag = PASS if ok else lvl
-        line = "  [%s] %s" % (tag, nm)
-        if detail and not ok:
-            line += "  -> %s" % detail
-        print(line)
-    print("-" * 64)
-    if n_fail:
-        if cfg_path is None:
-            print(_SETUP_HINT)
-            print("-" * 64)
-        print("NOT READY: %d check(s) failed. Fix the above, then re-run verify_config.py." % n_fail)
-        print("  Tip: python scripts/init_config.py   # stamp a fresh config.json outside the repo")
-        return 1
-    if n_warn:
-        # Structure conforms (hot-swappable) but the runtime PII is not yet set: name it loudly,
-        # still exit 0 so the swap-test / discovery contract holds (config-spec E5).
-        print("READY (structure conforms) — but %d WARNING(s) above. Set sec_user_agent "
-              "(your real name + email) in config.json before any live EDGAR call, or requests 403." % n_warn)
-        return 0
-    print("READY: config conforms. sec_user_agent is set; defaults/overrides resolved.")
-    return 0
+        print('Small-cap local configuration doctor')
+        for item in checks:
+            print('[%s] %s%s' % (item['status'].upper(), item['name'],
+                                 ': '+item['diagnostic'] if item['diagnostic'] else ''))
+        print(report['status'].upper()+': local checks only; live SEC/market/model services were not checked')
+    return 0 if ready else 1
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__':
+    raise SystemExit(main())

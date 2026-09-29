@@ -1,0 +1,14 @@
+{
+  "run": "synthetic-output-run",
+  "ticker": "SYNTA",
+  "other_ticker": "SYNTB",
+  "report": "# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: watch\nconfidence: 64\nhold_period: 12 months\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+  "canonical": "{\"synthetic_location\": \"canonical\"}\n",
+  "duplicate": "{\"synthetic_location\": \"nested\"}\n",
+  "other_origin": "https://github.com/example/synthetic-other-config.git",
+  "rank_error": "Synthetic ranking child failed before output.",
+  "rank_returncodes": [
+    0,
+    7
+  ]
+}

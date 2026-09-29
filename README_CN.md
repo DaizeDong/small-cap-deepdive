@@ -91,7 +91,7 @@
 或手动克隆：
 
 ```bash
-git clone https://github.com/DaizeDong/small-cap-deepdive.git ~/.claude/plugins/small-cap-deepdive
+git clone --recurse-submodules https://github.com/DaizeDong/small-cap-deepdive.git ~/.claude/plugins/small-cap-deepdive
 ```
 
 然后安装取数层依赖并一次性配置：
@@ -99,14 +99,16 @@ git clone https://github.com/DaizeDong/small-cap-deepdive.git ~/.claude/plugins/
 ```bash
 cd ~/.claude/plugins/small-cap-deepdive
 pip install -r tools/requirements.txt
-mkdir -p ~/.small-cap-deepdive-config
-cp reference/config.example.json ~/.small-cap-deepdive-config/config.json
+gh repo create small-cap-deepdive-config --private
+gh repo clone small-cap-deepdive-config ~/.small-cap-deepdive-config
+export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
+python scripts/init_config.py
 ```
 
 打开 `~/.small-cap-deepdive-config/config.json`，将 `"sec_user_agent"` 设为你的真实姓名和邮箱：
 
 ```json
-"sec_user_agent": "张三 zhangsan@example.com"
+"sec_user_agent": "AcmeCorp user1@example.com"
 ```
 
 这是唯一必填字段。EDGAR 要求每次请求带有效 `User-Agent` 头（SEC 政策），缺失或使用假值会导致 `efts.sec.gov` 返回 403。
@@ -116,12 +118,24 @@ cp reference/config.example.json ~/.small-cap-deepdive-config/config.json
 
 若不走 `/plugin install`，也可建立 junction/symlink 部署为 Claude Code skill：
 
-```bash
-# Windows（以管理员身份运行）
-cmd /c mklink /J "%USERPROFILE%\.claude\skills\small-cap-deepdive" "skills\small-cap-deepdive"
+```powershell
+# 在克隆目录内运行，普通用户 PowerShell 即可，无需管理员权限。
+$repoRoot = (Resolve-Path -LiteralPath (git rev-parse --show-toplevel)).Path
+if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'SKILL.md'))) { throw 'SKILL.md missing' }
+$skillAlias = Join-Path $env:USERPROFILE '.claude/skills/small-cap-deepdive'
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $skillAlias) | Out-Null
+New-Item -ItemType Junction -Path $skillAlias -Target $repoRoot | Out-Null
+if (-not (Test-Path -LiteralPath (Join-Path $skillAlias 'SKILL.md'))) { throw 'Skill alias failed' }
+```
 
-# macOS / Linux
-ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
+```bash
+# macOS / Linux，在克隆目录内运行
+repo_root="$(git rev-parse --show-toplevel)"
+test -f "$repo_root/SKILL.md" || exit 1
+mkdir -p "$HOME/.claude/skills"
+skill_alias="$HOME/.claude/skills/small-cap-deepdive"
+ln -s "$repo_root" "$skill_alias"
+test -f "$skill_alias/SKILL.md" || exit 1
 ```
 
 ---
@@ -131,29 +145,33 @@ ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 `small-cap-deepdive` 是**带 config 的 skill**, 每个工具从一份 JSON 配置读取调参和唯一必填的 EDGAR
 身份（`sec_user_agent`）。逐字段完整规范见 [CONFIG.md](CONFIG.md)。
 
-- **挂载（发现顺序）：** `$SMALL_CAP_DEEPDIVE_CONFIG_DIR/config.json` → `$SMALL_CAP_DEEPDIVE_CONFIG/config.json`
-  → `~/.small-cap-deepdive-config/config.json` → `~/.config/small-cap-deepdive-config/config.json` →
-  全都没有则报 **NOT INITIALIZED（未初始化）**。命中第一个即用；有效配置 = `config.example.json` 默认值
-  ◁ 你的 `config.json` ◁ `SMALLCAP_*` 环境变量覆盖。
-  **发现链上没有任何一步落在仓内。** 它过去以仓内 `reference/config.json` 收尾，真实的 EDGAR 联系
-  地址就是这样被提交进公开仓的。回落到仓内不是便利，它就是泄漏。
+- **配置发现：** 通过固定版本的 `guards/tools/datadir.py` 选择伴生仓。
+  优先使用 `SMALL_CAP_DEEPDIVE_CONFIG_DIR` 或 `SMALL_CAP_DEEPDIVE_CONFIG`，
+  也支持解析器约定的相邻伴生仓和主目录位置。选中的目录必须属于可验证为 PRIVATE 的 Git 仓库，
+  并包含 `config.json`。缺少配置或无法确认可见性时，工具报错，不改用其他输出目录。
 - **首次配置：**
   ```bash
-  python scripts/init_config.py      # 在 ~/.small-cap-deepdive-config 生成 config.json（确定性）
+  python scripts/init_config.py      # 先验证已存在的私有伴生仓，再生成配置
   # 编辑该 config.json：把 "sec_user_agent" 设为你的真实姓名+邮箱（唯一硬性必填）
-  python scripts/verify_config.py    # doctor：逐字段 PASS/FAIL，明确报缺什么
+  python scripts/verify_config.py --json  # 检查本地配置、私有输出目录和依赖
   ```
 - **切换 config（即插即用）：** 把环境变量指向另一个 config 目录即可, config 自包含（`output_dir`
-  仓内相对路径、无硬编码绝对路径）：`export SMALL_CAP_DEEPDIVE_CONFIG_DIR=~/configs/A` ↔ `~/configs/B`。
+  相对于已验证的私有伴生仓）。每个配置目录都必须位于已经存在的 PRIVATE Git 工作树内。
 - **密钥 / PII：** Mode B, 你的 `config.json` 位于仓库之外；`config.json`、`*.env`、`secrets/*` 同时
   也在 gitignore 里作为兜底。`init_config.py` 拒绝往仓内写，`verify_config.py` 对仓内的
-  `--config-dir` 直接判 FAIL。
+  `--config-dir` 直接判 FAIL。配置与运行数据在私有伴生仓中提交并推送，保留版本历史。初始化会核验所有远端的读取和推送地址；公开或无法确认可见性的仓库均拒绝写入。上面的身份是合成示例，真实运行前须在私有配置中替换。
 
 ---
 
 ## 快速开始
 
-> **每种模式先开运行批次**：`export SMALLCAP_RUN=$(python tools/new_run.py --label <名称>)` 把所有产物路由到 `reports/smallcap/<日期>_<名称>/`,附 `_run.json`(skill commit + config),保证可复现、可跨版本对比。未设则平铺(向后兼容)。
+先用 `python tools/new_run.py --label <名称> [--input-hash <SHA256>]` 创建批次，将输出的名称设为 `SMALLCAP_RUN`。每次调用都在私有报告根目录下创建独立目录，名称包含日期、编码后的标签和随机标识；同名调用也不会覆盖旧批次。未设置 `SMALLCAP_RUN` 时，报告直接写入该根目录。
+
+恢复批次需显式传入 `--resume <RUN_ID> --input-hash <SHA256>`。工具会先核对清单中的输入哈希、目录名称和报告根目录；不匹配时退出，不改动已有文件。新批次未传哈希时，会对标签、备注和非敏感估值配置快照的规范 JSON 计算 SHA256，具体格式见 `tools/new_run.py`。
+
+报告、回测和运行状态都存入已验证为 PRIVATE 的 Git 伴生仓。`output_dir` 的相对路径以该伴生仓为起点；绝对路径和 `SMALLCAP_OUTPUT_DIR` 也须通过相同检查。`make_report.py --out` 可以指向另一个已验证的私有伴生仓。doctor 只检查本地配置与依赖，不代表 SEC、行情或模型服务已通过实测。
+
+所有远端的读取和推送地址都必须验证为 PRIVATE。SSH 检查也会处理字面 `github.com` 的本地 `HostName` 重写；包含 `Include`、`Match` 或主机名规范化规则时，改用字面 HTTPS GitHub 地址。已有输出文件如果是硬链接，工具会拒绝使用。
 
 共有四种入口模式。
 

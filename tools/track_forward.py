@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import uuid
 import os
 import sys
 import warnings
@@ -53,6 +54,7 @@ from typing import Any
 # Add tools dir to path for _common import
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import CFG, REPORTS, today
+from _output_paths import prove_output_path, prepare_output
 
 # v0.3.3 refactor, the scoring MATH and the P8 recall-floor audit were extracted into sibling
 # modules to shrink this orchestrator. They are re-exported below so the PUBLIC API
@@ -68,6 +70,7 @@ from _calibration import (
     _implied_prob_from_confidence, _brier,
     _is_data_false_positive, _price_scorable,
     _blowup_avoidance_rate, _downside_capture_rate, _buy_data_integrity_rate,
+    _buy_data_integrity_summary,
 )
 from _recall import (
     THEME_GOLD, FTS_TOP_HITS_CAP, RECALL_STAGES, SIC_REVERSE_MARKER,
@@ -102,7 +105,7 @@ def _metrics_dir() -> Path:
             "    (or set SMALL_CAP_DEEPDIVE_DATA_DIR)\n"
             "The shape you are expected to produce is in metrics/verdicts.jsonl.example."
         )
-    return d / "metrics"
+    return prove_output_path(d / "metrics")
 
 
 def _verdicts_file() -> Path:
@@ -222,16 +225,23 @@ def _fetch_close(ticker: str, on_date: str, verbose: bool = False) -> float | No
 
 
 def _load_verdicts() -> list[dict]:
-    if not VERDICTS_FILE.exists():
+    try:
+        path = Path(VERDICTS_FILE)
+    except DataDirNotInitialized:
+        return []
+    if not path.exists():
         return []
     rows = []
-    for line in VERDICTS_FILE.read_text(encoding="utf-8").splitlines():
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = line.strip()
         if line:
             try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid ledger JSON at line {number}; repair before rewriting") from exc
+            if not isinstance(row, dict):
+                raise ValueError(f"Invalid ledger record at line {number}: expected an object")
+            rows.append(row)
     return rows
 
 
@@ -242,18 +252,44 @@ def _save_verdicts(rows: list[dict]) -> None:
     final path. os.replace() is atomic on both POSIX and Windows (same-filesystem),
     so a mid-write crash cannot leave a truncated ledger.
     """
-    METRICS_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_path = VERDICTS_FILE.with_suffix(".jsonl.tmp")
     content = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
-    tmp_path.write_text(content, encoding="utf-8")
-    # Flush is implicit after write_text closes the file; os.replace is atomic.
-    os.replace(tmp_path, VERDICTS_FILE)
+    target = prepare_output(VERDICTS_FILE)
+    tmp_path = prepare_output(target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp"))
+    created = False
+    try:
+        with tmp_path.open("x", encoding="utf-8") as stream:
+            created = True
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        prove_output_path(target)
+        os.replace(tmp_path, target)
+    finally:
+        if created:
+            tmp_path.unlink(missing_ok=True)
 
 
 def _append_verdict(row: dict) -> None:
-    METRICS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(VERDICTS_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    content = json.dumps(row, ensure_ascii=False) + "\n"
+    target = prepare_output(VERDICTS_FILE)
+    with target.open("ab+") as stream:
+        stream.seek(0, os.SEEK_END)
+        separator = b""
+        if stream.tell():
+            stream.seek(-1, os.SEEK_END)
+            if stream.read(1) not in (b"\n", b"\r"):
+                separator = b"\n"
+        stream.write(separator + content.encode('utf-8'))
+
+
+def _integrity_description(summary: dict) -> str:
+    rate = summary['rate']
+    value = f"{rate * 100:.1f}%" if rate is not None else "N/A"
+    coverage = summary['review_coverage']
+    coverage_text = f"{coverage * 100:.1f}%" if coverage is not None else "N/A"
+    return (f"{value}; clean {summary['clean_buys']}/{summary['reviewed_buys']} reviewed BUY; "
+            f"reviewed {summary['reviewed_buys']}/{summary['total_buys']} ({coverage_text}); "
+            f"pending {summary['pending_buys']}")
 
 
 # ---------------------------------------------------------------------------
@@ -453,6 +489,10 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
             kill_flags = [kill_flags_raw] if kill_flags_raw else []
         else:
             kill_flags = list(kill_flags_raw)
+        risk_count = rec.get("killflag_count", len(kill_flags))
+        if type(risk_count) is not int or risk_count < 0:
+            raise ValueError("Verdict killflag_count must be a nonnegative integer")
+        risk_count = max(risk_count, len(kill_flags))
 
         # verdict_date: try to infer from file or use today
         verdict_date = rec.get("verdict_date") or rec.get("date") or _today()
@@ -478,6 +518,11 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
             "mos_pct": mos_pct,
             "mos_basis": mos_basis,
             "kill_flags": kill_flags,
+            "killflag_count": risk_count,
+            "unresolved_killflag_count": risk_count - len(kill_flags),
+            "risk_evidence": rec.get("risk_evidence"),
+            "verdict_date_source": rec.get("verdict_date_source"),
+            "report_sha256": rec.get("report_sha256"),
             "catalyst": catalyst,
             "confidence": confidence,
             "implied_prob": implied_prob,
@@ -717,10 +762,8 @@ def cmd_backfill_validation_fp(args) -> None:
 
     print(f"\nValidation FP backfill: {added} added | {skipped} already present "
           f"| {len(VALIDATION_FP)} total in cohort")
-    integrity = _buy_data_integrity_rate(_load_verdicts())
-    if integrity is not None:
-        print(f"BUY data-integrity now: {integrity*100:.1f}% "
-              f"(clean BUYs / all BUYs)")
+    integrity = _buy_data_integrity_summary(_load_verdicts())
+    print("BUY data-integrity now: " + _integrity_description(integrity))
 
 
 # ---------------------------------------------------------------------------
@@ -800,6 +843,7 @@ def cmd_score(args) -> None:
 
 def cmd_scorecard(args) -> None:
     """--scorecard: aggregate scored verdicts and write metrics/scorecard.md."""
+    destination = prove_output_path(SCORECARD_FILE)
     rows = _load_verdicts()
     today_str = _today()
 
@@ -811,7 +855,7 @@ def cmd_scorecard(args) -> None:
     # De-risk-native metrics (P12c), measurable now, alongside / ahead of the price-Brier.
     blowup_avoid = _blowup_avoidance_rate(rows)
     downside_cap = _downside_capture_rate(rows)
-    buy_integrity = _buy_data_integrity_rate(rows)
+    buy_integrity = _buy_data_integrity_summary(rows)
 
     lines = [
         "# Track-Forward Calibration Scorecard",
@@ -827,10 +871,10 @@ def cmd_scorecard(args) -> None:
         "",
         "| Metric | Value | N | Notes |",
         "|---|---|---|---|",
-        f"| BUY data-integrity (clean / all BUY) | "
-        f"{(f'{buy_integrity*100:.1f}%' if buy_integrity is not None else '—')} | "
-        f"{sum(1 for r in rows if r.get('rating')=='买入')} | "
-        f"measurable today; {len(fp_rows)} adjudicated data_false_positive |",
+        f"| BUY data-integrity (clean / reviewed BUY) | "
+        f"{_integrity_description(buy_integrity)} | "
+        f"{buy_integrity['reviewed_buys']} | "
+        f"{buy_integrity['false_positive_buys']} adjudicated data_false_positive |",
         f"| Blowup-avoidance (观察/避开 avoided <= {BLOWUP_DRAWDOWN_THRESHOLD*100:.0f}% total return) | "
         f"{(f'{blowup_avoid*100:.1f}%' if blowup_avoid is not None else '—')} | "
         f"{len([r for r in scored if r.get('rating') in ('观察','避开') and r.get('stock_return_pct') is not None])} | "
@@ -992,8 +1036,7 @@ def cmd_scorecard(args) -> None:
         if earliest_maturity and scored:
             lines += ["", f"*Earliest pending maturity: {earliest_maturity.strftime('%Y-%m-%d')}*"]
 
-    METRICS_DIR.mkdir(parents=True, exist_ok=True)
-    SCORECARD_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    prepare_output(destination).write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Scorecard written: {SCORECARD_FILE}")
     print(f"Scored: {len(scored)} | Pending: {len(pending)}")
 
@@ -1026,10 +1069,8 @@ def cmd_status(args) -> None:
     print(f"  Matured (unscored):  {len(matured_unscored)}  <- run --score")
     print(f"  Pending (horizon not reached): {len(pending)}")
     print(f"  data_false_positive (BUY, out of price-Brier): {len(fp_rows)}")
-    buy_integrity = _buy_data_integrity_rate(rows)
-    if buy_integrity is not None:
-        print(f"  BUY data-integrity:  {buy_integrity*100:.1f}% "
-              f"({sum(1 for r in rows if r.get('rating')=='买入')} BUY verdicts)")
+    buy_integrity = _buy_data_integrity_summary(rows)
+    print("  BUY data-integrity:  " + _integrity_description(buy_integrity))
 
     if pending:
         earliest = None
@@ -1303,13 +1344,16 @@ def _selftest() -> None:
 
     # --- Test 11 (P12c): de-risk-native metrics (blowup-avoidance / downside-capture / BUY-integrity) ---
     # BUY data-integrity: 19 FP + 1 clean BUY -> 1/20 = 0.05.
-    clean_buy = {"rating": "买入", "adjudication": None}
+    from make_fixtures import tracking_scenarios
+    clean_buy = tracking_scenarios()['mixed'][0]
     integ_rows = fp_rows + [clean_buy]
     integ = _buy_data_integrity_rate(integ_rows)
     assert abs(integ - (1.0 / 20.0)) < 1e-9, f"BUY data-integrity wrong: {integ}"
     # All-FP -> 0.0; no BUY at all -> None.
     assert _buy_data_integrity_rate(fp_rows) == 0.0, "all-FP integrity should be 0.0"
     assert _buy_data_integrity_rate([{"rating": "观察"}]) is None, "no-BUY integrity should be None"
+    pending_review = _buy_data_integrity_summary(tracking_scenarios()['unreviewed'])
+    assert pending_review['rate'] is None and pending_review['pending_buys'] == 1
     # Blowup-avoidance: 2 of 3 de-risk names avoided <= -40%.
     derisk = [
         {"rating": "观察", "scored": True, "stock_return_pct": -10.0},  # avoided

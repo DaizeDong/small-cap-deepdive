@@ -1,8 +1,7 @@
 """
 _valuation_eligibility.py — the buy_eligible composite for valuation.py.
 
-Extracted (pure mechanical move, ZERO behavior change) from compute_valuation()
-in valuation.py. This module owns the single mechanical boolean the BUY trigger
+This module owns the single mechanical boolean the BUY trigger
 ANDs in (buy_eligible) and its reason list — all the guard reads/reasons that
 gate it.
 
@@ -29,6 +28,7 @@ def compose_buy_eligibility(
     mos,
     nav_mos,
     mos_basis: str,
+    debt_evidence_uncertain: bool = False,
 ) -> tuple[bool, list[str]]:
     """Compose buy_eligible — the single mechanical boolean the BUY trigger ANDs.
 
@@ -40,6 +40,8 @@ def compose_buy_eligibility(
     """
     # --- P1: compose buy_eligible, the single mechanical boolean the BUY trigger ANDs in ---
     _buy_ineligible_reasons: list[str] = []
+    if debt_evidence_uncertain:
+        _buy_ineligible_reasons.append("debt_evidence_uncertain")
     if extreme_mos_review_required:
         _buy_ineligible_reasons.append("extreme_mos_review_required")
     if large_cap_out_of_scope:

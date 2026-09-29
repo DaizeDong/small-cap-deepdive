@@ -1,13 +1,12 @@
 """_calibration.py — Brier / confidence-as-probability / de-risk-native metrics.
 
-v0.3.3 refactor: extracted verbatim from track_forward.py to shrink that orchestrator. This
-module owns the scoring MATH — the Brier kernel, the confidence-as-probability mapping (P12a),
+This module owns scoring math: the Brier kernel, the confidence-as-probability mapping (P12a),
 the data_false_positive predicate + price-scorable filter (P12d), and the three de-risk-native
 metrics (P12c: blowup-avoidance / downside-capture / BUY-data-integrity).
 
 Imports ONLY stdlib; it NEVER imports back from track_forward (no circular import). The
-orchestrator re-exports every public symbol below so the PUBLIC API (track_forward.<symbol>) is
-UNCHANGED. NO behavior change — this is a pure mechanical move.
+orchestrator re-exports its metrics. BUY integrity requires explicit adjudication and reports
+review coverage separately from the outcome among reviewed verdicts.
 """
 from __future__ import annotations
 
@@ -141,16 +140,23 @@ def _downside_capture_rate(rows: list[dict],
     return captured / len(pool)
 
 
-def _buy_data_integrity_rate(rows: list[dict]) -> float | None:
-    """Fraction of all BUY verdicts that survive a balance-sheet cross-check, i.e. are NOT
-    adjudicated data_false_positive. Measurable TODAY from the backfilled 19 — no 12-month wait.
+def _buy_data_integrity_summary(rows: list[dict]) -> dict:
+    """Separate review coverage from integrity among explicitly reviewed BUYs.
 
-    integrity = clean_BUYs / all_BUYs. With only the 19 validation false-positives logged and no
-    clean BUY yet, this is 0.0 — the honest, decision-relevant headline number. Returns None when
-    no BUY verdicts exist at all.
+    Only data_verified_clean and data_false_positive are completed adjudications.
+    Absent or unknown labels remain pending, including failed review attempts.
     """
     buys = [r for r in rows if r.get("rating") == "买入"]
-    if not buys:
-        return None
-    clean = sum(1 for r in buys if not _is_data_false_positive(r))
-    return clean / len(buys)
+    clean = sum(r.get("adjudication") == "data_verified_clean" for r in buys)
+    false_positive = sum(_is_data_false_positive(r) for r in buys)
+    reviewed = clean + false_positive
+    return {"rate": clean / reviewed if reviewed else None,
+            "total_buys": len(buys), "reviewed_buys": reviewed,
+            "clean_buys": clean, "false_positive_buys": false_positive,
+            "pending_buys": len(buys) - reviewed,
+            "review_coverage": reviewed / len(buys) if buys else None}
+
+
+def _buy_data_integrity_rate(rows: list[dict]) -> float | None:
+    """Compatibility scalar; an unreviewed BUY contributes no clean outcome."""
+    return _buy_data_integrity_summary(rows)["rate"]

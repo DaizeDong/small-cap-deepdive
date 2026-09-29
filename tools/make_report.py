@@ -30,12 +30,13 @@ import glob
 import json
 import re
 from pathlib import Path
+from urllib.parse import quote
 import sys
 
 # Add tools dir to path for _common import
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import REPORTS, today
+from _common import REPORTS, today, reports_dir, prepare_output
 
 # Sentinel used in the fenced rating block for fields the agent must finalize.
 TBD = "TBD"
@@ -505,7 +506,8 @@ def main() -> None:
     ticker = deep.get("ticker") or val.get("ticker") or "UNKNOWN"
     md = render_report(deep, val)
 
-    out = Path(args.out) if args.out else (deepdive_path.parent / f"report_{ticker}.md")
+    report_name = 'report_' + quote(str(ticker), safe='-_') + '.md'
+    out = prepare_output(Path(args.out) if args.out else (reports_dir() / report_name))
     out.write_text(md, encoding="utf-8")
     print(f"report scaffolded: {out}")
 

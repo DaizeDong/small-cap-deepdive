@@ -3,8 +3,8 @@
     "Every path in a public skill repo belongs to exactly one class (Skill Repo Spec v1 s9).",
     "TOOL    = code, SKILL.md, docs. Public, hand-written, contains no data.",
     "FIXTURE = tests and examples. Public, but SYNTHETIC and produced by tools/make_fixtures.py.",
-    "DATA    = anything a real run produced. NEVER git-tracked; lives in the private companion",
-    "          config, resolved at runtime by tools/datadir.py. The repo ships only the schema.",
+    "DATA    = anything a real run produced. Versioned in the PRIVATE companion, never here.",
+    "          Resolve the companion through guards/tools/datadir.py. The tool ships only schemas.",
     "SEALED  = a path that held real data once and must stay dead. No code resolves it any more,",
     "          so it is owed no schema, only the guarantee that it never comes back.",
     "Enforced by tools/data_boundary.py, in .githooks and in CI."
@@ -17,6 +17,6 @@
   "data_sealed": [
     "reference/config.json"
   ],
-  "fixture": [],
+  "fixture": ["tests/fixtures/private_runs.json", "tests/fixtures/manifest.json", "tests/fixtures/finalizer.json"],
   "_data_home": "~/.small-cap-deepdive-config/data/   (override with $SMALL_CAP_DEEPDIVE_DATA_DIR)"
 }
