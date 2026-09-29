@@ -532,6 +532,9 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     # Phase 2 additions: valuation inputs
     print(f"  拉估值输入序列(债务/EBIT/D&A/CapEx/Goodwill/Intangibles)...", file=sys.stderr)
     debt, debt_source = _debt_series(cik, asof=as_of)
+    # The legacy cascade may return liabilities, which cannot establish contractual debt.
+    if debt_source == "Liabilities_proxy":
+        debt = []
     time.sleep(0.2)
     # P9: EBIT concept cascade. Pull OperatingIncomeLoss first; if absent, _ebit_with_source
     # falls back to pretax-continuing-ops (+interest addback) so EV/EBITDA recovers.
@@ -549,9 +552,8 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     goodwill = concept_series(cik, "Goodwill", asof=as_of); time.sleep(0.2)
     intangibles = concept_series(cik, "IntangibleAssetsNetExcludingGoodwill", asof=as_of); time.sleep(0.2)
 
-    # C1a: liabilities series for debt-truncation cross-check (Liabilities - Equity = implied debt)
-    # Also serves as fallback for Assets when Assets concept is empty (C1c balance-sheet identity)
-    print(f"  拉 Liabilities 序列(用于 C1 债务截断检验)...", file=sys.stderr)
+    # Liabilities remain separate balance-sheet evidence for NAV and distress calculations.
+    print("  Pulling liabilities...", file=sys.stderr)
     liabilities = concept_series(cik, "Liabilities", asof=as_of); time.sleep(0.2)
     # C1c: if Assets is empty, try LiabilitiesAndStockholdersEquity as fallback
     if not assets:
@@ -618,7 +620,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         # NAV inputs
         "goodwill": goodwill,
         "intangibles": intangibles,
-        # C1: liabilities series for debt-truncation cross-check
+        # Total liabilities are distinct from contractual debt.
         "liabilities": liabilities,
     }
     # M5, data-quality anomaly detection: flag implausible net_income (XBRL unit anomaly).
@@ -636,18 +638,16 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
             f"treat net_income with caution; valuation uses OCF which is unaffected."
         )
 
-    # C1a: debt staleness check (debt_truncation is now produced by _debt_for_ev below).
+    # Preserve reported contractual debt; balance-sheet totals cannot fill missing debt.
     _, _debt_stale, _ = _check_debt_quality(debt, assets, equity, liabilities)
-
-    # v0.3.1 #2: choose the debt figure EV should use. _debt_series already SUMS the standard debt
-    # concepts (Level 1); if that summed debt is STILL < 0.5 * implied (liab-equity), the XBRL tags
-    # under-read the balance sheet -> substitute the implied figure for EV so EV is accurate and the
-    # name is not falsely blocked by cross_source_mismatch. debt_truncation_suspected is now the
-    # flag for THAT substitution (rarer + accurate): it fires only when EV switched to implied.
     _summed_debt_latest = debt[-1]["val"] if debt else None
     _ev_debt, _debt_truncation_suspected, _debt_trunc_detail = _debt_for_ev(
         _summed_debt_latest, liabilities, equity, assets
     )
+    _debt_evidence_status = "reported" if _ev_debt is not None else "unavailable"
+    _debt_evidence_detail = _debt_trunc_detail
+    if debt_source == "Liabilities_proxy":
+        _debt_evidence_detail = "Only total liabilities were available; contractual debt remains unknown."
 
     # C1b: wrong-entity guard (ticker→CIK cross-check + financial sanity)
     _wrong_entity_suspected, _wrong_entity_reason = _validate_ticker_entity(
@@ -765,8 +765,8 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     _op_lease = _operating_lease_liability(cik, asof=as_of)
     time.sleep(0.2)
     _sec_debt_lease_adj = _sec_debt_latest
-    if _op_lease is not None:
-        _sec_debt_lease_adj = (_sec_debt_latest or 0.0) + _op_lease
+    if _op_lease is not None and _sec_debt_latest is not None:
+        _sec_debt_lease_adj = _sec_debt_latest + _op_lease
     _sec_shares_latest = shares[-1]["val"] if shares else None
     try:
         _second = yf_fn(ticker)
@@ -777,6 +777,12 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     _cs_checked, _cs_mismatch, _cs_detail = _cross_source_check(
         _sec_debt_lease_adj, _latest_rev, _sec_shares_latest, _second
     )
+    _, _debt_source_conflict, _debt_conflict_detail = _cross_source_check(
+        _sec_debt_lease_adj, None, None, _second
+    )
+    if _debt_source_conflict:
+        _debt_evidence_status = "conflicting"
+        _debt_evidence_detail = _debt_conflict_detail
 
     # FIX 1, compose derived.asof_max_filing_date (emitted ONLY when as_of is set). Combine the max
     # "filed" date recorded across ALL as-of concept pulls (revenue/ni/ocf/cash/shares/assets/equity/
@@ -819,11 +825,12 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         "runway_periods": (round(cash[-1]["val"] / abs(ocf[-1]["val"]), 1)
                            if (cash and ocf and ocf[-1]["val"] < 0) else None),
         # Phase 2 additions
-        # v0.3.1 #2: latest_total_debt is the EV debt figure, the summed standard debt concepts,
-        # or the implied (liab-equity) figure when the sum still under-read the balance sheet.
-        # valuation reads this for EV (ev = market_cap + latest_total_debt - cash).
+        # Contractual debt retains its reported value and any evidence uncertainty.
         "latest_total_debt": _ev_debt,
         "debt_source": debt_source,
+        "debt_evidence_status": _debt_evidence_status,
+        "debt_evidence_detail": _debt_evidence_detail,
+        "debt_evidence_uncertain": _debt_evidence_status != "reported",
         "latest_ebit": ebit[-1]["val"] if ebit else None,
         # P9: which concept the EBIT cascade actually used (consumer reads to recover EV/EBITDA)
         "ebit_source": _ebit_source,
@@ -1037,23 +1044,18 @@ def _selftest():
     assert _warn is not None, "M5 data_quality_warn: failed to fire for |NI|>rev*50 (unit test broken)"
     print(f"  M5 data_quality_warn: fires correctly for implausible NI/rev ratio  OK")
 
-    # --- C1a: debt truncation guard unit test ---
-    # Simulate: reported_debt=11M, implied_debt(liab-equity)=4500M → ratio=0.002 < 0.5 → truncation
-    _test_debt = [{"end": "2024-12-31", "val": 11_000_000}]
-    _test_assets = [{"end": "2024-12-31", "val": 8_000_000_000}]
-    _test_equity = [{"end": "2024-12-31", "val": 3_500_000_000}]
-    _test_liab = [{"end": "2024-12-31", "val": 4_500_000_000}]
-    _trunc, _stale, _detail = _check_debt_quality(_test_debt, _test_assets, _test_equity, _test_liab)
-    assert _trunc, f"C1a: debt_truncation_suspected must fire when reported<0.5*implied (detail={_detail})"
-    assert not _stale, "C1a: debt_stale must NOT fire when dates match"
-    print(f"  C1a debt_truncation_suspected: fires correctly for HRI-like scenario  OK")
-
-    # Staleness test: debt date 2020, assets date 2024 → stale
-    _test_debt_stale = [{"end": "2020-12-31", "val": 11_000_000}]
-    _test_assets_recent = [{"end": "2024-12-31", "val": 8_000_000_000}]
-    _, _stale2, _ = _check_debt_quality(_test_debt_stale, _test_assets_recent, _test_equity, _test_liab)
-    assert _stale2, "C1a: debt_stale must fire when debt date is >18m behind assets date"
-    print(f"  C1a debt_stale: fires correctly for stale-debt scenario  OK")
+    # Generated debt evidence controls preserve contractual debt and staleness.
+    from make_fixtures import debt_scenarios
+    _debt_fix = debt_scenarios()
+    _test_debt = [{"end": _debt_fix["date"], "val": _debt_fix["reported"]}]
+    _trunc, _stale, _detail = _check_debt_quality(
+        _test_debt, _debt_fix["assets"], _debt_fix["equity"], _debt_fix["liabilities"])
+    assert (_trunc, _stale, _detail) == (False, False, None)
+    _test_debt_stale = [{"end": _debt_fix["old_date"], "val": _debt_fix["reported"]}]
+    _, _stale2, _ = _check_debt_quality(
+        _test_debt_stale, _debt_fix["assets"], _debt_fix["equity"], _debt_fix["liabilities"])
+    assert _stale2, "Old contractual debt must retain its staleness flag"
+    print("  Debt evidence: contractual amount and staleness preserved  OK")
 
     # --- C1b: wrong-entity guard unit test ---
     # Simulate a company with shares < 1000 (sub-entity)
@@ -1441,23 +1443,12 @@ def _selftest():
         "P-B: low_revenue_loss_ratio must NOT fire when loss is small vs revenue"
     )
 
-    # --- P-B: debt_truncation refinement, plausible producer debt no longer relabeled ---
-    # Real producer: reported debt $300M, implied (liab-equity) $700M -> ratio 0.43.
-    # Old 0.5 threshold WOULD have flagged this; refined 0.1 threshold must NOT.
-    _prod_debt = [{"end": "2024-12-31", "val": 300_000_000}]
-    _prod_assets = [{"end": "2024-12-31", "val": 1_500_000_000}]
-    _prod_equity = [{"end": "2024-12-31", "val": 800_000_000}]
-    _prod_liab = [{"end": "2024-12-31", "val": 1_500_000_000}]  # liab-equity = 700M; 300/700=0.43
-    _pt, _ps, _pd = _check_debt_quality(_prod_debt, _prod_assets, _prod_equity, _prod_liab)
-    assert _pt is False, (
-        f"P-B: plausible producer debt (ratio 0.43) must NOT be relabeled as truncation, detail={_pd}"
-    )
-    # Severe mismatch (ratio < 0.1) must STILL fire (the original C1a HRI-like case below already
-    # asserts this at ratio 0.002; re-confirm a borderline-severe 0.08 case fires here).
-    _sev_debt = [{"end": "2024-12-31", "val": 56_000_000}]   # 56/700 = 0.08 < 0.1
-    _st, _, _ = _check_debt_quality(_sev_debt, _prod_assets, _prod_equity, _prod_liab)
-    assert _st is True, "P-B: severe debt mismatch (ratio<0.1) must still fire truncation"
-    print("  P-B debt_truncation: plausible producer (0.43) spared, severe (<0.1) still fires  OK")
+    # A reported zero is also distinct from missing debt and non-debt liabilities.
+    _zero_debt = [{"end": _debt_fix["date"], "val": 0}]
+    _zero_quality = _check_debt_quality(
+        _zero_debt, _debt_fix["assets"], _debt_fix["equity"], _debt_fix["liabilities"])
+    assert _zero_quality == (False, False, None)
+    print("  Debt evidence: reported zero is preserved  OK")
 
     # --- P-G: form_used provenance is set by tenk_sections (10-K/20-F/40-F) ---
     # Live: EGAN (CIK 1066194) is a domestic 10-K filer -> form_used must be "10-K".
@@ -1710,50 +1701,15 @@ def _selftest():
     )
     print(f"  #1 _normalized_fcf_proxy: OCF-CapEx mean = ${_nfp/1e6:.1f}M  OK")
 
-    # --- v0.3.1 #2: _debt_series SUMS standard debt concepts; _debt_for_ev implied fallback ---
-    # Debt summed > single concept: the Level-1 sum label names all summands.
-    assert DEBT_SUM_CONCEPTS[:2] == ["LongTermDebtNoncurrent", "LongTermDebtCurrent"], (
-        "#2: DEBT_SUM_CONCEPTS must start with the split long-term debt concepts"
-    )
-    assert "ShortTermBorrowings" in DEBT_SUM_CONCEPTS and "FinanceLeaseLiabilityCurrent" in DEBT_SUM_CONCEPTS, (
-        "#2: DEBT_SUM_CONCEPTS must include short-term borrowings + finance-lease components"
-    )
-    # _debt_for_ev: plausible summed debt (>= 0.5*implied) is left unchanged, no truncation flag.
-    _d2_liab = [{"end": "2024-12-31", "val": 1_500_000_000}]
-    _d2_eq = [{"end": "2024-12-31", "val": 800_000_000}]   # implied = 700M
-    _d2_assets = [{"end": "2024-12-31", "val": 1_500_000_000}]
-    _ev_plaus, _tr_plaus, _ = _debt_for_ev(400_000_000, _d2_liab, _d2_eq, _d2_assets)  # 400>=350
-    assert _ev_plaus == 400_000_000 and _tr_plaus is False, (
-        f"#2: plausible summed debt (>=0.5*implied) must be unchanged, no truncation; got {_ev_plaus},{_tr_plaus}"
-    )
-    # Summed debt still far below implied -> substitute implied for EV + truncation flag fires.
-    _ev_sub, _tr_sub, _det_sub = _debt_for_ev(100_000_000, _d2_liab, _d2_eq, _d2_assets)  # 100<350
-    assert _ev_sub == 700_000_000 and _tr_sub is True, (
-        f"#2: summed debt < 0.5*implied must substitute implied (700M) for EV + flag, got {_ev_sub},{_tr_sub}"
-    )
-    assert "using implied for EV" in (_det_sub or ""), f"#2: detail must explain substitution, got {_det_sub!r}"
-    # Demonstrate the SUM beats a single concept: a filer with split LTD + short-term borrowings
-    # sums to more than either component alone (offline merge logic mirror).
-    _merge = {}
-    for _c, _entries in (
-        ("LongTermDebtNoncurrent", [{"end": "2024-12-31", "val": 200_000_000}]),
-        ("LongTermDebtCurrent", [{"end": "2024-12-31", "val": 50_000_000}]),
-        ("ShortTermBorrowings", [{"end": "2024-12-31", "val": 120_000_000}]),
-    ):
-        for _v in _entries:
-            _merge[_v["end"]] = _merge.get(_v["end"], 0) + _v["val"]
-    assert _merge["2024-12-31"] == 370_000_000 > 200_000_000, (
-        "#2: summed debt (370M) must exceed the single largest concept (200M) — anti-truncation"
-    )
-    # Fallback to Assets-Equity when Liabilities absent (balance-sheet identity).
-    _ev_af, _tr_af, _ = _debt_for_ev(50_000_000, [], _d2_eq, _d2_assets)  # implied = 1500-800=700
-    assert _ev_af == 700_000_000 and _tr_af is True, (
-        f"#2: Assets-Equity implied fallback must apply when Liabilities absent, got {_ev_af},{_tr_af}"
-    )
-    # No implied figure computable -> summed debt returned unchanged (never substitute blindly).
-    _ev_ni, _tr_ni, _ = _debt_for_ev(50_000_000, [], [], [])
-    assert _ev_ni == 50_000_000 and _tr_ni is False, "#2: no implied figure -> debt unchanged, no flag"
-    print(f"  #2 debt: sum>single (370M>200M); implied-fallback substitutes 700M w/ trunc flag  OK")
+    # Generated debt amounts are invariant to the availability of a liabilities tag.
+    for _case in _debt_fix["amount_cases"]:
+        for _liabilities in (_debt_fix["liabilities"], []):
+            _ev, _substituted, _detail = _debt_for_ev(
+                _case["amount"], _liabilities, _debt_fix["equity"], _debt_fix["assets"])
+            assert _ev == _case["expected"] and not _substituted
+            if _ev is None:
+                assert _detail
+    print("  Debt evidence: no balance-sheet substitution  OK")
 
     # --- v0.3.1 #3: lease-adjusted SEC debt for cross-source comparison ---
     # Adding OperatingLeaseLiability to the SEC debt side closes the ASC842 gap so a lease-heavy

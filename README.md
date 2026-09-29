@@ -147,7 +147,7 @@ horizon) tested the skill's claims on held-out data. Honest result, write-up in
 Or clone manually:
 
 ```bash
-git clone https://github.com/DaizeDong/small-cap-deepdive.git ~/.claude/plugins/small-cap-deepdive
+git clone --recurse-submodules https://github.com/DaizeDong/small-cap-deepdive.git ~/.claude/plugins/small-cap-deepdive
 ```
 
 Then install the data-layer dependencies and configure once:
@@ -155,14 +155,16 @@ Then install the data-layer dependencies and configure once:
 ```bash
 cd ~/.claude/plugins/small-cap-deepdive
 pip install -r tools/requirements.txt
-mkdir -p ~/.small-cap-deepdive-config
-cp reference/config.example.json ~/.small-cap-deepdive-config/config.json
+gh repo create small-cap-deepdive-config --private
+gh repo clone small-cap-deepdive-config ~/.small-cap-deepdive-config
+export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
+python scripts/init_config.py
 ```
 
 Open `~/.small-cap-deepdive-config/config.json` and set `"sec_user_agent"` to your real name and email:
 
 ```json
-"sec_user_agent": "Jane Smith jane@example.com"
+"sec_user_agent": "AcmeCorp user1@example.com"
 ```
 
 This is the only required field. EDGAR requires a valid `User-Agent` header on every request
@@ -174,12 +176,24 @@ refuse to create one.
 
 To use the skill from Claude Code via a junction (Windows) or symlink instead of `/plugin install`:
 
-```bash
-# Windows (run as Administrator)
-cmd /c mklink /J "%USERPROFILE%\.claude\skills\small-cap-deepdive" "skills\small-cap-deepdive"
+```powershell
+# Run from the clone directory in an ordinary user PowerShell session.
+$repoRoot = (Resolve-Path -LiteralPath (git rev-parse --show-toplevel)).Path
+if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'SKILL.md'))) { throw 'SKILL.md missing' }
+$skillAlias = Join-Path $env:USERPROFILE '.claude/skills/small-cap-deepdive'
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $skillAlias) | Out-Null
+New-Item -ItemType Junction -Path $skillAlias -Target $repoRoot | Out-Null
+if (-not (Test-Path -LiteralPath (Join-Path $skillAlias 'SKILL.md'))) { throw 'Skill alias failed' }
+```
 
-# macOS / Linux
-ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
+```bash
+# macOS / Linux, from the clone directory
+repo_root="$(git rev-parse --show-toplevel)"
+test -f "$repo_root/SKILL.md" || exit 1
+mkdir -p "$HOME/.claude/skills"
+skill_alias="$HOME/.claude/skills/small-cap-deepdive"
+ln -s "$repo_root" "$skill_alias"
+test -f "$skill_alias/SKILL.md" || exit 1
 ```
 
 ---
@@ -190,32 +204,34 @@ ln -s "$(pwd)" "$HOME/.claude/skills/small-cap-deepdive"
 required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-field contract:
 [CONFIG.md](CONFIG.md).
 
-- **Mount (discovery order):** `$SMALL_CAP_DEEPDIVE_CONFIG_DIR/config.json` → `$SMALL_CAP_DEEPDIVE_CONFIG/config.json`
-  → `~/.small-cap-deepdive-config/config.json` → `~/.config/small-cap-deepdive-config/config.json` →
-  nothing found, the skill reports **NOT INITIALIZED**. First that exists wins; effective config =
-  `config.example.json` defaults ◁ your `config.json` ◁ `SMALLCAP_*` env overrides.
-  **No step lands inside the repo**, and none may be added. What the in-repo step used to be, what
-  leaked through it, and what the resolver raises instead: [CONFIG.md](CONFIG.md) §Discovery
-  convention.
+- **Config discovery:** the pinned `guards/tools/datadir.py` resolver selects the companion.
+  `SMALL_CAP_DEEPDIVE_CONFIG_DIR` or `SMALL_CAP_DEEPDIVE_CONFIG` takes priority;
+  the resolver also supports its sibling-companion and home-directory conventions.
+  The selected directory must belong to a verified PRIVATE Git repository and contain
+  `config.json`. Missing configuration or unproved visibility fails without selecting another output home.
 - **First time:**
   ```bash
-  python scripts/init_config.py      # stamp config.json into ~/.small-cap-deepdive-config (deterministic)
+  python scripts/init_config.py      # verify the existing PRIVATE companion, then initialize
   # edit that config.json: set "sec_user_agent" to your real name + email (the only hard requirement)
-  python scripts/verify_config.py    # doctor: PASS/FAIL per field, names what is missing
+  python scripts/verify_config.py --json  # local config, PRIVATE root and dependency checks
   ```
 - **Switch configs (hot-swap):** point the env var at another config dir, configs are self-contained
-  (repo-relative `output_dir`, no hardcoded paths): `export SMALL_CAP_DEEPDIVE_CONFIG_DIR=~/configs/A` ↔ `~/configs/B`.
+  (`output_dir` relative to the resolved PRIVATE companion). Each selected directory must be within an existing PRIVATE Git worktree.
 - **Secrets / PII:** Mode B, your `config.json` lives outside this repo; `config.json`, `*.env`, and
   `secrets/*` are also gitignored as a backstop. `init_config.py` refuses to write inside the repo
-  and `verify_config.py` FAILs on an in-repo `--config-dir`.
+  and `verify_config.py` FAILs on an in-repo `--config-dir`. Commit and push configuration and runtime DATA in the PRIVATE companion. Initialization verifies every remote fetch and push destination before writing; PUBLIC or unknown visibility is refused. The synthetic identity above is illustrative and must be replaced privately before live use.
 
 ---
 
 ## Quick start
 
-> **Open a run batch first** (any mode): `export SMALLCAP_RUN=$(python tools/new_run.py --label <name>)`
-> routes all outputs into `reports/smallcap/<date>_<name>/` with a `_run.json` manifest (skill commit +
-> config) so runs are reproducible and comparable across versions. Unset = flat (legacy).
+Allocate a batch with `python tools/new_run.py --label <name> [--input-hash <SHA256>]` and set `SMALLCAP_RUN` to its stdout. Each call creates an exclusive directory beneath the PRIVATE reports root, using a date, encoded label and random identifier. Repeated labels never overwrite an earlier run. With no active run, reports use the unbatched root.
+
+Resume explicitly with `--resume <RUN_ID> --input-hash <SHA256>`. The manifest's input hash, run identity and configured reports root must match before any mutation; successful resume preserves existing bytes. For compatible allocations without a supplied hash, the tool hashes canonical JSON containing the label, note and nonsecret valuation config snapshot; `tools/new_run.py` documents the exact encoding.
+
+Reports, backtests and run state belong in a verified PRIVATE Git companion. Relative `output_dir` values resolve against that companion; absolute values and `SMALLCAP_OUTPUT_DIR` pass the same proof. `make_report.py --out` may select a different verified PRIVATE companion. The doctor checks local configuration and dependencies; it does not establish live SEC, market or model readiness.
+
+SSH companion origins can use an alias declared by ordinary `Host` and `HostName github.com` rules in `~/.ssh/config`. Verification reads that file locally, respects the first matching `HostName`, and never runs SSH or configured commands. This also checks local rewrites of the literal `github.com` host. SSH configurations using `Include`, `Match`, or hostname canonicalization are refused; use a literal HTTPS GitHub origin for these configurations. HTTPS origins must name `github.com` directly. Every effective fetch and push destination must pass the PRIVATE visibility check. Existing hardlinked output files are refused.
 
 There are four entry modes.
 
@@ -251,8 +267,12 @@ To re-sort or re-weight a prior run's outputs without re-running discovery:
 ```bash
 python tools/rank.py
 python tools/rank.py --slug railcar
-python tools/rank.py --input reports/railcar_scores/
+python tools/rank.py --input "<private-companion>/reports/smallcap/<run>"
 ```
+
+The default uses the configured PRIVATE companion and active run. Explicit inputs must
+also belong to a separate PRIVATE GitHub worktree. Git and `gh` verify the canonical
+destination before output is written; unknown visibility is refused.
 
 Full step-by-step: **[runbooks/batch-rank.md](runbooks/batch-rank.md)**
 

@@ -1,15 +1,20 @@
-"""Shared config/IO spine for small-cap-deepdive tools. All hardcoding lives here via config."""
+"""Lazy shared configuration and PRIVATE output paths for small-cap tools."""
 from __future__ import annotations
-import json, os, re, time
-from datetime import datetime, timezone
+from collections.abc import MutableMapping
+import importlib.util
+import json
+import math
+import os
 from pathlib import Path
-import requests
+import re
+import time
+from datetime import datetime, timezone
+
+from _output_paths import prove_output_path, prepare_output
 
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent
 _REF = _REPO / "reference"
-
-# Config-dir discovery env vars (config-spec E2). See CONFIG.md for the full contract.
 _CONFIG_DIR_ENV_VARS = ("SMALL_CAP_DEEPDIVE_CONFIG_DIR", "SMALL_CAP_DEEPDIVE_CONFIG")
 
 
@@ -17,213 +22,196 @@ class ConfigNotInitialized(RuntimeError):
     pass
 
 
-# Same shape as tools/datadir.py's DataDirNotInitialized message: name the state, say it is the
-# CORRECT state for a fresh clone, then give the exact commands. Never "here is a repo path".
 CONFIG_SETUP_HINT = (
-    "small-cap-deepdive has no config.json outside this repo, so it is UNINITIALIZED.\n"
-    "That is the correct state for a freshly cloned public skill. Point it at your own:\n"
-    "    mkdir -p ~/.small-cap-deepdive-config\n"
-    "    cp reference/config.example.json ~/.small-cap-deepdive-config/config.json\n"
-    "    (or set SMALL_CAP_DEEPDIVE_CONFIG_DIR to a dir OUTSIDE this repo)\n"
-    "Then set sec_user_agent (your real name + email) in that file.\n"
-    "There is deliberately NO in-repo fallback: reference/config.json was the documented\n"
-    "'legacy fallback', and a real SEC contact address ended up committed in it. A fallback\n"
-    "into the repo is not a convenience, it IS the leak."
+    "small-cap-deepdive is UNINITIALIZED. Set SMALL_CAP_DEEPDIVE_CONFIG_DIR to your "
+    "versioned PRIVATE companion containing config.json, copied from "
+    "reference/config.example.json. Initialize the pinned resolver with "
+    "git submodule update --init --recursive -- guards. "
+    "Runtime output never falls back to the tool source, cwd or system Temp."
 )
 
 
 def _companion_root():
-    """Ask tools/datadir.py where this skill's companion repo is. None when there is none.
-
-    Loaded by path rather than by `import datadir`, because these tools are run both as scripts and
-    as modules and sys.path is not the same in both. An import that works in one and not the other
-    would fail exactly the way this function exists to prevent: quietly.
-
-    ONLY ImportError-shaped problems are swallowed, and only because a missing datadir.py is a
-    legitimate state for a partially vendored checkout. Anything else, above all a bug in this
-    function, propagates: a broad `except Exception` here would hide a NameError in this very body
-    and leave the sibling probe permanently dead with nothing to show for it. That is not
-    hypothetical; the first draft of this function referenced an unimported module and the broad
-    except would have made it undetectable.
-    """
-    p = Path(__file__).resolve().parent / "datadir.py"
-    if not p.is_file():
-        return None
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("_dd_for_config", p)
+    """Use the pinned resolver, bound to this consumer including linked worktrees."""
+    path = _REPO/'guards/tools/datadir.py'
+    if not path.is_file():
+        raise ConfigNotInitialized(CONFIG_SETUP_HINT)
+    spec = importlib.util.spec_from_file_location('_smallcap_pinned_datadir', path)
     if spec is None or spec.loader is None:
-        return None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    fn = getattr(mod, "resolve_companion_root", None)
-    if fn is None:
-        # An older vendored datadir.py predates this helper. Degrade to the probes below rather
-        # than crashing, but do not pretend the question was asked.
-        return None
-    return fn("small-cap-deepdive")
+        raise ConfigNotInitialized('cannot load pinned guards resolver; '+CONFIG_SETUP_HINT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module._own_repo_root = lambda: str(_REPO)
+    module._config_env_vars = lambda skill: _CONFIG_DIR_ENV_VARS
+    for selector in (*_CONFIG_DIR_ENV_VARS, 'SMALL_CAP_DEEPDIVE_DATA_DIR'):
+        if os.environ.get(selector) and not Path(os.environ[selector]).expanduser().is_dir():
+            raise ConfigNotInitialized(selector+' names a missing companion directory')
+    companion = module.resolve_companion_root('small-cap-deepdive')
+    if companion is None:
+        raise ConfigNotInitialized(CONFIG_SETUP_HINT)
+    return prove_output_path(companion)
 
 
 def resolve_config_json() -> Path | None:
-    """Locate the user's config.json OUTSIDE this repo, or None if the tool is uninitialized.
-
-    First existing wins (config-spec E2):
-      1. $SMALL_CAP_DEEPDIVE_CONFIG_DIR (or alias $SMALL_CAP_DEEPDIVE_CONFIG) -> <dir>/config.json
-      2. ~/.small-cap-deepdive-config/config.json          (dotfile default)
-      3. ~/.config/small-cap-deepdive-config/config.json   (XDG default)
-      4. None                                              -> UNINITIALIZED, which is exactly what a
-                                                              freshly cloned public skill SHOULD be
-
-    No step lands inside the repo. `config_json_path()` raises ConfigNotInitialized with setup
-    instructions instead, mirroring tools/datadir.py:data_path(). An out-of-repo config dir keeps
-    the config (incl. the sec_user_agent PII) out of the public skill repo and lets you hot-swap
-    configs by repointing the env var (E5).
-    """
-    for var in _CONFIG_DIR_ENV_VARS:
-        d = os.environ.get(var)
-        if d:
-            p = Path(os.path.expanduser(d)) / "config.json"
-            if p.exists():
-                return p
-    # THE SIBLING COMPANION, asked through tools/datadir.py rather than re-derived here.
-    #
-    # This function used to know only the two dotfile locations below, while datadir.py also probes
-    # the fleet convention: a directory named <skill>-config BESIDE this repo. Two resolvers, two
-    # discovery orders, one question. Measured 2026-08-30: resolve_data_dir found the companion at
-    # CodesClaude/small-cap-deepdive-config/data, this function returned None, and with no config
-    # the run fell back to config.example.json's `./reports/smallcap`, which is inside this repo.
-    # 4029 real-run files were sitting there, held out of git by one .gitignore line that the
-    # boundary guard's own docstring calls advisory.
-    #
-    # Delegating rather than adding a fourth branch is the point: a second copy of the order is
-    # what produced the split in the first place, and it would drift again.
-    root = _companion_root()
-    if root is not None:
-        p = Path(root) / "config.json"
-        if p.exists():
-            return p
-    for d in (Path(os.path.expanduser("~/.small-cap-deepdive-config")),
-              Path(os.path.expanduser("~/.config/small-cap-deepdive-config"))):
-        p = d / "config.json"
-        if p.exists():
-            return p
-    return None
+    """Resolve config through the same proved companion used for output."""
+    path = _companion_root()/'config.json'
+    return prove_output_path(path) if path.is_file() else None
 
 
 def config_json_path() -> Path:
-    """Resolve the user's config.json, or fail hard with setup instructions. Never a repo path."""
-    p = resolve_config_json()
-    if p is None:
+    path = resolve_config_json()
+    if path is None:
         raise ConfigNotInitialized(CONFIG_SETUP_HINT)
-    return p
+    return path
+
+
+def _numeric_setting(key, value, expected_type):
+    if type(value) not in (int, float) or (type(value) is float and not math.isfinite(value)):
+        raise ConfigNotInitialized(f'{key} must be a finite number')
+    if expected_type is int and type(value) is float and not value.is_integer():
+        raise ConfigNotInitialized(f'{key} must be an integer')
+    try:
+        result = expected_type(value)
+    except (OverflowError, ValueError) as exc:
+        raise ConfigNotInitialized(f'{key} is outside the supported numeric range') from exc
+    if type(result) is float and not math.isfinite(result):
+        raise ConfigNotInitialized(f'{key} must be a finite number')
+    return result
 
 
 def load_config() -> dict:
-    # precedence: resolved config.json (out-of-repo) > config.example.json defaults;
-    # env SMALLCAP_* overrides scalars. config.json discovery order: see resolve_config_json / CONFIG.md.
-    # A READ may degrade: with no config.json we run on example defaults alone (EDGAR then 403s on
-    # the placeholder sec_user_agent, and verify_config.py names it). What a read may NOT do is
-    # reach back into the repo for an overlay.
-    cfg = json.loads((_REF / "config.example.json").read_text(encoding="utf-8"))
-    real = resolve_config_json()
-    if real is not None:
-        cfg.update(json.loads(real.read_text(encoding="utf-8")))
-    for k in list(cfg):
-        env = os.environ.get("SMALLCAP_" + k.upper())
-        if env is not None:
-            cfg[k] = env
-    return cfg
+    real = config_json_path()
+    defaults = json.loads((_REF/'config.example.json').read_text(encoding='utf-8'))
+    overlay = json.loads(real.read_text(encoding='utf-8'))
+    if not isinstance(overlay, dict):
+        raise ConfigNotInitialized('config.json must contain an object')
+    numeric_types = {key: type(value) for key, value in defaults.items()
+                     if type(value) in (int, float)}
+    defaults.update(overlay)
+    for key in list(defaults):
+        value = os.environ.get('SMALLCAP_'+key.upper())
+        if value is not None:
+            if key in numeric_types:
+                try:
+                    value = json.loads(value)
+                except (ValueError, TypeError) as exc:
+                    raise ConfigNotInitialized(f'{key} requires a numeric environment value') from exc
+            defaults[key] = value
+        if key in numeric_types:
+            defaults[key] = _numeric_setting(key, defaults[key], numeric_types[key])
+    return defaults
 
-CFG = load_config()
-UA = {"User-Agent": CFG["sec_user_agent"]}
-# Batch runs: SMALLCAP_RUN (e.g. "2026-06-19_aginput") routes all outputs into a
-# per-run subdir so each run's candidates/cheappass/deepdive/valuation/reports stay
-# together and runs (and skill versions) can be compared. Unset => flat (legacy).
-_RUN = os.environ.get("SMALLCAP_RUN", "").strip().strip("/\\")
+
+class _LazyMapping(MutableMapping):
+    def __init__(self, loader):
+        self.loader = loader
+        self._data = None
+
+    def _values(self):
+        if self._data is None:
+            self._data = self.loader()
+        return self._data
+
+    def __getitem__(self, key):
+        return self._values()[key]
+
+    def __setitem__(self, key, value):
+        self._values()[key] = value
+
+    def __delitem__(self, key):
+        del self._values()[key]
+
+    def __iter__(self):
+        return iter(self._values())
+
+    def __len__(self):
+        return len(self._values())
+
+
+CFG = _LazyMapping(load_config)
+UA = _LazyMapping(lambda: {'User-Agent': CFG['sec_user_agent']})
 
 
 def _resolve_output_dir(raw):
-    """Turn the configured `output_dir` into a path, and refuse one inside this repo.
-
-    A RELATIVE output_dir is resolved against the COMPANION repo, not the current directory. That
-    is what makes a config.json portable: `data/reports/smallcap` means the same thing on any
-    machine where the companion is discoverable, while an absolute path is a machine's private
-    detail that breaks on restore. An absolute value still wins, for the case where output belongs
-    somewhere neither this repo nor the companion.
-
-    THE REFUSAL IS THE POINT. `reference/config.example.json` shipped `./reports/smallcap`, which is
-    inside this repo, and nothing objected: 4029 real-run files accumulated there, out of git only
-    because one .gitignore line happened to cover them, and .gitignore is advisory. Every route
-    into this state, the shipped default, a config.json copied from it, or SMALLCAP_OUTPUT_DIR, ends
-    here, so one check closes all of them.
-
-    Raising rather than silently relocating: a tool that quietly writes somewhere other than where
-    its config says would be a different and worse surprise, and the operator is the only one who
-    can decide where this skill's output belongs.
-    """
-    p = Path(os.path.expanduser(str(raw)))
-    if not p.is_absolute():
-        root = _companion_root()
-        p = (Path(root) / p) if root is not None else (Path.cwd() / p)
-    p = p.resolve()
-    try:
-        p.relative_to(_REPO)
-    except ValueError:
-        return p
-    raise ConfigNotInitialized(
-        "output_dir resolves INSIDE this repo (%s).\n"
-        "A public skill repo ships the tool; everything a real run produces belongs in the private\n"
-        "companion repo beside it. Set output_dir in the companion's config.json to a path relative\n"
-        "to that companion, for example \"data/reports/smallcap\", or to an absolute path outside\n"
-        "this repo.\n%s" % (p, CONFIG_SETUP_HINT))
+    if not isinstance(raw, (str, os.PathLike)) or not str(raw).strip():
+        raise ConfigNotInitialized('output_dir must be a nonempty path')
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = _companion_root()/path
+    return prove_output_path(path)
 
 
-REPORTS = _resolve_output_dir(CFG["output_dir"])
-if _RUN:
-    REPORTS = REPORTS / _RUN
-REPORTS.mkdir(parents=True, exist_ok=True)
+def output_root() -> Path:
+    """Return the absolute PRIVATE unbatched root without creating directories."""
+    return _resolve_output_dir(load_config()['output_dir'])
+
+
+def validate_run_name(name: str) -> str:
+    if not isinstance(name, str) or not name or not name.strip('.'):
+        raise ValueError('run name must be a nonempty directory component')
+    if name != name.strip() or name.endswith('.') or any(
+            char in '/\\:<>"|?*' or ord(char) < 32 or ord(char) == 127 for char in name):
+        raise ValueError('run name contains unsafe path syntax or control characters')
+    if name.split('.')[0].upper() in {'CON', 'PRN', 'AUX', 'NUL',
+                                     *(f'COM{i}' for i in range(1, 10)),
+                                     *(f'LPT{i}' for i in range(1, 10))}:
+        raise ValueError('reserved run name')
+    return name
+
+
+def reports_dir() -> Path:
+    root = output_root()
+    run = os.environ.get('SMALLCAP_RUN', '')
+    if not run:
+        return root
+    destination = prove_output_path(root/validate_run_name(run))
+    if destination.parent != root or destination.name != run:
+        raise ValueError('active run escapes its configured root')
+    return destination
+
+
+class _LazyReports(os.PathLike):
+    """Compatibility path for existing writers; every final child is proved."""
+    def __fspath__(self):
+        return str(reports_dir())
+
+    def __str__(self):
+        return str(reports_dir())
+
+    def __truediv__(self, name):
+        base = reports_dir()
+        path = prove_output_path(base/name)
+        if not path.is_relative_to(base):
+            raise ValueError('default report path escapes the active reports directory')
+        return prepare_output(path)
+
+    def __getattr__(self, name):
+        return getattr(reports_dir(), name)
+
+
+REPORTS = _LazyReports()
+
 
 def init_edgar() -> None:
     from edgar import set_identity
-    set_identity(CFG["sec_user_agent"])
+    set_identity(CFG['sec_user_agent'])
 
-
-# ---------------------------------------------------------------------------
-# Concurrency isolation (v0.3.2 backlog #10), run-state must never be a single
-# shared path.
-#
-# A previous implementation parked run-state in a fixed /tmp/smallcap_run.txt.
-# Two agents running different themes CONCURRENTLY clobbered each other's
-# run-state (observed: cdmo-cro / railcar / space-economy collisions). The fix:
-# the run-state file is namespaced, per SMALLCAP_RUN batch when one is active,
-# else PID-unique, so concurrent agents never write the same path. It lives
-# INSIDE the active run dir (REPORTS) when batched, keeping a run self-contained;
-# only the unbatched/legacy path falls back to the system temp dir, and even then
-# it is PID-stamped, never the old fixed /tmp/smallcap_run.txt.
-# ---------------------------------------------------------------------------
 
 def run_state_path(run: str | None = None, pid: int | None = None) -> Path:
-    """Return a NON-shared run-state file path for the active run / process.
-
-    Resolution (never a single fixed cross-agent path):
-      1. SMALLCAP_RUN active (arg `run` or env) -> <REPORTS>/_run_state.txt, i.e.
-         scoped to THIS run's batch dir so a concurrent run with a different
-         SMALLCAP_RUN writes a different file.
-      2. No active run (flat/legacy) -> <system temp>/smallcap_run_<pid>.txt,
-         PID-unique so concurrent unbatched agents do not clobber each other.
-
-    `run` / `pid` are injectable for the selftest (so it can prove two distinct
-    runs / PIDs resolve to two distinct paths offline). Never returns the legacy
-    shared "/tmp/smallcap_run.txt".
-    """
-    import tempfile
-    run = (run if run is not None else os.environ.get("SMALLCAP_RUN", "")).strip().strip("/\\")
-    if run:
-        base = Path(CFG["output_dir"]) / run
-        base.mkdir(parents=True, exist_ok=True)
-        return base / "_run_state.txt"
-    if pid is None:
-        pid = os.getpid()
-    return Path(tempfile.gettempdir()) / f"smallcap_run_{pid}.txt"
+    """Use the environment when omitted; an empty run selects process-scoped state."""
+    selected = os.environ.get('SMALLCAP_RUN', '') if run is None else run
+    if selected != '':
+        selected = validate_run_name(selected)
+    root = output_root()
+    if selected:
+        directory = prove_output_path(root/selected)
+        if directory.parent != root or directory.name != selected:
+            raise ValueError('run state escapes its configured root')
+        return prove_output_path(directory/'_run_state.txt')
+    process = os.getpid() if pid is None else int(pid)
+    if process <= 0:
+        raise ValueError('pid must be positive')
+    return prove_output_path(root/f'_run_state_{process}.txt')
 
 def slug(name: str) -> str:
     return re.sub(r"\W+", "_", str(name).lower())[:40].strip("_")
@@ -232,6 +220,7 @@ def today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 def http_get(url: str, params: dict | None = None, timeout: int = 25, retries: int = 4) -> requests.Response:
+    import requests
     last = None
     for attempt in range(retries):
         last = requests.get(url, headers=UA, params=params, timeout=timeout)
@@ -386,32 +375,22 @@ def _selftest() -> None:
     assert band_for(_mcb, 2e9, 5e9) == "large", (
         "P12: an oversize reconstructed mktcap bands 'large' only AFTER resolution (correct order)")
 
-    # -----------------------------------------------------------------------
-    # v0.3.2 #10, run-state must be PID-unique / per-SMALLCAP_RUN, never a single
-    # shared /tmp path. Two distinct runs (and two distinct PIDs) must NOT collide.
-    # Override output_dir to a temp dir so the selftest never pollutes real reports/.
-    # -----------------------------------------------------------------------
-    import tempfile as _tf
-    _orig_outdir = CFG["output_dir"]
-    with _tf.TemporaryDirectory() as _rs_tmp:
-        CFG["output_dir"] = _rs_tmp
-        try:
-            p_a = run_state_path(run="2026-06-20_themeA")
-            p_b = run_state_path(run="2026-06-20_themeB")
-            assert p_a != p_b, f"#10: distinct SMALLCAP_RUN must give distinct run-state paths: {p_a} == {p_b}"
-            assert p_a.name == "_run_state.txt" and p_b.name == "_run_state.txt", "#10: batched run-state filename"
-            assert "2026-06-20_themeA" in str(p_a) and "2026-06-20_themeB" in str(p_b), (
-                "#10: batched run-state must be scoped under its own run dir")
-        finally:
-            CFG["output_dir"] = _orig_outdir
-    # PID-unique fallback for the unbatched/legacy (no SMALLCAP_RUN) path.
-    p_pid1 = run_state_path(run="", pid=11111)
-    p_pid2 = run_state_path(run="", pid=22222)
-    assert p_pid1 != p_pid2, f"#10: distinct PIDs must give distinct run-state paths: {p_pid1} == {p_pid2}"
-    assert p_pid1.name == "smallcap_run_11111.txt", f"#10: PID-unique run-state name: {p_pid1.name}"
-    # The legacy shared path is GONE: no resolution may produce /tmp/smallcap_run.txt.
-    assert p_pid1.name != "smallcap_run.txt" and p_a.name != "smallcap_run.txt", (
-        "#10: must never resolve to the legacy shared /tmp/smallcap_run.txt")
+    # Path-isolation math remains offline; generated regressions exercise PRIVATE proof.
+    import tempfile
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory(prefix='smallcap-state-control-') as temporary:
+        root = Path(temporary)
+        with patch.dict(os.environ, {'SMALLCAP_RUN': ''}), \
+             patch.dict(globals(), {'output_root': lambda: root,
+                                    'prove_output_path': lambda value: Path(value).resolve()}):
+            first = run_state_path(run="2026-06-20_themeA")
+            second = run_state_path(run="2026-06-20_themeB")
+            assert first != second and first.parent.parent == root
+            assert first.name == second.name == '_run_state.txt'
+            p_pid1 = run_state_path(pid=11111)
+            p_pid2 = run_state_path(pid=22222)
+            assert p_pid1 != p_pid2 and p_pid1.parent == p_pid2.parent == root
+            assert p_pid1.name == '_run_state_11111.txt'
 
     print("_common selftest PASS (P5 resolve_mktcap fallback chain + band_for unknown flow-through "
           "+ P12 resolve-then-band ordering + #10 run-state isolation)")

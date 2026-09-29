@@ -1,0 +1,55 @@
+{
+  "origin": "https://github.com/example/synthetic-smallcap-config.git",
+  "other_origin": "git@github.com:example/synthetic-other-config.git",
+  "config": {
+    "schema_version": 1,
+    "sec_user_agent": "user1@example.com",
+    "output_dir": "reports/smallcap"
+  },
+  "label": "Synthetic theme",
+  "unicode_label": "合成研究 A",
+  "note": "Generated control",
+  "hash": "4dd8a8deff78621b28c30a38ee45d7ab7c9c708f5e503c88613a5e46b41bfc69",
+  "other_hash": "ec435e363b2fad1a10d9faa2afc8b5c1166ddb9b41f09e841e8952e7d60544f9",
+  "invalid_names": [
+    "",
+    ".",
+    "..",
+    "...",
+    "../escape",
+    "nested/name",
+    "nested\\name",
+    "/absolute",
+    "C:drive",
+    "bad\nname",
+    "bad\u0000name"
+  ],
+  "report": {
+    "ticker": "SYNTH",
+    "company_name": "AcmeCorp",
+    "valuation": {}
+  },
+  "asof": "2020-01-01",
+  "linked_marker": "gitdir: synthetic-git-metadata\n",
+  "dependencies": {
+    "requests": "2.31.0",
+    "edgartools": "5.35.1",
+    "yfinance": "1.4.1",
+    "pandas": "3.0.1"
+  },
+  "run_state": {
+    "empty": "",
+    "active": "synthetic-active",
+    "explicit": "synthetic-explicit",
+    "unsafe": "../synthetic-escape",
+    "pids": [
+      101,
+      202
+    ],
+    "inherited": [
+      null,
+      "synthetic-active",
+      "../synthetic-escape"
+    ]
+  }
+}

@@ -50,11 +50,13 @@ disclosure non-filers, before any analyst time is spent.
 > timestamped batch so this run's candidates / cheappass / deepdive / valuation / report files
 > stay together and runs stay comparable across skill versions:
 > ```bash
-> export SMALLCAP_RUN=$(python tools/new_run.py --label <theme-or-event>)
-> # → all outputs now land in reports/smallcap/<date>_<label>/ with a _run.json manifest
-> #   (records date, skill git commit, and the valuation config snapshot)
+> SMALLCAP_RUN="$(python tools/new_run.py --label "Synthetic research")" || exit 1
+> export SMALLCAP_RUN
+> REPORTS_ROOT="$(python -c 'import sys; sys.path.insert(0, "tools"); from _common import reports_dir; print(reports_dir())')" || exit 1
+> export REPORTS_ROOT
+> # Outputs use this absolute PRIVATE directory with a _run.json manifest.
 > ```
-> Leaving `SMALLCAP_RUN` unset writes flat to `reports/smallcap/` (legacy behaviour).
+> Leaving `SMALLCAP_RUN` unset uses the unbatched PRIVATE reports root. Expand `REPORTS_ROOT` to its absolute value before handing any output path to another agent.
 >
 > **Concurrency isolation.** Theme runs execute concurrently (the coverage harness fans out dozens
 > of agents at once), so the two shared paths are namespaced per run rather than clobbered: the
@@ -174,7 +176,7 @@ theme-fit gate needed, form-type enumeration replaces keyword over-recall):
 
 1. **Enumerate the event.** Run `tools/discover_events.py --spinoffs` or
    `tools/discover_events.py --insider-clusters`.
-   Output: `reports/smallcap/candidates_event_<mode>_<date>.json`, same shape as
+   Output: `${REPORTS_ROOT}/candidates_event_<mode>_<date>.json`, same shape as
    theme-mode `candidates_<slug>.json`.
 
 2. **Kill-flag scan (mandatory).** Run `tools/cheap_pass.py --universe <candidates_json>`.
@@ -286,17 +288,14 @@ Before running any tool, complete setup once:
 # 1. Install Python dependencies
 pip install -r tools/requirements.txt
 
-# 2. Configure the tool — OUTSIDE the repo.
-# Your SEC User-Agent is your real name + email. It is yours, so it lives in the private config
-# dir, never in the working tree. A "just fill in reference/config.json" step is how a real
-# contact address once got committed here; the config now resolves from outside by design.
-mkdir -p ~/.small-cap-deepdive-config
-cp reference/config.example.json ~/.small-cap-deepdive-config/config.json
-# Edit ~/.small-cap-deepdive-config/config.json: set "sec_user_agent" to "Your Name you@example.com".
-# EDGAR requires a valid User-Agent on every request (format: "Name email"); omission causes 403.
-# (Override the location with $SMALL_CAP_DEEPDIVE_CONFIG_DIR. The in-repo reference/config.json
-#  fallback is GONE: discovery never lands in the repo, init_config.py refuses to write there, and
-#  verify_config.py reports NOT INITIALIZED instead of pointing at a repo path.)
+# 2. Create or clone a PRIVATE companion before entering personal configuration.
+gh repo create small-cap-deepdive-config --private
+gh repo clone small-cap-deepdive-config "$HOME/.small-cap-deepdive-config"
+export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
+python scripts/init_config.py
+# After successful PRIVATE verification, set sec_user_agent in the private config.
+python scripts/verify_config.py --json
+# Commit and push config and runtime DATA in this PRIVATE companion.
 ```
 
 The `sec_user_agent` field is the only hard requirement. All other config keys have defaults
@@ -347,7 +346,7 @@ no-fallback rule exists: `reference/track-forward.md` §Where the verdict log li
 
 1. **After each deep-dive run:** record verdicts from the output JSON:
    ```bash
-   python tools/track_forward.py --record reports/smallcap/deepdive_verdicts.json
+   python tools/track_forward.py --record "${REPORTS_ROOT}/deepdive_verdicts.json"
    ```
    Or record a single verdict via CLI flags:
    ```bash

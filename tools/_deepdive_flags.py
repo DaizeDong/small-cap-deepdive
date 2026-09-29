@@ -1,15 +1,7 @@
-"""_deepdive_flags.py — derived-flag computations extracted from deepdive_data.py.
+"""Derived financial flags and contractual-debt evidence helpers.
 
-Pure refactor: the concentration extractor + flag composer, the wrong-entity / low-revenue-loss /
-insurance / lessor / foreign-filer guards, the debt cross-source / truncation helpers, and the
-trajectory + contamination + normalization-mask derived fields. No behavior change — every symbol
-was moved verbatim from deepdive_data.py and is re-exported there so the public module path is
-unchanged. Imports from _common and _deepdive_concepts only; NEVER from deepdive_data (no circular
-import).
-
-The two helpers that probe XBRL (_insurance_concepts_present, _lessor_asset_heavy) resolve the
-fetcher through the _deepdive_concepts module namespace (_dc._one_concept) so deepdive_data's
-selftest, which patches _deepdive_concepts._one_concept, still controls them.
+The helpers are re-exported by deepdive_data.py. Concept fetches use the
+_deepdive_concepts namespace, avoiding a circular import.
 """
 from __future__ import annotations
 import re
@@ -355,78 +347,22 @@ def _check_debt_quality(
     equity_series: list,
     liabilities_series: list,
 ) -> tuple[bool, bool, str | None]:
-    """C1a debt truncation + staleness guard.
+    """Check contractual-debt staleness without inferring debt from balance-sheet totals.
 
-    Returns (debt_truncation_suspected, debt_stale, detail_str).
-
-    debt_truncation_suspected: reported total_debt < 0.1 * implied_debt
-      where implied_debt = total_liabilities - stockholders_equity
-      (or total_assets - stockholders_equity when liabilities absent).
-
-    P-B: the truncation ratio was tightened from 0.5 to 0.1. (liabilities - equity) includes
-    plenty of non-debt liabilities (deferred revenue, asset-retirement obligations, payables,
-    operating-lease liabilities) for a real producer, so reported debt legitimately sitting at
-    30-49% of (liab-equity) is NOT a truncated XBRL tag — flagging it relabeled real producers'
-    plausible partial debt as "truncation". Only a near-total mismatch (reported < 10% of implied)
-    is a credible sign the debt concept under-captured the balance sheet.
-
-    debt_stale: latest debt end-date is >18 months older than latest assets/revenue end-date.
+    The first return value remains for compatibility. A low debt-to-liabilities ratio
+    does not establish truncation: liabilities include obligations other than debt.
     """
-    if not debt_series:
+    if not debt_series or not assets_series:
         return False, False, None
 
-    latest_debt_entry = debt_series[-1]
-    latest_debt_val = latest_debt_entry["val"]
-    latest_debt_date = latest_debt_entry["end"]
+    from datetime import date
 
-    # Staleness check: compare debt end-date with assets end-date
-    debt_stale = False
-    if assets_series:
-        latest_assets_date = assets_series[-1]["end"]
-        try:
-            from datetime import date as _date
-            d_debt = _date.fromisoformat(latest_debt_date)
-            d_assets = _date.fromisoformat(latest_assets_date)
-            lag_days = (d_assets - d_debt).days
-            if lag_days > _DEBT_STALE_DAYS:
-                debt_stale = True
-        except Exception:
-            pass
-
-    # Debt truncation check: reported_debt vs implied_debt
-    debt_truncation_suspected = False
-    detail = None
-
-    # Try to compute implied_debt = Liabilities - Equity
-    implied_debt: float | None = None
-    if liabilities_series and equity_series:
-        # Match by end date; use latest matching pair
-        liab_map = {v["end"]: v["val"] for v in liabilities_series}
-        eq_map = {v["end"]: v["val"] for v in equity_series}
-        common = sorted(set(liab_map) & set(eq_map))
-        if common:
-            latest_end = common[-1]
-            implied_debt = liab_map[latest_end] - eq_map[latest_end]
-
-    # Fallback: Assets - Equity when Liabilities absent
-    if implied_debt is None and assets_series and equity_series:
-        asset_map = {v["end"]: v["val"] for v in assets_series}
-        eq_map = {v["end"]: v["val"] for v in equity_series}
-        common = sorted(set(asset_map) & set(eq_map))
-        if common:
-            latest_end = common[-1]
-            implied_debt = asset_map[latest_end] - eq_map[latest_end]
-
-    if implied_debt is not None and implied_debt > 0 and latest_debt_val is not None:
-        if latest_debt_val < 0.1 * implied_debt:
-            debt_truncation_suspected = True
-            detail = (
-                f"reported_total_debt={latest_debt_val/1e6:.1f}M, "
-                f"implied_debt(liab-equity)={implied_debt/1e6:.1f}M, "
-                f"ratio={latest_debt_val/implied_debt:.2f}"
-            )
-
-    return debt_truncation_suspected, debt_stale, detail
+    try:
+        debt_date = date.fromisoformat(debt_series[-1]["end"])
+        assets_date = date.fromisoformat(assets_series[-1]["end"])
+    except (KeyError, TypeError, ValueError):
+        return False, False, None
+    return False, (assets_date - debt_date).days > _DEBT_STALE_DAYS, None
 
 
 def _debt_for_ev(
@@ -435,50 +371,20 @@ def _debt_for_ev(
     equity_series: list,
     assets_series: list,
 ) -> tuple[float | None, bool, str | None]:
-    """v0.3.1 #2 — choose the debt figure EV should use.
+    """Preserve contractual debt and disclose missing or invalid debt evidence.
 
-    When the summed reported debt (Level-1 sum of standard concepts) is STILL implausibly low
-    relative to the implied debt (total_liabilities - total_equity), the XBRL debt tags did not
-    capture the balance sheet — use the IMPLIED figure for EV instead so EV is accurate and the
-    name is not falsely blocked by cross_source_mismatch.
-
-    implied_debt = latest matching (Liabilities - StockholdersEquity); falls back to
-    (Assets - StockholdersEquity) when Liabilities absent (balance-sheet identity).
-
-    Returns (debt_for_ev, debt_truncation_suspected, detail):
-      * debt_for_ev: implied_debt when summed_debt < 0.5 * implied_debt (and implied>0);
-        otherwise summed_debt unchanged.
-      * debt_truncation_suspected: True when the implied figure was substituted (the flag is now
-        rarer + accurate — it only fires when EV actually switched to the implied figure).
-      * detail: human-readable summary of the substitution (None when not substituted).
+    Assets minus equity gives total liabilities, which includes non-debt items.
+    Liabilities minus equity has no contractual-debt interpretation. Neither can
+    replace debt. The balance-sheet arguments and substitution flag are retained
+    for callers using the existing interface.
     """
-    # Compute implied_debt = Liabilities - Equity (preferred) or Assets - Equity (fallback).
-    implied_debt: float | None = None
-    if liabilities_series and equity_series:
-        liab_map = {v["end"]: v["val"] for v in liabilities_series}
-        eq_map = {v["end"]: v["val"] for v in equity_series}
-        common = sorted(set(liab_map) & set(eq_map))
-        if common:
-            latest_end = common[-1]
-            implied_debt = liab_map[latest_end] - eq_map[latest_end]
-    if implied_debt is None and assets_series and equity_series:
-        asset_map = {v["end"]: v["val"] for v in assets_series}
-        eq_map = {v["end"]: v["val"] for v in equity_series}
-        common = sorted(set(asset_map) & set(eq_map))
-        if common:
-            latest_end = common[-1]
-            implied_debt = asset_map[latest_end] - eq_map[latest_end]
+    from math import isfinite
 
-    if implied_debt is None or implied_debt <= 0:
-        return summed_debt, False, None
-
-    reported = summed_debt if summed_debt is not None else 0.0
-    if reported < 0.5 * implied_debt:
-        detail = (
-            f"summed_reported_debt={reported/1e6:.1f}M < 0.5*implied_debt "
-            f"(liab-equity={implied_debt/1e6:.1f}M) -> using implied for EV"
-        )
-        return implied_debt, True, detail
+    if summed_debt is None:
+        return None, False, "Contractual debt unavailable; balance-sheet totals do not establish debt."
+    if (isinstance(summed_debt, bool) or not isinstance(summed_debt, (int, float))
+            or not isfinite(summed_debt) or summed_debt < 0):
+        return None, False, "Contractual debt is invalid; no replacement inferred from balance-sheet totals."
     return summed_debt, False, None
 
 

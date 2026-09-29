@@ -51,10 +51,10 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import CFG, REPORTS, http_get, slug
+from _common import CFG, REPORTS, http_get, slug, prepare_output
 
 # 硬排除的 SIC 前缀:医药/医疗器械/医疗服务/软件/金融/保险/房产/零售/餐饮/玩具
-HARD_EXCLUDE = CFG["sic_hard_exclude"]
+# Read configured exclusions when a caller runs a filter, never during import.
 
 # ---------------------------------------------------------------------------
 # P8 SIC reverse-recall, the dedicated-SIC recall FLOOR.
@@ -303,14 +303,24 @@ def write_sic_floor_sidecar(theme_slug: str, sic_rows: list[dict],
                             run_dir: Path | None = None) -> Path:
     """Write the SIC-floor recall rows to the active-run, slug-namespaced sidecar.
 
-    Returns the path written. The destination is computed by sic_floor_sidecar_path,
-    so it is guaranteed to live under the active run dir and to carry the ACTIVE theme's
-    slug — never a fixed cross-theme path. Creates the run dir if missing.
+    Proves the final destination belongs to verified PRIVATE storage before creating
+    directories or writing. Explicit run directories require the same proof as defaults.
     """
     path = sic_floor_sidecar_path(theme_slug, run_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(list(sic_rows), indent=2, ensure_ascii=False), encoding="utf-8")
+    payload = json.dumps(list(sic_rows), indent=2, ensure_ascii=False)
+    path = prepare_output(path)
+    path.write_text(payload, encoding="utf-8")
     return path
+
+
+def _canonical_cik(value) -> str:
+    """Return an unpadded SEC issuer identifier; malformed identities cannot be merged."""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError("CIK must be a positive integer or decimal string")
+    text = str(value).strip()
+    if not re.fullmatch(r"[0-9]{1,10}", text) or int(text) == 0:
+        raise ValueError("CIK must contain one to ten digits and be positive")
+    return str(int(text))
 
 
 def union_recall(fts_rows: list[dict], sic_rows: list[dict]) -> list[dict]:
@@ -320,28 +330,23 @@ def union_recall(fts_rows: list[dict], sic_rows: list[dict]) -> list[dict]:
       "fts"          present only in fts_rows
       "sic_reverse"  present only in sic_rows (the FTS blind spot the floor recovers)
       "both"         present in both (strongest signal)
-    FTS rows win on field content (they carry ticker/form/file_date/matched_phrase from
+    The first FTS row wins on field content (it carries ticker/form/file_date/matched_phrase from
     the full-text hit); a SIC-only row is added with whatever browse-edgar gave (cik/name/
     sic) and ticker left blank for downstream enrichment to resolve. Returns a new list;
-    inputs are not mutated.
+    inputs are not mutated. CIKs are unpadded decimal strings; invalid identifiers raise.
     """
-    fts_ciks = {str(r.get("cik", "")).strip() for r in fts_rows if r.get("cik")}
-    sic_ciks = {str(r.get("cik", "")).strip() for r in sic_rows if r.get("cik")}
-    out: list[dict] = []
-    for r in fts_rows:
-        rr = dict(r)
-        cik = str(rr.get("cik", "")).strip()
-        rr["recall_channel"] = "both" if cik in sic_ciks else "fts"
-        out.append(rr)
-    for r in sic_rows:
-        cik = str(r.get("cik", "")).strip()
-        if cik in fts_ciks:
-            continue  # already emitted as "both"
-        rr = dict(r)
-        rr["recall_channel"] = "sic_reverse"
-        rr.setdefault("ticker", "")
-        out.append(rr)
-    return out
+    merged: dict[str, dict] = {}
+    for channel, rows in (("fts", fts_rows), ("sic_reverse", sic_rows)):
+        for row in rows:
+            cik = _canonical_cik(row.get("cik"))
+            if cik in merged:
+                if channel == "sic_reverse" and merged[cik]["recall_channel"] == "fts":
+                    merged[cik]["recall_channel"] = "both"
+                continue
+            merged[cik] = {**row, "cik": cik, "recall_channel": channel}
+            if channel == "sic_reverse":
+                merged[cik].setdefault("ticker", "")
+    return list(merged.values())
 
 
 def _selftest():
@@ -510,17 +515,18 @@ def _selftest():
         assert "railcar" not in p_mach.name, "#10: machinery sidecar must not carry a cross-theme (railcar) name"
         assert "candidates_" not in p_mach.name, "#10: sidecar must stay out of the candidates_*.json glob"
         assert p_mach.parent == run_machinery, "#10: sidecar must land under the ACTIVE run dir"
-        # Actually write two distinct sidecars and confirm they coexist without clobbering.
-        sic_rows_a = [{"cik": "111", "name": "MACHINE CO", "recall_channel": "sic_reverse"}]
-        sic_rows_b = [{"cik": "222", "name": "RAILCAR CO", "recall_channel": "sic_reverse"}]
-        w_a = write_sic_floor_sidecar("cov-machinery", sic_rows_a, run_dir=run_machinery)
-        w_b = write_sic_floor_sidecar("railcar-leasing", sic_rows_b, run_dir=run_railcar)
-        assert w_a == p_mach and w_b == p_rail, "#10: writer must use the namespaced path"
-        assert w_a.exists() and w_b.exists(), "#10: both sidecars must exist (no clobber)"
-        loaded_a = json.loads(w_a.read_text(encoding="utf-8"))
-        loaded_b = json.loads(w_b.read_text(encoding="utf-8"))
-        assert loaded_a[0]["cik"] == "111" and loaded_b[0]["cik"] == "222", (
-            "#10: each run's sidecar must hold ITS OWN rows, not a cross-theme stale file")
+        # Temporary directories are not initialized PRIVATE destinations. Positive
+        # writer coverage lives in tests/test_sic_recall.py with proved synthetic repos.
+        from make_fixtures import sic_recall_scenarios
+        from _output_paths import OutputPathError
+        rows = sic_recall_scenarios()["sic"]
+        try:
+            write_sic_floor_sidecar("cov-machinery", rows, run_dir=run_machinery)
+        except OutputPathError:
+            pass
+        else:
+            raise AssertionError("Uninitialized sidecar destination was accepted")
+        assert not run_machinery.exists(), "Refused writes must not create the run directory"
 
     print("filter_by_sic selftest PASS (+ #10 sidecar namespacing isolation)")
 

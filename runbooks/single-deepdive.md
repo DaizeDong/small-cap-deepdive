@@ -15,22 +15,28 @@ Complete this once before any run:
 
 ```bash
 pip install -r tools/requirements.txt
-mkdir -p ~/.small-cap-deepdive-config
-cp reference/config.example.json \
-   ~/.small-cap-deepdive-config/config.json
+gh repo create small-cap-deepdive-config --private
+gh repo clone small-cap-deepdive-config "$HOME/.small-cap-deepdive-config"
+export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
+python scripts/init_config.py
 ```
 
-Set `"sec_user_agent"` to `"Your Name you@example.com"` in that file (the private config dir,
+Set `"sec_user_agent"` to `"AcmeCorp user1@example.com"` in that file (the private config dir,
 never the repo, your identity is yours, and an in-tree copy is a leak waiting to be committed).
 EDGAR blocks requests with a missing or obviously fake User-Agent.
+
+Keep config, observations and reports committed and pushed in this PRIVATE companion. The identity shown here is synthetic; replace it privately before live SEC use. Run `python scripts/verify_config.py --json` before starting.
 
 Then open a run batch (start of every run) so outputs stay grouped and version-comparable:
 
 ```bash
-export SMALLCAP_RUN=$(python tools/new_run.py --label <ticker>)   # e.g. --label EGAN
+SMALLCAP_RUN="$(python tools/new_run.py --label "Synthetic research")" || exit 1
+export SMALLCAP_RUN
+REPORTS_ROOT="$(python -c 'import sys; sys.path.insert(0, "tools"); from _common import reports_dir; print(reports_dir())')" || exit 1
+export REPORTS_ROOT
 ```
 
-→ outputs land in `reports/smallcap/<date>_<label>/` with a `_run.json` manifest. Unset → flat (legacy).
+Outputs land in the absolute PRIVATE `$REPORTS_ROOT` directory with a `_run.json` manifest. Before handing paths to another agent, expand `REPORTS_ROOT` to its actual value. With no active run, the runtime uses the unbatched private reports root.
 
 ---
 
@@ -84,7 +90,7 @@ Runtime: 30 to 90 seconds.
 python tools/deepdive_data.py --ticker EGAN
 ```
 
-Output: `reports/smallcap/deepdive_EGAN_<date>.json`
+Output: `${REPORTS_ROOT}/deepdive_EGAN_<date>.json`
 
 Expected output:
 
@@ -99,7 +105,7 @@ Expected output:
   净利: $x.xM | OCF: $x.xM
   现金: $x.xM | runway: None 期
   ...
-数据: reports/smallcap/deepdive_EGAN_<date>.json
+数据: ${REPORTS_ROOT}/deepdive_EGAN_<date>.json
 ```
 
 **What it pulls:**
@@ -122,7 +128,7 @@ In your Claude Code session, instruct the agent:
 
 ```
 Deep-dive report for EGAN (eGain Corp, CIK 1066194) using data from
-reports/smallcap/deepdive_EGAN_<date>.json.
+${REPORTS_ROOT}/deepdive_EGAN_<date>.json.
 Theme context (if any): "SaaS for regulated industries" [omit if no theme].
 
 Required preamble before scoring:
@@ -251,7 +257,7 @@ If the latest 10-K has no going-concern language, the flag will not appear.
 
 ## Troubleshooting
 
-**EDGAR 403:** Set `sec_user_agent` to `"Name you@example.com"` in `~/.small-cap-deepdive-config/config.json` (the private config dir, never the repo).
+**EDGAR 403:** Set `sec_user_agent` to `"AcmeCorp user1@example.com"` in `~/.small-cap-deepdive-config/config.json` (the private config dir, never the repo).
 
 **CIK not found:** Try `python tools/discover.py --theme <ticker>` to confirm the ticker maps
 to a known CIK. Micro-caps occasionally file under a parent CIK rather than the ticker symbol.

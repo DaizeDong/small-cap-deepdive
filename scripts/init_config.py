@@ -1,110 +1,93 @@
 #!/usr/bin/env python3
-"""Stamp a spec-conformant config.json for small-cap-deepdive (config-spec E3/E4).
+"""Initialize deterministic configuration in a verified, versioned PRIVATE companion.
 
-Template-driven + deterministic: copies reference/config.example.json (the authoritative
-default schema) into the resolved config dir as config.json. Re-running with the same --out
-produces byte-identical output (E4). It then points out the one hard requirement —
-sec_user_agent (your EDGAR User-Agent: real name + email) — which you must edit before use.
-
-Discovery convention this skill uses (also in CONFIG.md, E2). config.json resolves from, in order:
-  1. $SMALL_CAP_DEEPDIVE_CONFIG_DIR   (or alias $SMALL_CAP_DEEPDIVE_CONFIG) -> <dir>/config.json
-  2. ~/.small-cap-deepdive-config/config.json          (dotfile default)
-  3. ~/.config/small-cap-deepdive-config/config.json   (XDG default)
-  4. nothing found -> NOT INITIALIZED. No step lands inside the repo.
-
-Usage:
-  python scripts/init_config.py [--out <dir>] [--force]
-
---out  target config DIR; if omitted, uses $SMALL_CAP_DEEPDIVE_CONFIG_DIR, else
-       ~/.small-cap-deepdive-config/. It used to default to the in-repo reference/ dir, which made
-       "just run init" the shortest path to an EDGAR identity inside a public repo. Writing into
-       the repo is now refused outright: a read may degrade, a write must fail hard.
-Stdlib only. Cross-platform. Writes config.json outside the repo; never echoes PII.
+Explicit --out takes precedence over the supported config environment selectors.
+Otherwise use the same companion discovery as the runtime. An existing PRIVATE
+Git worktree is required before writing or asking for an EDGAR identity.
 """
 import argparse
 import json
 import os
-import sys
 from pathlib import Path
+import stat
+import sys
+import tempfile
 
-_HERE = Path(__file__).resolve().parent
-_REPO = _HERE.parent
-_EXAMPLE = _REPO / "reference" / "config.example.json"
-_PLACEHOLDER_UA = "small-cap-deepdive research your-email@example.com"
-_DEFAULT_OUT = "~/.small-cap-deepdive-config"
+_REPO = Path(__file__).resolve().parents[1]
+_EXAMPLE = _REPO / 'reference/config.example.json'
+sys.path.insert(0, str(_REPO / 'tools'))
+from _output_paths import OutputPathError, prove_output_path
 
 
 def resolve_out(out_arg):
-    """Target config DIR. Always outside the repo: this writes a file that will hold PII."""
-    if out_arg:
-        return Path(os.path.expanduser(out_arg))
-    env = os.environ.get("SMALL_CAP_DEEPDIVE_CONFIG_DIR") or os.environ.get("SMALL_CAP_DEEPDIVE_CONFIG")
-    if env:
-        return Path(os.path.expanduser(env))
-    return Path(os.path.expanduser(_DEFAULT_OUT))
+    """Use the runtime's companion selectors without requiring config.json yet."""
+    selected = out_arg or os.environ.get('SMALL_CAP_DEEPDIVE_CONFIG_DIR') or os.environ.get('SMALL_CAP_DEEPDIVE_CONFIG')
+    if selected:
+        return Path(selected).expanduser()
+    from _common import _companion_root
+    return _companion_root()
 
 
-def is_inside_repo(p):
+def check_config_target(target):
+    """Refuse file aliases before either skipping or replacing existing config."""
     try:
-        return _REPO == p.resolve() or _REPO in p.resolve().parents
-    except Exception:
-        return False
+        info = target.lstat()
+    except FileNotFoundError:
+        return
+    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+            or getattr(info, 'st_file_attributes', 0) & 1024):
+        raise OutputPathError('config.json must be an ordinary file with no links')
+
+
+def write_config(target, text):
+    """Replace only after a complete write and a fresh destination proof."""
+    descriptor, name = tempfile.mkstemp(prefix='.config-', suffix='.tmp', dir=target.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8', newline='\n') as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        check_config_target(target)
+        if prove_output_path(target) != target:
+            raise OutputPathError('config destination changed during initialization')
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Stamp a spec-conformant config.json from the example template.")
-    ap.add_argument("--out", default=None,
-                    help="target config dir (default: $SMALL_CAP_DEEPDIVE_CONFIG_DIR, else %s)"
-                         % _DEFAULT_OUT)
-    ap.add_argument("--force", action="store_true", help="overwrite an existing config.json")
-    a = ap.parse_args()
-
-    if not _EXAMPLE.is_file():
-        print("ERROR: template not found: %s" % _EXAMPLE)
-        return 2
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--out', help='directory within an existing PRIVATE companion')
+    parser.add_argument('--force', action='store_true', help='replace an existing ordinary config.json')
+    args = parser.parse_args()
     try:
-        template = json.loads(_EXAMPLE.read_text(encoding="utf-8"))
-    except Exception as e:
-        print("ERROR: config.example.json is not valid JSON: %s" % e)
+        out_dir = prove_output_path(resolve_out(args.out))
+        target = out_dir / 'config.json'
+        check_config_target(target)
+        if prove_output_path(target) != target:
+            raise OutputPathError('config destination must remain in the verified directory')
+        template = json.loads(_EXAMPLE.read_text(encoding='utf-8'))
+        if not isinstance(template, dict):
+            raise ValueError('config template must be a JSON object')
+        out_dir.mkdir(parents=True, exist_ok=True)
+        if target.exists() and not args.force:
+            print('Existing config preserved; use --force to replace it.')
+        else:
+            write_config(target, json.dumps(template, indent=2, ensure_ascii=False) + '\n')
+            print('Config initialized.')
+    except (OSError, RuntimeError, ValueError) as error:
+        print('ERROR: ' + str(error))
+        print('Create or clone a PRIVATE Git companion with an origin remote, then select it with --out or SMALL_CAP_DEEPDIVE_CONFIG_DIR.')
         return 2
 
-    out_dir = resolve_out(a.out)
-    # A write must fail hard. config.json holds the sec_user_agent PII, so a target inside this
-    # public repo is refused with instructions rather than quietly stamped there.
-    if is_inside_repo(out_dir):
-        print("ERROR: refusing to write config.json inside the skill repo: %s" % out_dir)
-        print("  config.json holds your EDGAR identity (real name + email). It belongs outside")
-        print("  a public repo, always. There is no in-repo location for it any more.")
-        print("    python scripts/init_config.py --out %s" % _DEFAULT_OUT)
-        return 2
-    out_dir.mkdir(parents=True, exist_ok=True)
-    target = out_dir / "config.json"
-
-    print("Init small-cap-deepdive config")
-    print("  template : %s" % _EXAMPLE)
-    print("  target   : %s" % target)
-    if target.exists() and not a.force:
-        print("  SKIP (exists): pass --force to overwrite. Existing config left untouched.")
-    else:
-        # Deterministic stamp: pretty-printed copy of the example schema, sorted-stable, \n newlines.
-        target.write_text(json.dumps(template, indent=2, ensure_ascii=False) + "\n",
-                          encoding="utf-8", newline="\n")
-        print("  wrote: %s" % target)
-
-    print("")
-    print("REQUIRED before first run: set \"sec_user_agent\" to your real name + email")
-    print("  (EDGAR User-Agent; the placeholder %r causes 403s from efts.sec.gov)." % _PLACEHOLDER_UA)
-    # Discovery finds ~/.small-cap-deepdive-config and the XDG dir on its own; anywhere else needs
-    # the env var, so only print the hint when it is actually required.
-    _auto = [Path(os.path.expanduser("~/.small-cap-deepdive-config")),
-             Path(os.path.expanduser("~/.config/small-cap-deepdive-config"))]
-    if all(out_dir.resolve() != d.resolve() for d in _auto):
-        print("  Then point the skill at this dir:")
-        print("    export SMALL_CAP_DEEPDIVE_CONFIG_DIR=%s" % out_dir)
-    print("")
-    print("Then verify:  python scripts/verify_config.py")
+    print('Verified PRIVATE configuration directory: ' + str(out_dir))
+    print('Set sec_user_agent privately in config.json before live EDGAR requests.')
+    print('Retain configuration and runtime history in the PRIVATE companion with commit and push.')
+    print('Use SMALL_CAP_DEEPDIVE_CONFIG_DIR to select this directory for subsequent commands.')
+    print('Then verify: python scripts/verify_config.py --json')
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__':
+    raise SystemExit(main())

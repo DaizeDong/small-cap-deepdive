@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 import sys
 from datetime import datetime, timezone
@@ -34,7 +35,7 @@ from pathlib import Path
 
 # sys.path shim so this script can be run directly from tools/
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import CFG, REPORTS, init_edgar, today
+from _common import CFG, REPORTS, init_edgar, today, reports_dir, prove_output_path, prepare_output
 
 # Valuation model primitives extracted to a sibling module (pure mechanical move).
 # Re-exported here so any consumer importing them from `valuation` keeps working.
@@ -73,7 +74,8 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     der = dd.get("derived", {})
     dq: list[str] = []  # data_quality flags
 
-    discount_rate = cfg["wacc"]  # used as the discount rate in reverse-DCF
+    discount_rate_key = "equity_discount_rate" if "equity_discount_rate" in cfg else "wacc"
+    discount_rate = cfg[discount_rate_key]
     cap_low = cfg["cap_rate_low"]    # low cap rate → HIGH equity value (optimistic end)
     cap_high = cfg["cap_rate_high"]  # high cap rate → LOW equity value (conservative end)
     n_years = int(cfg["normalize_years"])
@@ -82,6 +84,15 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # --- Inputs ---
     latest_cash = der.get("latest_cash")
     latest_debt = der.get("latest_total_debt")
+    debt_status = der.get("debt_evidence_status") or (
+        "reported" if latest_debt is not None else "unavailable")
+    debt_uncertain = bool(
+        latest_debt is None or debt_status != "reported"
+        or der.get("debt_evidence_uncertain")
+        or "proxy" in str(der.get("debt_source") or "").lower())
+    debt_detail = der.get("debt_evidence_detail")
+    if debt_uncertain:
+        dq.append(f"debt_evidence_uncertain:{debt_status}:{debt_detail or 'contractual debt not established'}")
     latest_revenue = der.get("latest_revenue")
     latest_ni = der.get("latest_net_income")
     latest_ocf = der.get("latest_ocf")
@@ -199,23 +210,17 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
 
     # --- EV computation ---
     # EV = market_cap + total_debt - cash
-    # If debt or cash is unavailable, compute partial EV with annotation
+    # Missing or conflicting contractual debt cannot support an EV estimate.
     ev: float | None = None
     ev_note: str | None = None
-    if latest_debt is not None and latest_cash is not None:
+    if debt_uncertain:
+        ev_note = "debt_evidence_uncertain"
+    elif latest_cash is not None:
         ev = market_cap + latest_debt - latest_cash
-    elif latest_debt is not None:
+    else:
         ev = market_cap + latest_debt
         ev_note = "cash_excluded"
         dq.append("ev_excludes_cash")
-    elif latest_cash is not None:
-        ev = market_cap - latest_cash
-        ev_note = "debt_excluded"
-        dq.append("ev_excludes_debt")
-    else:
-        ev = float(market_cap)
-        ev_note = "debt_and_cash_excluded"
-        dq.append("ev_is_market_cap_only")
 
     if ev is not None and ev <= 0:
         dq.append("ev_nonpositive_multiples_null")
@@ -267,20 +272,35 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     cv_rounded = round(cv_val, 4) if cv_val is not None else None
 
     # --- Normalized metrics ---
+    fcf_periods = []
     if cyclical:
         norm_ebitda = _normalize(ebitda_series, n_years)
-        norm_fcf_series, fcf_proxy_flag = _build_fcf_series(ocf_series, capex_series, fcf_is_proxy)
-        norm_fcf = _normalize(norm_fcf_series, n_years)
+        norm_fcf_series, _ = _build_fcf_series(ocf_series, capex_series, fcf_is_proxy)
+        fcf_periods = norm_fcf_series[-n_years:]
+        fcf_proxy_flag = any(not period["capex_complete"] for period in fcf_periods)
+        norm_fcf = None if fcf_proxy_flag else _normalize(fcf_periods, n_years)
         norm_note = f"cyclical:trailing_{n_years}yr_avg"
         # Flag if the normalization window is shorter than requested
-        n_fcf_used = len([v for v in norm_fcf_series if v.get("val") is not None])
+        n_fcf_used = len([v for v in fcf_periods if v.get("val") is not None])
         if n_fcf_used < n_years and norm_fcf is not None:
             dq.append(f"normalized_uses_{n_fcf_used}yr_insufficient")
     else:
         norm_ebitda = latest_ebitda
-        norm_fcf = latest_fcf
-        fcf_proxy_flag = fcf_is_proxy
+        fcf_proxy_flag = bool(fcf_is_proxy or latest_capex is None)
+        norm_fcf = None if fcf_proxy_flag else latest_fcf
         norm_note = "non_cyclical:latest"
+
+    incomplete_periods = [period["end"] for period in fcf_periods if not period["capex_complete"]]
+    if fcf_proxy_flag:
+        dq.append("normalized_fcf_capex_incomplete_or_ocf_proxy")
+    fcf_normalization = {
+        "mode": "trailing_periods" if cyclical else "latest",
+        "requested_periods": n_years if cyclical else 1,
+        "periods": fcf_periods,
+        "incomplete_periods": incomplete_periods,
+        "latest_capex_complete": latest_capex is not None and not fcf_is_proxy,
+        "policy": "no_capitalization_when_selected_capex_evidence_is_incomplete",
+    }
 
     if norm_ebitda is None:
         dq.append("normalized_ebitda_unavailable")
@@ -324,13 +344,15 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # --- C1 data-quality blocks on valuation routing ---
     # If debt_truncation or wrong_entity detected, treat EV/MoS as unreliable.
     # These flags are already in dq; here we force abstain by treating fcf_cap unsuitable.
-    _c1_data_block = der.get("debt_truncation_suspected") or der.get("debt_stale") or der.get("wrong_entity_suspected")
+    _c1_data_block = (debt_uncertain or der.get("debt_truncation_suspected")
+                      or der.get("debt_stale") or der.get("wrong_entity_suspected"))
     if _c1_data_block and not fcf_cap_model_unsuitable:
         fcf_cap_model_unsuitable = True  # force abstain path
         dq.append("fcf_cap_blocked_by_c1_data_quality_guard")
 
     # --- Reverse DCF (Gordon growth approximation) ---
-    # norm_fcf is levered (equity) FCF (OCF - CapEx, post-interest).
+    # OCF - CapEx is post-interest cash flow. Treat it as an equity cash-flow
+    # proxy under zero net new borrowing; no excess-cash addback is assumed.
     # Correct denominator: market_cap (equity value), not EV.
     # g = discount_rate - norm_fcf / market_cap
     # Economic validity: if g >= discount_rate, the perpetuity is invalid → null.
@@ -356,27 +378,14 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
                 dq.append("rdcf_implied_growth_very_high:market_pricing_in_high_growth")
 
     # --- Intrinsic value band (FCF capitalization) ---
-    # Conservative FCF capitalization: equity_value = normalized_fcf / cap_rate - net_debt
+    # Capitalize the same post-interest cash flow directly to equity value.
+    # A second net-debt subtraction would mix enterprise and equity bases.
     # cap_rate_high (0.12) → low equity estimate (conservative end)
     # cap_rate_low (0.09) → high equity estimate (optimistic end)
-    # Net debt = total_debt - cash (positive = net debt owed)
-    net_debt: float | None = None
-    if latest_debt is not None and latest_cash is not None:
-        net_debt = latest_debt - latest_cash
-    elif latest_debt is not None:
-        net_debt = latest_debt
-        dq.append("net_debt_excludes_cash")
-    elif latest_cash is not None:
-        net_debt = -latest_cash  # net cash position
-        dq.append("net_debt_excludes_debt_liabilities")
-
     iv_band: dict | None = None
     if norm_fcf is not None and norm_fcf > 0:
-        ev_implied_low = norm_fcf / cap_high   # high cap rate → low EV
-        ev_implied_high = norm_fcf / cap_low   # low cap rate → high EV
-        nd = net_debt if net_debt is not None else 0
-        eq_low = ev_implied_low - nd
-        eq_high = ev_implied_high - nd
+        eq_low = norm_fcf / cap_high
+        eq_high = norm_fcf / cap_low
         if latest_shares and latest_shares > 0:
             ps_low = round(eq_low / latest_shares, 2)
             ps_high = round(eq_high / latest_shares, 2)
@@ -390,7 +399,8 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
             "per_share_high": ps_high,
             "cap_rate_used_low": cap_low,
             "cap_rate_used_high": cap_high,
-            "note": f"conservative_fcf_cap;net_debt={'included' if net_debt is not None else 'excluded(unavailable)'}",
+            "basis": "post_interest_equity_cash_flow",
+            "note": "equity_cash_flow_cap;zero_net_new_borrowing;no_excess_cash_addback",
         }
     else:
         iv_band = None
@@ -470,39 +480,18 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # Downgrade BUY→WATCH when FCF quality is suspect:
     #   (i)  reverse_dcf_implied_growth < -0.15, market prices in steep decline while
     #        our MoS says cheap = contradiction → unsupported terminal value
-    #   (ii) OCF-proxy AND capital-intensive (large PP&E proxy = assets >> equity, or
-    #        large capex historically), true FCF after capex is unknown and likely lower
+    #   (ii) selected CapEx evidence is missing or marked as an OCF proxy
     #   (iii) lumpy OCF (CV high but not fully captured by cyclical flag)
     #
     # This only fires for fcf_cap path (nav/abstain already route away from BUY).
-    _fcf_sustainability_uncertain = False
+    _fcf_sustainability_uncertain = bool(fcf_proxy_flag and mos_basis == "fcf_cap")
+    if _fcf_sustainability_uncertain:
+        dq.append("fcf_sustainability_uncertain:ocf_proxy_capex_unknown_or_incomplete_history")
     if mos_basis == "fcf_cap" and mos is not None:
         # (i) reverse-DCF growth strongly negative while MoS positive → contradiction
         if rdcf_growth is not None and rdcf_growth < -0.15:
             _fcf_sustainability_uncertain = True
             dq.append(f"fcf_sustainability_uncertain:rdcf_growth={rdcf_growth:.3f}<-0.15")
-
-        # (ii) P2: EVERY OCF-proxy FCF is uncertain, true FCF after capex is unknown
-        # and structurally <= OCF. assets/rev>5 is used ONLY to escalate severity,
-        # NEVER as a gate (the old dead `elif` silently skipped capital-light proxies
-        # with assets present but ratio<=5, ~18% of the universe went unflagged).
-        if fcf_is_proxy:
-            _fcf_sustainability_uncertain = True
-            if latest_assets is not None and latest_revenue and latest_revenue > 0:
-                asset_rev_ratio = latest_assets / latest_revenue
-                if asset_rev_ratio > 5.0:
-                    dq.append(
-                        f"fcf_sustainability_uncertain:ocf_proxy_on_capital_intensive"
-                        f"(assets/rev={asset_rev_ratio:.1f})"
-                    )
-                else:
-                    dq.append(
-                        f"fcf_sustainability_uncertain:ocf_proxy_capex_unknown"
-                        f"(assets/rev={asset_rev_ratio:.1f})"
-                    )
-            else:
-                # No asset/revenue data, still uncertain (unknown capex on unknown base)
-                dq.append("fcf_sustainability_uncertain:ocf_proxy_capex_unknown")
 
     # --- P10: lumpy-OCF normalization guard (specced in I1, never coded until now) ---
     # When a cyclical name is normalized on a trailing 5yr average, a single peak year
@@ -634,6 +623,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         mos=mos,
         nav_mos=nav_mos,
         mos_basis=mos_basis,
+        debt_evidence_uncertain=debt_uncertain,
     )
 
     # --- Assemble output ---
@@ -645,6 +635,9 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         # EV
         "ev": round(ev) if ev is not None else None,
         "ev_note": ev_note,
+        "debt_evidence_status": debt_status,
+        "debt_evidence_uncertain": debt_uncertain,
+        "debt_evidence_detail": debt_detail,
         # Multiples
         "ev_sales": ev_sales,
         "ev_ebitda": ev_ebitda,
@@ -658,6 +651,8 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "normalized_ebitda": round(norm_ebitda) if norm_ebitda is not None else None,
         "normalized_fcf": round(norm_fcf) if norm_fcf is not None else None,
         "normalization_note": norm_note,
+        "normalized_fcf_is_proxy": fcf_proxy_flag,
+        "fcf_normalization": fcf_normalization,
         # Reverse DCF (equity-FCF basis, denominator is market_cap, not EV)
         "rdcf_basis": rdcf_basis,
         "reverse_dcf_implied_growth": rdcf_growth,
@@ -734,6 +729,12 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         # Transparency
         "assumptions": {
             "discount_rate": discount_rate,
+            "discount_rate_basis": "equity_required_return",
+            "discount_rate_config_key": discount_rate_key,
+            "legacy_wacc_is_equity_rate_alias": discount_rate_key == "wacc",
+            "cash_flow_basis": "post_interest_ocf_less_capex",
+            "net_new_borrowing_assumed": 0,
+            "excess_cash_added": False,
             "cap_rate_low": cap_low,
             "cap_rate_high": cap_high,
             "normalize_years": n_years,
@@ -767,14 +768,22 @@ def main():
     if not args.ticker:
         ap.error("--ticker is required")
 
-    init_edgar()
-    json_path = Path(args.json)
-    if not json_path.exists():
+    ticker = args.ticker.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9.-]{0,19}", ticker):
+        ap.error("--ticker must be a plain ticker symbol")
+    # --json is also a write destination because the CLI merges the result into it.
+    json_path = prove_output_path(Path(args.json))
+    if not json_path.is_file():
         print(f"ERROR: file not found: {json_path}", file=sys.stderr)
         sys.exit(1)
 
     dd = json.loads(json_path.read_text(encoding="utf-8"))
-    ticker = args.ticker.upper()
+    if not isinstance(dd, dict) or not isinstance(dd.get("ticker"), str):
+        ap.error("deepdive JSON must be an object with a ticker identity")
+    if dd["ticker"].strip().upper() != ticker:
+        ap.error("--ticker does not match the deepdive JSON identity")
+    out_path = prove_output_path(reports_dir() / f"valuation_{ticker}_{today()}.json")
+    init_edgar()
     mktcap_override = args.mktcap if args.mktcap > 0 else None
     market_cap, mktcap_source = _get_market_cap(ticker, mktcap_override)
 
@@ -787,7 +796,8 @@ def main():
     block["market_cap_source"] = mktcap_source
 
     # Write standalone valuation JSON
-    out_path = REPORTS / f"valuation_{ticker}_{today()}.json"
+    json_path = prove_output_path(json_path)
+    out_path = prepare_output(out_path)
     out_path.write_text(json.dumps(block, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Valuation written: {out_path}")
 

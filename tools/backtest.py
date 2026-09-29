@@ -68,10 +68,8 @@ BUCKETS = (BUCKET_BUY, BUCKET_WATCH, BUCKET_AVOID, BUCKET_ABSTAIN)
 # names, so a wiped-out name (~ -100%) is firmly inside this set.
 BLOWUP_THRESHOLD = -0.40
 
-# Output location for per-cell JSON (spec §Architecture 4). Fixed under the repo root, deliberately
-# NOT the active-run REPORTS dir, so a backtest cell never lands inside a live discovery run.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-BACKTEST_DIR = _REPO_ROOT / "reports" / "smallcap" / "backtest"
+from _common import output_root, prepare_output
+from urllib.parse import quote
 
 
 # ---------------------------------------------------------------------------
@@ -464,10 +462,10 @@ def run_cell(theme: str, asof: str, horizon: int = DEFAULT_HORIZON_MONTHS,
 
 
 def _write_cell(cell: dict) -> Path:
-    """Write the per-cell JSON to reports/smallcap/backtest/<asof>_<theme>.json."""
-    BACKTEST_DIR.mkdir(parents=True, exist_ok=True)
-    safe_theme = str(cell["theme"]).replace("/", "-").replace(" ", "-")
-    path = BACKTEST_DIR / f"{cell['asof']}_{safe_theme}.json"
+    """Write the cell beneath the PRIVATE unbatched reports root."""
+    safe_theme = quote(str(cell['theme']), safe='-_')
+    safe_date = quote(str(cell['asof']), safe='-')
+    path = prepare_output(output_root()/'backtest'/f'{safe_date}_{safe_theme}.json')
     path.write_text(json.dumps(cell, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
 

@@ -11,16 +11,17 @@ Complete this once before any run:
 
 ```bash
 pip install -r tools/requirements.txt
-mkdir -p ~/.small-cap-deepdive-config
-cp reference/config.example.json \
-   ~/.small-cap-deepdive-config/config.json
+gh repo create small-cap-deepdive-config --private
+gh repo clone small-cap-deepdive-config "$HOME/.small-cap-deepdive-config"
+export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
+python scripts/init_config.py
 ```
 
 Open `~/.small-cap-deepdive-config/config.json` (the private config dir, never the repo) and set
 `"sec_user_agent"` to your real name and email:
 
 ```json
-"sec_user_agent": "Jane Smith user1@example.com"
+"sec_user_agent": "AcmeCorp user1@example.com"
 ```
 
 EDGAR requires a valid `User-Agent` header on every request. Omission causes 403 errors.
@@ -28,15 +29,18 @@ This is the only required field, all other keys have defaults.
 
 ---
 
+Keep config, observations and reports committed and pushed in this PRIVATE companion. The identity shown here is synthetic; replace it privately before live SEC use. Run `python scripts/verify_config.py --json` before starting.
+
 ## Open a run batch (do this at the start of every run)
 
 ```bash
-export SMALLCAP_RUN=$(python tools/new_run.py --label <theme>)   # e.g. --label aginput
+SMALLCAP_RUN="$(python tools/new_run.py --label "Synthetic research")" || exit 1
+export SMALLCAP_RUN
+REPORTS_ROOT="$(python -c 'import sys; sys.path.insert(0, "tools"); from _common import reports_dir; print(reports_dir())')" || exit 1
+export REPORTS_ROOT
 ```
 
-All outputs for this run then land together in `reports/smallcap/<date>_<label>/`, with a
-`_run.json` manifest (date, skill git commit, config snapshot) so runs stay comparable across
-skill versions. Unset `SMALLCAP_RUN` → flat `reports/smallcap/` (legacy).
+All outputs land in the absolute PRIVATE `$REPORTS_ROOT` directory with a `_run.json` manifest. Before handing paths to another agent, expand `REPORTS_ROOT` to its actual value. With no active run, the runtime uses the unbatched private reports root.
 
 ---
 
@@ -59,7 +63,7 @@ Use `--micro` flag to apply the micro-cap ($500M) ceiling instead of the default
 python tools/discover.py --theme "railcar leasing" --out-slug railcar
 ```
 
-Output: `reports/smallcap/universe_railcar_<date>.csv`
+Output: `${REPORTS_ROOT}/universe_railcar_<date>.csv`
 
 Expected output:
 
@@ -73,7 +77,7 @@ Expected output:
 === 发现结果 ===
 总召回 187 家 | 小盘候选 42 家 (市值<$2.0B, 已剔SPAC/低流动性)
 ...
-清单: reports/smallcap/universe_railcar_<date>.csv
+清单: ${REPORTS_ROOT}/universe_railcar_<date>.csv
 ```
 
 **What to expect:** Over-recall is intentional. 150 to 300 candidates for a niche theme;
@@ -111,11 +115,11 @@ never returned, so Gate 2 is the only place a company leaves the funnel for them
 ## Step 3, Mechanical De-Risk (cheap_pass)
 
 ```bash
-python tools/cheap_pass.py --universe reports/smallcap/universe_railcar_<date>.csv \
+python tools/cheap_pass.py --universe "${REPORTS_ROOT}/universe_railcar_<date>.csv" \
   --out-slug railcar
 ```
 
-Output: `reports/smallcap/cheappass_railcar_<date>.csv`
+Output: `${REPORTS_ROOT}/cheappass_railcar_<date>.csv`
 
 Expected output:
 
@@ -125,7 +129,7 @@ Expected output:
 === Cheap pass 结果 ===
 体检 42 家 | 淘汰 8 家 | 幸存 34 家
 ...
-清单: reports/smallcap/cheappass_railcar_<date>.csv
+清单: ${REPORTS_ROOT}/cheappass_railcar_<date>.csv
 ```
 
 **What it checks (hard kill-flags):**
@@ -144,21 +148,21 @@ Expected output:
 
 ## Step 4, Gate 2: LLM Theme-Fit Classification
 
-After `run_theme.py` writes `reports/smallcap/candidates_<slug>.json`, run the theme-fit gate.
+After `run_theme.py` writes `${REPORTS_ROOT}/candidates_<slug>.json`, run the theme-fit gate.
 
 **Natural-language path (works in any Claude Code session):**
 
 In your Claude Code session, instruct the agent:
 
 ```
-For each ticker in reports/smallcap/candidates_railcar.json, read the company's most recent 10-K
+For each ticker in ${REPORTS_ROOT}/candidates_railcar.json, read the company's most recent 10-K
 business description from EDGAR and classify it as:
   pure_play   — primary business is directly in the theme
   partial     — theme exposure is real but not primary
   misrecall   — incidental keyword match, no real theme exposure
 
 Use the prompt template in reference/discovery-engine.md §Gate 2.
-Write results to reports/smallcap/railcar_gate2.json (include ticker, cik, name, classification,
+Write results to ${REPORTS_ROOT}/railcar_gate2.json (include ticker, cik, name, classification,
 one-sentence rationale). Drop all misrecalls before the next step.
 ```
 
@@ -190,7 +194,7 @@ theme swept the entire oncology biotech sector (zero railcar companies among the
 ## Step 5, Deep-Dive Data Pull
 
 ```bash
-python tools/deepdive_data.py --candidates reports/smallcap/candidates_railcar.json
+python tools/deepdive_data.py --candidates "${REPORTS_ROOT}/candidates_railcar.json"
 ```
 
 Or per-ticker:
@@ -199,7 +203,7 @@ Or per-ticker:
 python tools/deepdive_data.py --ticker RAIL
 ```
 
-Output: `reports/smallcap/deepdive_<ticker>_<date>.json` (one file per ticker)
+Output: `${REPORTS_ROOT}/deepdive_<ticker>_<date>.json` (one file per ticker)
 
 **What it pulls:** Revenue/OCF/EV series (XBRL), Form 4 insider trades (12-month net
 buy/sell), S-3 / ATM shelf status, dilution history, 8-K material events.
@@ -214,14 +218,14 @@ Runtime 5 to 20 minutes for 22 tickers (EDGAR rate discipline: ~150ms between re
 In your Claude Code session:
 
 ```
-For each pure_play/partial company in reports/smallcap/railcar_gate2.json, spawn one Agent.
+For each pure_play/partial company in ${REPORTS_ROOT}/railcar_gate2.json, spawn one Agent.
 Each Agent must:
 1. Open reference/cognitive-priors.md and state the base-rate priors for this company class.
 2. Run a disconfirmation WebSearch: "<company name> fraud lawsuit SEC investigation short seller".
 3. Check data staleness: is the most recent filing period within 90 days?
 4. Apply the 7-dimension scorecard from reference/judgment-rubric.md.
 5. Apply all Rating Hard-Rules from SKILL.md.
-6. Write the full report to reports/smallcap/report_<TICKER>.md.
+6. Write the full report to ${REPORTS_ROOT}/report_<TICKER>.md.
 ```
 
 **Optional accelerator:** If the Workflow tool is available:
@@ -241,7 +245,7 @@ disconfirmation search). For 22 candidates: ~180k to 330k tokens total. Budget ~
 python tools/rank.py --slug railcar
 ```
 
-Expected output: `reports/smallcap/RANKING.md`
+Expected output: `${REPORTS_ROOT}/RANKING.md`
 
 **Token magnitude:** Negligible, deterministic sort + Markdown table generation.
 

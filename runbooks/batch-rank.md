@@ -3,7 +3,7 @@
 > Entry mode 3, `rank`. When to use it: `SKILL.md` §Entry 3.
 > This runbook is the operational how-to for that entry, not a second statement of it.
 
-This entry mode is instant (no network, no LLM). It operates on `report_*.md` files written
+This entry mode makes no model or finance-data calls. It operates on `report_*.md` files written
 by the deep-dive judgment step. Use it to produce a clean ranked table from a prior session's
 output.
 
@@ -11,20 +11,21 @@ output.
 
 ## Prerequisites
 
-You must have a prior theme run's deep-dive report files. These live in the REPORTS directory
-(default `reports/smallcap/`) as `report_<ticker>.md` files.
+You must have a prior theme run's deep-dive report files in the configured PRIVATE companion.
+The default REPORTS directory combines that companion's output directory with the active
+`SMALLCAP_RUN`, if set. Report files use the name `report_<ticker>.md`.
 
 ```
-reports/smallcap/
-  report_GBX.md
-  report_RAIL.md
-  deepdive_GBX_2026-06-18.json
-  deepdive_RAIL_2026-06-18.json
+<private-companion>/<configured-output>/<active-run>/
+  report_<ticker>.md
+  deepdive_<ticker>_<date>.json
   ...
 ```
 
-No installation beyond `pip install -r tools/requirements.txt` is needed for re-ranking.
-No network access or config required.
+Install `tools/requirements.txt` and configure the companion as described in `CONFIG.md`.
+Working Git and authenticated `gh` commands are required to prove the canonical output
+destination belongs to a PRIVATE GitHub worktree. Visibility verification can use the
+network. PUBLIC, unknown, unusable, or unversioned destinations are refused before writing.
 
 ---
 
@@ -49,7 +50,7 @@ This is the primary guard against narrative-driven score inflation.
 python tools/rank.py
 ```
 
-Output: `reports/smallcap/RANKING.md`
+Output: `RANKING.md` inside the selected companion run directory.
 
 Expected output (Markdown table):
 
@@ -83,11 +84,18 @@ falls back gracefully to all `report_*.md`.
 ## Step 3, Re-Rank from a Custom Directory
 
 ```bash
-python tools/rank.py --input reports/railcar_scores/
+python tools/rank.py --input "<private-companion>/reports/smallcap/<run>"
 ```
 
-Reads `report_*.md` from the specified directory instead of the default REPORTS path.
-Output is written to `<input_dir>/RANKING.md`.
+Replace the placeholders with your companion path and run name. Reads `report_*.md` from
+that directory and writes `<input_dir>/RANKING.md`. The actual destination repository must
+be PRIVATE, including when the supplied path contains a directory link.
+
+To finalize a run and rebuild its ranking, use `tools/finalize_run.py` with the same `--input`.
+Finalization proves the destination before repairing doubled output trees or writing verdicts.
+Repair preserves duplicates and skips nested repositories and directory links. If the ranking
+child fails, finalization exits nonzero and keeps the verdict file already written. `--no-rank`
+skips the ranking child.
 
 ---
 
