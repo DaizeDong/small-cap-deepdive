@@ -23,9 +23,9 @@
 
 排名靠前的公司意味着它通过了所有淘汰门、有真实的主题敞口、值得完整人工尽调,不代表买入。这个工具的核心价值，在于它**排除**了什么：持续经营疑虑的候选、死亡螺旋的稀释者、不正常申报的公司,这些在任何判断动用之前就已被挡在门外。
 
-**0 买入是功能，不是 bug。**
+**零买入需要结合筛选范围和数据覆盖解释。**
 
-若某主题产出零个 4 分以上候选，工具在告诉你：当前该主题的小盘股中，没有干净的产业受益者。这是正确且有用的答案。一个无法输出"什么都没找到"的扫描器，不是扫描器，是叙事生成机。
+某主题没有产出 4 分以上候选，只说明本次观察到的候选在当前规则下没有达标。它不能证明该主题没有合适公司，也不能证明市场定价有效或事件路线更有优势。报告应同时说明候选范围、缺失数据、失败步骤和人工干预。
 
 一句话：**工具的 edge 是机械纪律一致地施加于全量候选，而非对某家公司的叙事综合。** 本仓库里的每个工具、每个不变量、每条硬规则，都源于四条原则,改根因（不打补丁）、Hybrid 而非 thin（数据层有其存在价值）、纪律即护城河、`reference/` 单一真相源。
 
@@ -37,13 +37,18 @@
 
 给定一个投资主题或一个 ticker，skill 自 SEC 申报全库枚举候选，施加机械避雷硬规则，以强制反方为前提做可证伪的深度尽调，并对幸存候选排序。逐步拆解：
 
-0. **开运行批次**（`new_run.py`）：每次运行写入 `reports/smallcap/<日期>_<label>/`，附 `_run.json` manifest（skill git commit + 估值 config 快照），便于按版本对比。`export SMALLCAP_RUN=$(python tools/new_run.py --label <主题>)`。
+0. **开运行批次**（`new_run.py`）：每次运行写入已初始化 PRIVATE 伴生仓的 `reports/smallcap/<日期>_<label>/`，附 `_run.json` manifest（skill git commit + 估值 config 快照），便于按版本对比。分配失败时先退出，成功后再导出返回的运行标识：
+
+   ```bash
+   SMALLCAP_RUN="$(python tools/new_run.py --label "Synthetic research")" || exit 1
+   export SMALLCAP_RUN
+   ```
 
 1. **枚举 SEC 全库**：用 EDGAR 全文检索（FTS），可选 UNION 一个 **SIC 反向召回底**（`discover.py --sic-reverse`，内部调用 `filter_by_sic.py`）,对有专属 SIC 码的主题,枚举该 SIC 下全部注册人,避免漏掉低关键词密度的真实成员；该召回底按主题 opt-in。市值用 fallback 链解析（yfinance 为空时用 SEC 股数×价格）；仍无法定价的归 `band="unknown"` 流过,而非静默丢弃。
 
-2. **两阶段精度门（强制）**：门 1（`filter_by_sic.sic_classify`，由 `run_theme.py` 内联调用）：SIC **复核层**，不是排除层。命中硬排除 SIC 的公司被标为 `sic_tier="review"`，**仍然进入门 2**；门 1 永不丢弃任何公司。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / partial / misrecall`，丢弃 `misrecall` 是全流程中唯一一次按主题契合度剔除。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司,而门 1 把它们全部放行了,因为 pharma SIC 只会拿到 `review`。召回用 `recall@gold`（对照手工真实成员清单）**度量**,而非假设。
+2. **机械避雷**（`cheap_pass.py`）：直接读 SEC 申报的硬红线,持续经营审计段、死亡螺旋可转债、内控重大缺陷、magnitude 级客户/政府单一项目集中度。触发的公司不进入判断,无论叙事质量如何。
 
-3. **机械避雷**（`cheap_pass.py`）：直接读 SEC 申报的硬红线,持续经营审计段、死亡螺旋可转债、内控重大缺陷、magnitude 级客户/政府单一项目集中度。触发的公司不进入判断,无论叙事质量如何。
+3. **两阶段精度门（强制）**：门 1（`filter_by_sic.sic_classify`，由 `run_theme.py` 内联调用）：SIC **复核层**，不是排除层。命中硬排除 SIC 的公司被标为 `sic_tier="review"`，**仍然进入门 2**；门 1 永不丢弃任何公司。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / partial / misrecall`，丢弃 `misrecall` 是全流程中唯一一次按主题契合度剔除。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司,而门 1 把它们全部放行了,因为 pharma SIC 只会拿到 `review`。召回用 `recall@gold`（对照手工真实成员清单）**度量**,而非假设。
 
 4. **取数**（`deepdive_data.py`）：XBRL 财务序列（含 EBIT 概念级联、债务与股数 fallback）、Form 4 内部人交易、货架/ATM 状态、稀释历史、重大事件时间线。数据完整性守卫：债务截断、错误实体、低营收巨亏比、以及**二次源交叉校验**（SEC vs yfinance，>2.5× 分歧即标记并阻断 BUY）。
 
@@ -53,7 +58,7 @@
 
 7. **收尾 + 排序**（`finalize_run.py`、`make_report.py`、`rank.py`）：确定性逐票报告,每个评级下附数据质量**信任 banner**,自动生成 verdict 喂入 track-forward,并产出 `RANKING.md`（漏斗计数、淘汰原因、数据盲区）。
 
-8. **前向校准**（`track_forward.py`）：verdict 记入 `<私有数据目录>/metrics/verdicts.jsonl`（由 `tools/datadir.py` 解析到**仓库之外**，绝不落回仓内；仓内只带 `metrics/verdicts.jsonl.example` 作为 schema）,到期对 IWM 做 Brier 评分,含 de-risk 指标（避免暴雷/下行捕获）。
+8. **前向校准**（`track_forward.py`）：verdict 记入 `<私有数据目录>/metrics/verdicts.jsonl`（由 `guards/tools/datadir.py` 解析到**仓库之外**，绝不落回仓内；仓内只带 `metrics/verdicts.jsonl.example` 作为 schema）,到期对 IWM 做 Brier 评分,含 de-risk 指标（避免暴雷/下行捕获）。
 
 9. **诊断信号,防火墙隔离**（`signals.py`）：严格诊断的侧信道,度量"延迟信息扩散"立论,**价格背离**（基本面轨迹 vs 滚动价格回报 → `unpriced_improvement` / `melting_ice_cube_priced` / `aligned`）与**持仓**（13D/13G + 做空)。它**永不**触碰 `buy_eligible` 或买入决策,仅记录供未来 per-signal 校准。
 
@@ -62,23 +67,18 @@
 - 多因子/量化选股或回测,实证证明扣除交易成本后因子 alpha 消失，这个决策空间不进本工具。
 - 交易信号、执行或组合管理。
 - 实时行情,所有数据来自 SEC 申报，典型延迟 1 to 4 天。
-- 大盘/卖方覆盖,工具针对无或极少分析师覆盖的小盘/微盘股校准。
+- 大盘或卖方覆盖较多的公司；工具面向缺少分析师覆盖的小盘和微盘公司。
 - 自动买入建议,每份输出以"值得人工尽调"结尾，不以"买入"结尾。
 
-### 留出集验证（2026-06）
+### 证据与评估
 
-一个 25 格、无幸存者偏差的 point-in-time 回测（5 主题 × 5 个 as-of 日期 2020 to 2024，12 个月持有期）
-在留出数据上检验了 skill 的主张。诚实结论,详见
-[`docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md`](docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md)：
+真实运行记录和研究报告保存在已初始化、纳入版本管理的 PRIVATE 伴生仓。
+公开工具只提供通用方法和生成的合成样例。[证据状态](docs/evidence-status.md)
+区分源码审查、合成检查、当前执行和历史研究各自能说明什么。
 
-- **无持久 alpha。** 便宜度（安全边际 MoS）在样本内跑赢市场，但那是 2020 to 21 后疫情反弹的 regime 假象，
-  在留出集上消失（holdout permutation p=0.72）。**工具无法选出跑赢者，也不声称能**,这正是它从不发出"买入"的原因。
-- **真实的避崩盘 edge**（它的本职）。经 OOS 验证的 **CORE-4 困境 kill-flag**（经营现金流为负、经营亏损、
-  累计赤字、Altman Z″ < 1.1）把困境股打入 AVOID。同一份面板上量了**两个不同的 cutoff**，每个数字只属于其中一个，
-  引用时必须连同 cutoff 一起给出：在**实际上线的 `distress_score >= 3` cutoff** 上，崩盘 precision 35.4%
-  对 13.3% 基准（**lift 2.65×**）、**recall 62%**；在**按年 top-quintile cutoff** 上，lift **2.56×**、
-  **recall 51%**，ticker 聚类 bootstrap 对该 top-quintile lift 的 95% CI = **[1.73, 3.00]**（P(lift≤1)=0）。
-  0-BUY 的扫描结果依然有效,价值在于你**没有**踩到的雷。
+CORE-4 是四个二元困境指标之和，取值为 0 到 4。固定分数门槛、逐年排序和
+训练集/测试集逻辑回归属于不同的评估方法。绩效结论需要有日期的资格证据、
+完整范围和数据来源，以及重新执行的评估。没有 BUY 输出不能证明市场有效或没有投资机会。
 
 ---
 
@@ -193,8 +193,8 @@ test -f "$skill_alias/SKILL.md" || exit 1
 对已知公司做严格的可证伪报告：
 
 ```
-/small-cap-deepdive ticker EGAN
-/small-cap-deepdive ticker EGAN --theme "合规行业 SaaS"
+/small-cap-deepdive ticker <ticker>
+/small-cap-deepdive ticker <ticker> --theme "合规行业 SaaS"
 ```
 
 完整步骤：**[runbooks/single-deepdive.md](runbooks/single-deepdive.md)**
@@ -206,10 +206,14 @@ test -f "$skill_alias/SKILL.md" || exit 1
 不重跑发现和尽调，对已有输出换权重或重排：
 
 ```bash
-python tools/rank.py
-python tools/rank.py --slug railcar
-python tools/rank.py --input reports/railcar_scores/
+python tools/rank.py --output RANKING-rerun-01.md
+python tools/rank.py --slug railcar --output RANKING-railcar-rerun-01.md
+python tools/rank.py --input "${REPORTS_ROOT}" --output RANKING-rerun-02.md
 ```
+
+每次重排都要选一个尚不存在的输出文件名；工具会保留已有的排序文件。
+
+`REPORTS_ROOT` 须先按主题运行手册初始化，指向已验证的 PRIVATE 伴生仓内的绝对路径。
 
 完整步骤：**[runbooks/batch-rank.md](runbooks/batch-rank.md)**
 
@@ -244,11 +248,11 @@ ticker）通过 CIK 处理，归入 `band="unknown"` 队列。
 ## 如何触发
 
 任意模式用 slash 命令，例如 `/small-cap-deepdive theme "铁路车厢租赁"` 或
-`/small-cap-deepdive ticker EGAN`。或在任何 Claude Code 会话里用自然语言触发：
+`/small-cap-deepdive ticker <ticker>`。或在任何 Claude Code 会话里用自然语言触发：
 
 ```
 对"铁路车厢租赁"主题跑 small-cap-deepdive
-用 small-cap-deepdive 把 EGAN 当小盘股深挖
+用 small-cap-deepdive 把 <ticker> 当小盘股深挖
 对"工业水处理"主题筛 SEC 小盘股全库
 ```
 
@@ -317,9 +321,9 @@ skill 触发于小盘/微盘价值研究、主题选股、单公司深度尽调�
 
 **market-intel（可选只读复用）：** 若已安装 `market-intel` skill，判断层会读取其源目录来路由定性检索（X 舆情、行业新闻、竞品网络存在感）到最优 MCP 工具。market-intel 不会在运行时被当作 skill 调用,只读取 catalog 作为文档。完整的防递归设计见 `reference/data-sources.md §market-intel`。
 
-**openinsider 脆弱性：** 默认 `insider_source` 配置使用 `openinsider.com` 解析 Form 4 买卖方向。该第三方服务无明确的自动访问条款。工具在 openinsider 不可用时自动回退到直接 EDGAR Form 4 解析，并在报告中标注数据来源。如需从一开始就去除 openinsider 依赖，可设 `"insider_source": "edgar"`,但**注意：此模式为路线图存根，尚未实现**（设置后返回 `available: false`；已测试的默认为 openinsider）。详见 `reference/data-sources.md`。
+**OpenInsider 可用性：** 默认路径解析 OpenInsider 提供的 Form 4 买卖信息。获取或解析失败时，输出保留不可用状态；当前没有自动切换到 EDGAR Form 4 的实现。配置 `"insider_source": "edgar"` 选择的是尚未实现的路径，会返回 `available: false`。报告不能把不可用的数据写成零交易。详见 `reference/data-sources.md`。
 
-**workflow .js 文件为可选项：** `workflows/theme-fit-gate.js` 和 `workflows/deepdive-fanout.js` 在 Claude Code 会话中有 Workflow 工具时可加速并行步骤。它们不是必要依赖,`SKILL.md` 中的自然语言编排是主路径，任意 Claude Code 会话均可运行。
+**Workflow host 要求：** `workflows/theme-fit-gate.js` 和 `workflows/deepdive-fanout.js` 需要通过已配置的 Workflow host 处理绑定请求。自然语言编排可以准备请求，但只有导入对应的 host 结果后，该阶段才算完成。这两个 JavaScript 文件不能直接用 Node 运行。
 
 **X 舆情路由：** 需要某只票的 X/Twitter 舆情时，若已通过 market-intel 配置文件配置了 twitterapi.io key，则走 resale 路由（供应商账号池+代理，用户账号零风险）；不可用时回退到搜索引擎索引 X 内容。永久排除用户自己账号的登录路由,存在账号封禁风险。
 

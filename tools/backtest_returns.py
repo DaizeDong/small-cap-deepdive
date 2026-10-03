@@ -1,41 +1,33 @@
-"""PIT backtest returns layer (PIECE 3 of docs/backtest-2026-06/spec.md).
+"""Adjusted-close returns and explicit quote coverage for the PIT backtest.
 
-Free + survivorship-safe forward-return + entry-market-cap + benchmark machinery for the
-point-in-time backtest harness. Three public helpers:
+Exit lookup covers the complete holding interval. An old last quote remains a
+labelled proxy with an unknown terminal outcome; it does not prove a delisting,
+liquidation value or executable sale. Provider failures and absent or invalid
+quotes remain separate outcomes. Injected price functions support offline tests.
 
-  * forward_return(ticker, asof, horizon_months=12)  — dividend-adjusted total return
-        asof -> asof+horizon. A name that DELISTED before asof+horizon realizes to its LAST
-        available close (a blown-up name lands near -100%, which is the POINT a de-risk scanner
-        must be graded on avoiding). Returns None + a labeled reason when price data is genuinely
-        unavailable (never fabricated).
-  * mktcap_asof(ticker, asof, cik=None)              — entry market cap = price-as-of-T x PIT
-        shares-outstanding (us-gaap/dei concept series filed<=asof, latest period-end). yfinance
-        marketCap is a CURRENT field (look-ahead) so it is NOT used here.
-  * benchmark_return(asof, horizon_months=12)        — forward_return on IWM (Russell 2000 ETF;
-        the correct small-cap universe comparison, matching track_forward.DEFAULT_BENCHMARK).
-
-ADDITIVE — nothing here touches the live latest-filing path. yfinance is called with
-auto_adjust=True, so the resolved closes are split- AND dividend-adjusted (total-return basis);
-matches tools/track_forward._fetch_close. A `price_fn` is injectable through every helper so the
-selftest is network-free and deterministic.
+Returns use dividend-adjusted prices. Market-cap estimates use a separate quote
+and dated share evidence, reconciled to one split basis. Missing or ambiguous
+basis evidence cannot qualify a company for valuation.
 """
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import warnings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, localcontext
+from numbers import Number
 from pathlib import Path
 
 # Add tools dir to path for sibling imports (mirrors track_forward.py).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import resolve_mktcap  # noqa: E402  (resolve-then-band fallback chain)
 
 DEFAULT_BENCHMARK = "IWM"   # Russell 2000 small-cap ETF, matches track_forward.DEFAULT_BENCHMARK
 DEFAULT_HORIZON_MONTHS = 12
-# Sub-$0.10 entry => a penny/sub-penny forward return is a data artifact, not a tradeable outcome
-# (e.g. GNOLF 2024 oilsvc: entry $0.00001 -> exit $0.01 = a fake +999x that swung the raw panel mean
-# by +26). Flagged status="penny_unreliable" and excluded from stats (forward_return returns None).
+# Entries below the configured penny-price floor are not admitted as tradeable
+# forward-return evidence. Preserve penny_unreliable and exclude the observation
+# from return statistics rather than magnifying a near-zero denominator.
 _MIN_ENTRY_PRICE = 0.10
 
 # ---------------------------------------------------------------------------
@@ -45,54 +37,121 @@ _MIN_ENTRY_PRICE = 0.10
 #   * price        : float dividend-adjusted close (total-return basis)
 #   * resolved_date: "YYYY-MM-DD" of the trading day actually used (on or BEFORE on_date)
 #   * None         : no price on/near on_date (delisting / data gap / un-fetchable)
-# Returning the resolved_date is what lets forward_return detect a DELISTED name: when the
-# exit-date request resolves to a date materially earlier than asof+horizon, the series ended
-# mid-horizon (the name stopped trading) and we realize to that last close instead.
+# Dates establish quote age. They do not establish why a price series ended.
 # ---------------------------------------------------------------------------
 
 
-def _yf_price_fn(ticker: str, on_date: str) -> tuple[float, str] | None:
-    """Default (network) price function — DIVIDEND-ADJUSTED close on/near on_date via yfinance.
+def _quote_date(value) -> str:
+    if isinstance(value, datetime):
+        value = value.date().isoformat()
+    elif isinstance(value, date):
+        value = value.isoformat()
+    if not isinstance(value, str) or len(value) != 10:
+        raise ValueError("quote date must be YYYY-MM-DD")
+    parsed = datetime.strptime(value, "%Y-%m-%d")
+    if parsed.strftime("%Y-%m-%d") != value:
+        raise ValueError("quote date must be YYYY-MM-DD")
+    return value
 
-    Returns (price, resolved_date) using the most recent trading day on or BEFORE on_date within
-    a backward search window, or None on any failure (yfinance unavailable, ticker not found,
-    delisted with no data in window, etc.). NEVER raises.
 
-    Total-return basis: auto_adjust=True back-adjusts Close for BOTH splits AND cash dividends, so
-    the returned close is the dividend-adjusted (total-return) price — identical convention to
-    tools/track_forward._fetch_close. The backward window is wide (14 days) so a thinly-traded or
-    near-delisting name still resolves to its last real print.
-    """
+def _validated_quote(value, start_date: str, end_date: str) -> tuple[float, str]:
+    if not isinstance(value, (tuple, list)) or len(value) != 2:
+        raise ValueError("quote must contain exactly price and date")
+    price, day = value
+    if isinstance(price, bool) or not isinstance(price, Number):
+        raise ValueError("quote price must be numeric and not boolean")
+    price = float(price)
+    if not math.isfinite(price) or price <= 0:
+        raise ValueError("quote price must be finite and positive")
+    day = _quote_date(day)
+    if not start_date <= day <= end_date:
+        raise ValueError("quote date is outside the requested interval")
+    return price, day
+
+
+def _yf_lookup(ticker: str, start_date: str, on_date: str) -> dict:
+    """Retrieve one explicit interval and select its latest valid dated close."""
+    diagnostic = {"rows_seen": 0, "invalid_rows": 0, "out_of_window_rows": 0}
+    end = (datetime.strptime(on_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     try:
         import yfinance as yf
-        dt = datetime.strptime(on_date, "%Y-%m-%d")
-        start = (dt - timedelta(days=14)).strftime("%Y-%m-%d")
-        end = (dt + timedelta(days=2)).strftime("%Y-%m-%d")
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            hist = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=True)
-        if hist is None or hist.empty:
-            return None
-        # Filter to on/before on_date FIRST, then resolve Close from the filtered slice (avoids the
-        # off-by-one-trading-day bug fixed in track_forward._fetch_close).
-        hist_filt = hist[hist.index <= dt.strftime("%Y-%m-%d")]
-        if hist_filt.empty:
-            return None
-        if "Close" in hist_filt.columns:
-            close_col = hist_filt["Close"]
-        elif "Adj Close" in hist_filt.columns:
-            close_col = hist_filt["Adj Close"]
-        else:
-            close_col = hist_filt.iloc[:, 0]
-        raw = close_col.iloc[-1]
-        price = float(raw.item() if hasattr(raw, "item") else raw)
-        resolved = hist_filt.index[-1]
-        resolved_date = resolved.strftime("%Y-%m-%d") if hasattr(resolved, "strftime") else str(resolved)[:10]
-        if price <= 0 or price != price:  # non-positive / NaN is no better than absent
-            return None
-        return price, resolved_date
-    except Exception:
-        return None
+            warnings.simplefilter("ignore", DeprecationWarning)
+            # history exposes failures through raise_errors; download can turn them into an empty frame.
+            hist = yf.Ticker(ticker).history(
+                start=start_date, end=end, auto_adjust=True, raise_errors=True)
+    except Exception as exc:
+        return {"status": "provider_error", "quote": None, "diagnostics": diagnostic,
+                "error_type": type(exc).__name__}
+
+    quotes = {}
+    try:
+        if hist is None:
+            return {"status": "invalid", "quote": None, "diagnostics": diagnostic,
+                    "detail": "history response is None"}
+        if hist.empty:
+            return {"status": "missing", "quote": None, "diagnostics": diagnostic}
+        column = next((name for name in ("Close", "Adj Close") if name in hist.columns), None)
+        if column is None:
+            return {"status": "invalid", "quote": None, "diagnostics": diagnostic,
+                    "detail": "history has no adjusted close column"}
+        for index, row in hist.iterrows():
+            diagnostic["rows_seen"] += 1
+            try:
+                day = _quote_date(index)
+                if not start_date <= day <= on_date:
+                    diagnostic["out_of_window_rows"] += 1
+                    continue
+                quote = _validated_quote((row[column], day), start_date, on_date)
+            except (ValueError, TypeError, OverflowError, KeyError):
+                diagnostic["invalid_rows"] += 1
+                continue
+            previous = quotes.get(day)
+            if previous is not None and previous != quote:
+                return {"status": "invalid", "quote": None, "diagnostics": diagnostic,
+                        "detail": "conflicting closes for one date"}
+            quotes[day] = quote
+    except Exception as exc:
+        return {"status": "invalid", "quote": None, "diagnostics": diagnostic,
+                "detail": "unreadable price history", "error_type": type(exc).__name__}
+    latest = quotes[max(quotes)] if quotes else None
+    status = "ok" if latest is not None else ("invalid" if diagnostic["invalid_rows"] else "missing")
+    return {"status": status, "quote": latest, "diagnostics": diagnostic}
+
+
+def _yf_price_fn(ticker: str, on_date: str, *, start_date: str | None = None) -> tuple[float, str] | None:
+    """Compatibility quote helper; missing returns None, retrieval/validation failures raise.
+
+    A standalone entry query looks back 14 days. Forward returns use _yf_lookup
+    with the resolved entry date as the exit query's lower bound.
+    """
+    on_date = _quote_date(on_date)
+    start_date = _quote_date(start_date) if start_date is not None else (
+        datetime.strptime(on_date, "%Y-%m-%d") - timedelta(days=14)).strftime("%Y-%m-%d")
+    if start_date > on_date:
+        raise ValueError("price interval starts after its end")
+    result = _yf_lookup(ticker, start_date, on_date)
+    if result["status"] in {"provider_error", "invalid"}:
+        raise RuntimeError(f"price lookup {result['status']}: {result.get('error_type', result.get('detail', 'invalid rows'))}")
+    return result["quote"]
+
+
+def _query_quote(ticker: str, on_date: str, start_date: str, price_fn) -> dict:
+    if price_fn is None or price_fn is _yf_price_fn:
+        result = _yf_lookup(ticker, start_date, on_date)
+    else:
+        try:
+            value = price_fn(ticker, on_date)
+        except Exception as exc:
+            return {"status": "provider_error", "quote": None, "diagnostics": {},
+                    "error_type": type(exc).__name__}
+        result = {"status": "missing" if value is None else "ok", "quote": value, "diagnostics": {}}
+    if result["status"] == "ok":
+        try:
+            result["quote"] = _validated_quote(result["quote"], start_date, on_date)
+        except (ValueError, TypeError, OverflowError) as exc:
+            result.update(status="invalid", quote=None, detail=str(exc))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -126,9 +185,8 @@ def _days_between(date1: str, date2: str) -> int:
     return (d2 - d1).days
 
 
-# How many days BEFORE the requested exit date a resolved close may land before we treat the name
-# as having DELISTED mid-horizon (rather than just a normal weekend/holiday gap). ~45 days covers
-# the widest exchange holiday + thin-trading gaps without false-flagging a live name.
+# Quote-age policy only. The historical name is retained for compatibility;
+# exceeding this threshold does not establish a terminal corporate event.
 _DELIST_GAP_DAYS = 45
 
 
@@ -141,30 +199,13 @@ def forward_return(
     ticker: str,
     asof: str,
     horizon_months: int = DEFAULT_HORIZON_MONTHS,
-    price_fn=_yf_price_fn,
+    price_fn=None,
 ) -> dict | None:
-    """Dividend-adjusted total return for `ticker` over [asof, asof + horizon_months].
+    """Return a measured adjusted-close result, including labelled stale proxies, or None.
 
-    Returns a dict:
-      {
-        "ticker", "asof", "target_exit_date", "horizon_months",
-        "entry_date",  "entry_price",
-        "exit_date",   "exit_price",
-        "total_return",          # (exit/entry - 1), dividend-adjusted (total-return basis)
-        "realized_to_last_close",# True iff the name delisted/stopped trading before the target
-                                 #   exit date and the return was realized to its LAST close
-        "status": "ok",
-      }
-    or None when price data is GENUINELY unavailable. The None branch is paired with a labeled
-    reason via the sibling forward_return_with_reason(); this thin wrapper returns the dict-or-None
-    so callers that only want the number stay simple.
-
-    DELISTED / blown-up names: yfinance keeps a name's prints up to its last trading day, then the
-    series stops. If the resolved exit-date close lands materially BEFORE the target exit date
-    (> _DELIST_GAP_DAYS), the name stopped trading mid-horizon — we realize the return to that LAST
-    available close and set realized_to_last_close=True. A name that fell ~99% before delisting
-    therefore lands near -100%, which is exactly the outcome a de-risk scanner is graded on
-    avoiding (spec: "a blown-up name lands near -100%, which is the POINT").
+    Use forward_return_with_reason for missing/error outcomes. Successful results
+    retain quote dates, age and return_kind. The legacy realized_to_last_close
+    flag means stale_quote_proxy; it does not confirm a realized sale or delisting.
     """
     res = forward_return_with_reason(ticker, asof, horizon_months, price_fn=price_fn)
     if res.get("status") == "ok":
@@ -176,143 +217,312 @@ def forward_return_with_reason(
     ticker: str,
     asof: str,
     horizon_months: int = DEFAULT_HORIZON_MONTHS,
-    price_fn=_yf_price_fn,
+    price_fn=None,
 ) -> dict:
-    """forward_return that ALWAYS returns a dict — on failure, status != "ok" + a labeled reason.
-
-    The harness (PIECE 4) joins on this so an un-fetchable name is recorded with WHY (never
-    fabricated, never silently dropped). status ∈ {"ok", "no_entry_price", "no_exit_price"}.
-      * no_entry_price : no price on/near asof (e.g. name not yet listed at asof). NOT a blowup —
-                         the name simply cannot be entered, so it carries no realized return.
-      * no_exit_price  : entry resolved but NO close at/before the target exit date at all
-                         (data fully un-fetchable for the window). Distinct from a delisted name
-                         that DID have a last close mid-horizon (that one resolves status="ok"
-                         with realized_to_last_close=True).
-    """
-    target_exit = _add_months(asof, horizon_months)
+    """Return quote evidence or an explicit missing, invalid or provider-error outcome."""
     base = {
         "ticker": ticker,
         "asof": asof,
-        "target_exit_date": target_exit,
+        "target_exit_date": None,
         "horizon_months": horizon_months,
         "entry_date": None, "entry_price": None,
         "exit_date": None, "exit_price": None,
         "total_return": None,
         "realized_to_last_close": False,
+        "return_kind": None, "terminal_status": "unknown",
+        "exit_quote_age_days": None, "price_diagnostics": {},
     }
+    try:
+        asof = _quote_date(asof)
+        if isinstance(horizon_months, bool) or not isinstance(horizon_months, int) or horizon_months < 0:
+            raise ValueError("horizon_months must be a nonnegative integer")
+        target_exit = _add_months(asof, horizon_months)
+        entry_start = (datetime.strptime(asof, "%Y-%m-%d") - timedelta(days=14)).strftime("%Y-%m-%d")
+    except (ValueError, TypeError, OverflowError) as exc:
+        return {**base, "status": "invalid_request", "reason": str(exc)}
+    base.update(asof=asof, target_exit_date=target_exit)
 
-    entry = price_fn(ticker, asof)
-    if not entry:
-        return {**base, "status": "no_entry_price",
-                "reason": f"no dividend-adjusted close on/near asof {asof} for {ticker} "
-                          f"(not listed at asof, or price data un-fetchable)"}
-    entry_price, entry_date = float(entry[0]), entry[1]
-    if entry_price <= 0:
-        return {**base, "status": "no_entry_price",
-                "reason": f"non-positive entry price ({entry_price}) for {ticker} at {asof}"}
+    def lookup_failure(result, stage):
+        status = result["status"]
+        if status == "missing":
+            reason = (f"no dividend-adjusted close on/near asof {asof} for {ticker}" if stage == "entry" else
+                      f"NO close at/before target exit {target_exit} within the holding interval for {ticker}")
+        else:
+            reason = f"{stage} quote {status}: {result.get('detail', result.get('error_type', 'no eligible close'))}"
+        return {**base, "status": ("provider_error" if status == "provider_error" else
+                                  f"invalid_{stage}_price" if status == "invalid" else f"no_{stage}_price"),
+                "error_stage": stage, "error_type": result.get("error_type"),
+                "reason": reason}
+
+    entry = _query_quote(ticker, asof, entry_start, price_fn)
+    base["price_diagnostics"]["entry"] = entry["diagnostics"]
+    if entry["status"] != "ok":
+        return lookup_failure(entry, "entry")
+    entry_price, entry_date = entry["quote"]
+    base.update(entry_price=entry_price, entry_date=entry_date)
     if entry_price < _MIN_ENTRY_PRICE:
         return {**base, "entry_price": entry_price, "entry_date": entry_date,
                 "status": "penny_unreliable",
                 "reason": f"sub-${_MIN_ENTRY_PRICE:.2f} entry price ({entry_price}) for {ticker} at "
                           f"{asof} - penny/sub-penny forward return is a data artifact; excluded from stats"}
 
-    exit_ = price_fn(ticker, target_exit)
-    if not exit_:
-        return {**base, "entry_date": entry_date, "entry_price": entry_price,
-                "status": "no_exit_price",
-                "reason": f"entry resolved but NO close at/before target exit {target_exit} for "
-                          f"{ticker} (price window fully un-fetchable)"}
-    exit_price, exit_date = float(exit_[0]), exit_[1]
-
-    # DELISTED-mid-horizon detection: the exit-date request resolved to a date materially earlier
-    # than the target exit date => the series ended (name stopped trading). Realize to last close.
-    realized_to_last = _days_between(exit_date, target_exit) > _DELIST_GAP_DAYS
+    exit_ = _query_quote(ticker, target_exit, entry_date, price_fn)
+    base["price_diagnostics"]["exit"] = exit_["diagnostics"]
+    if exit_["status"] != "ok":
+        return lookup_failure(exit_, "exit")
+    exit_price, exit_date = exit_["quote"]
+    quote_age = _days_between(exit_date, target_exit)
+    realized_to_last = quote_age > _DELIST_GAP_DAYS
 
     total_return = (exit_price / entry_price) - 1.0
+    if not math.isfinite(total_return):
+        return {**base, "status": "invalid_return", "reason": "price ratio is not finite"}
     return {
         **base,
         "entry_date": entry_date, "entry_price": entry_price,
         "exit_date": exit_date, "exit_price": exit_price,
         "total_return": round(total_return, 6),
         "realized_to_last_close": realized_to_last,
+        "return_kind": "stale_quote_proxy" if realized_to_last else "observed_close",
+        "exit_quote_age_days": quote_age,
         "status": "ok",
-        "reason": ("realized to last available close (name delisted/stopped trading before "
-                   f"target exit {target_exit})" if realized_to_last else "full-horizon return"),
+        "reason": (f"last observed adjusted-close proxy, {quote_age} days before target; terminal outcome unknown"
+                   if realized_to_last else "observed adjusted-close return near target date"),
     }
 
 
-def mktcap_asof(
-    ticker: str,
-    asof: str,
-    cik: str | int | None = None,
-    price_fn=_yf_price_fn,
-    shares_fn=None,
-) -> dict:
-    """Entry market cap AS-OF T = (price-as-of-T) x (PIT shares-outstanding filed<=T).
+def _cap_positive(value, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, Number):
+        raise ValueError(f"{field} must be a numeric, nonboolean value")
+    value = float(value)
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{field} must be finite and positive")
+    return value
 
-    yfinance `marketCap` is a CURRENT field (look-ahead contamination), so it is NOT used. Instead
-    we reconstruct: dividend-adjusted close near asof x SEC shares-outstanding from the
-    point-in-time concept series (us-gaap CommonStockSharesOutstanding / dei
-    EntityCommonStockSharesOutstanding, filed<=asof, latest period-end). This is survivorship-safe
-    and look-ahead-clean.
 
-    Returns a dict {ticker, asof, price, price_date, shares, mktcap, source, reason}. mktcap is
-    None (with a labeled reason, source="unresolved") when price OR shares are genuinely
-    unavailable — never fabricated. `shares_fn` is injectable for the network-free selftest; the
-    default resolves PIT shares via _deepdive_concepts._shares_series(cik, asof=asof).
+def _split_events(envelope, start: str, end: str) -> dict[str, float]:
+    """Validate a declared complete action interval, including duplicate dates."""
+    if not isinstance(envelope, dict) or envelope.get("complete") is not True:
+        raise ValueError("complete split-action evidence is unavailable")
+    lower, upper = _quote_date(envelope.get("start")), _quote_date(envelope.get("end"))
+    if lower > start or upper < end or lower > upper:
+        raise ValueError("split-action coverage does not span both evidence bases")
+    rows = envelope.get("splits")
+    if not isinstance(rows, list):
+        raise ValueError("split-action rows are unavailable")
+    events = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("invalid split-action row")
+        day = _quote_date(row.get("date"))
+        ratio = _cap_positive(row.get("ratio"), "split ratio")
+        if not lower <= day <= upper:
+            raise ValueError("split action falls outside its declared coverage")
+        if day in events and events[day] != ratio:
+            raise ValueError("conflicting split ratios on one effective date")
+        events[day] = ratio
+    return events
+
+
+def _market_cap_evidence(quote: dict, shares: dict, asof: str) -> dict:
+    """Express dated shares in the quote's split basis before multiplying."""
+    start = (date.fromisoformat(asof) - timedelta(days=14)).isoformat()
+    price, price_date = _validated_quote((quote.get("price"), quote.get("date")), start, asof)
+    count = _cap_positive(shares.get("shares"), "shares")
+    share_date, filed = _quote_date(shares.get("date")), _quote_date(shares.get("filed"))
+    if not share_date <= price_date <= asof or not share_date <= filed <= asof:
+        raise ValueError("share observation/filing is outside the point-in-time window")
+    price_basis, share_basis = quote.get("basis"), shares.get("basis")
+    if price_basis not in {"as_traded", "split_adjusted"}:
+        raise ValueError("price basis is unknown or includes dividend adjustments")
+    if share_basis not in {"as_traded", "as_reported", "split_adjusted"}:
+        raise ValueError("share basis is unknown or is not an instantaneous count")
+    price_anchor = _quote_date(quote.get("basis_date", price_date))
+    share_anchor = _quote_date(shares.get("basis_date", share_date))
+    if price_anchor < price_date or (price_basis == "as_traded" and price_anchor != price_date):
+        raise ValueError("price basis date contradicts its stated basis")
+    if share_anchor < share_date or (share_basis != "split_adjusted" and share_anchor != share_date):
+        raise ValueError("share basis date contradicts its stated basis")
+    if price_basis == "split_adjusted" and "basis_date" not in quote:
+        raise ValueError("split-adjusted price lacks a basis date")
+    if share_basis == "split_adjusted" and "basis_date" not in shares:
+        raise ValueError("split-adjusted shares lack a basis date")
+    for field in ("currency", "share_class"):
+        if quote.get(field) is not None and shares.get(field) is not None and quote[field] != shares[field]:
+            raise ValueError(f"price and shares disagree on {field}")
+
+    lower, upper = min(price_anchor, share_anchor), max(price_anchor, share_anchor)
+    needs_events = lower != upper or share_basis == "as_reported"
+    envelope = quote.get("actions")
+    if needs_events or envelope is not None:
+        events = _split_events(envelope, min(lower, share_date), max(upper, filed))
+    else:
+        events = {}
+    if share_basis == "as_reported" and any(share_date <= day <= filed and ratio != 1
+                                            for day, ratio in events.items()):
+        raise ValueError("a split between the share observation and filing leaves restatement basis ambiguous")
+    for anchor, evidence in ((price_anchor, quote), (share_anchor, shares)):
+        if events.get(anchor, 1) != 1 and evidence.get("basis_timing") != "after_actions":
+            raise ValueError("same-day split basis needs an explicit after-actions convention")
+
+    # Decimal prevents intermediate split products from overflowing before a later
+    # reverse split cancels them. Final public values must still be finite floats.
+    with localcontext() as context:
+        context.prec = 64
+        factor = Decimal(1)
+        for day, ratio in sorted(events.items()):
+            if lower < day <= upper:
+                factor *= Decimal(str(ratio))
+        if share_anchor > price_anchor:
+            factor = Decimal(1) / factor
+        aligned = Decimal(str(count)) * factor
+        market_cap = aligned * Decimal(str(price))
+        aligned_float = _cap_positive(float(aligned), "aligned shares")
+        cap_float = _cap_positive(float(market_cap), "market cap")
+        factor_float = _cap_positive(float(factor), "split factor")
+    return {"price": price, "price_date": price_date, "price_basis": price_basis,
+            "price_basis_date": price_anchor, "reported_shares": count,
+            "shares": aligned_float, "shares_date": share_date, "shares_filed": filed,
+            "shares_basis": share_basis, "shares_basis_date": share_anchor,
+            "shares_source": shares.get("source"), "split_factor": factor_float,
+            "normalization_basis_date": price_anchor, "mktcap": cap_float,
+            "source": "sec_shares_x_price", "basis_status": "compatible", "usable": True,
+            "estimate_kind": "latest_disclosed_count_snapshot", "status": "ok",
+            "price_age_days": _days_between(price_date, asof),
+            "shares_age_days": _days_between(share_date, asof),
+            "action_coverage": ({key: envelope.get(key) for key in ("start", "end", "complete")}
+                                if envelope is not None else None),
+            "reason": "split bases reconciled; share changes after the disclosed count are not estimated"}
+
+
+def _yf_market_cap_quote(ticker: str, asof: str, shares) -> dict | None:
+    """Fetch split-only Close and the actions needed to undo its current basis."""
+    observed = datetime.now(timezone.utc).date()
+    if asof > observed.isoformat():
+        raise ValueError("asof is after the price observation date")
+    entry_start = (date.fromisoformat(asof) - timedelta(days=14)).isoformat()
+    start = min(entry_start, _quote_date(shares["date"])) if isinstance(shares, dict) else entry_start
+    import yfinance as yf
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        history = yf.Ticker(ticker).history(
+            start=start, end=(observed + timedelta(days=1)).isoformat(),
+            auto_adjust=False, back_adjust=False, actions=True, raise_errors=True)
+    if history is None:
+        raise ValueError("market-cap history response is None")
+    if history.empty:
+        return None
+    if not {"Close", "Stock Splits"}.issubset(history.columns):
+        raise ValueError("market-cap history needs Close and explicit Stock Splits columns")
+    quotes, splits = {}, []
+    invalid_prices = 0
+    for index, row in history.iterrows():
+        day = _quote_date(index)
+        if not start <= day <= observed.isoformat():
+            raise ValueError("history row is outside the requested action interval")
+        ratio = row["Stock Splits"]
+        if isinstance(ratio, bool) or not isinstance(ratio, Number) or not math.isfinite(float(ratio)):
+            raise ValueError("missing or invalid split-action value")
+        if ratio != 0:
+            splits.append({"date": day, "ratio": _cap_positive(ratio, "split ratio")})
+        if entry_start <= day <= asof:
+            try:
+                price, _ = _validated_quote((row["Close"], day), entry_start, asof)
+            except (ValueError, TypeError, OverflowError, KeyError):
+                invalid_prices += 1
+                continue
+            if day in quotes and quotes[day] != price:
+                raise ValueError("conflicting market-cap closes on one date")
+            quotes[day] = price
+    if not quotes:
+        if invalid_prices:
+            raise ValueError("no valid market-cap close in the requested entry interval")
+        return None
+    day = max(quotes)
+    return {"price": quotes[day], "date": day, "basis": "split_adjusted",
+            "basis_date": observed.isoformat(),
+            "provider": "yfinance", "invalid_price_rows": invalid_prices,
+            "actions": {"start": start, "end": observed.isoformat(), "complete": True,
+                        "splits": splits,
+                        "coverage_basis": "successful history request with explicit action column"}}
+
+
+def mktcap_asof(ticker: str, asof: str, cik: str | int | None = None,
+               price_fn=None, shares_fn=None) -> dict:
+    """Return a dated snapshot estimate only when price/share split bases agree.
+
+    Structured callbacks return the evidence described in docs/backtest-market-cap-basis.md.
+    Legacy tuple/scalar injections retain their arithmetic result with usable=False;
+    they supply no basis evidence and must not feed valuation. Current marketCap,
+    dividend-adjusted prices and weighted-average shares are never default fallbacks.
     """
     out = {"ticker": ticker, "asof": asof, "price": None, "price_date": None,
-           "shares": None, "mktcap": None, "source": "unresolved", "reason": None}
-
-    px = price_fn(ticker, asof)
-    if not px:
-        out["reason"] = f"no price on/near asof {asof} for {ticker}"
-        return out
-    price, price_date = float(px[0]), px[1]
-    out["price"], out["price_date"] = price, price_date
-
-    if shares_fn is None:
-        shares_fn = _default_pit_shares_fn(asof)
+           "shares": None, "mktcap": None, "source": "unresolved", "reason": None,
+           "status": "unresolved", "basis_status": "unresolved", "usable": False}
     try:
-        shares = shares_fn(cik)
-    except Exception:
-        shares = None
-    out["shares"] = shares
-
-    # resolve_mktcap with yf_mktcap=None forces the SEC shares x price branch, the look-ahead-safe
-    # path. (We pass cik through; the injected shares_fn already carries the asof.)
-    mc, src = resolve_mktcap(None, price, cik, shares_fn=lambda _c: shares)
-    out["mktcap"], out["source"] = mc, src
-    if mc is None:
-        out["reason"] = (f"price resolved ({price}) but PIT shares-outstanding unavailable for "
-                         f"cik={cik} at {asof}")
+        asof = _quote_date(asof)
+        start = (date.fromisoformat(asof) - timedelta(days=14)).isoformat()
+    except (ValueError, TypeError, OverflowError):
+        out["reason"] = "invalid asof date"
+        return out
+    try:
+        if shares_fn is None:
+            lookup = _default_pit_shares_fn(asof)(cik)
+            out.update(shares_lookup=lookup, shares_status=lookup["status"])
+            if lookup["status"] != "ok":
+                out["reason"] = lookup["reason"]
+                return out
+            shares = lookup["evidence"]
+        else:
+            shares = shares_fn(cik)
+    except Exception as exc:
+        out.update(shares_status="invalid" if isinstance(exc, ValueError) else "provider_error",
+                   reason=f"PIT shares lookup failed: {type(exc).__name__}")
+        return out
+    try:
+        quote = (_yf_market_cap_quote(ticker, asof, shares) if price_fn is None or price_fn is _yf_price_fn
+                 else price_fn(ticker, asof))
+    except Exception as exc:
+        out.update(price_status="invalid" if isinstance(exc, ValueError) else "provider_error",
+                   reason=f"market-cap quote lookup failed: {type(exc).__name__}: {exc}")
+        return out
+    if quote is None:
+        out.update(price_status="missing", reason=f"no price on/near asof {asof} for {ticker}")
+        return out
+    if shares is None:
+        out.update(shares_status="unavailable",
+                   reason=f"PIT shares-outstanding unavailable for cik={cik} at {asof}")
+        return out
+    try:
+        if isinstance(quote, (tuple, list)) and not isinstance(shares, dict):
+            price, day = _validated_quote(quote, start, asof)
+            count = _cap_positive(shares, "shares")
+            cap = _cap_positive(price * count, "legacy market cap")
+            out.update(price=price, price_date=day, shares=count, mktcap=cap,
+                       source="sec_shares_x_price", status="legacy_unverified",
+                       basis_status="legacy_unverified",
+                       reason="legacy callbacks do not declare a price/share basis; arithmetic is not usable for valuation")
+        elif isinstance(quote, dict) and isinstance(shares, dict):
+            out.update(_market_cap_evidence(quote, shares, asof))
+        else:
+            raise ValueError("both price and share callbacks must supply dated basis evidence")
+    except (ValueError, TypeError, OverflowError, ArithmeticError) as exc:
+        out.update(reason=str(exc), status="invalid_evidence", basis_status="unresolved")
     return out
 
 
 def _default_pit_shares_fn(asof: str):
-    """Build a shares_fn(cik) -> float|None that returns PIT shares-outstanding as-of `asof`.
-
-    Wraps _deepdive_concepts._shares_series(cik, asof=asof) (filed<=asof, latest period-end). Kept
-    out of mktcap_asof's import path so the selftest (which injects its own shares_fn) needs no
-    network and no _deepdive_concepts import.
-    """
+    """Fetch the strict SEC envelope without the lossy financial-series adapter."""
     def _fn(cik):
-        if cik is None or str(cik).strip() in ("", "nan"):
-            return None
-        try:
-            from _deepdive_concepts import _shares_series
-            series = _shares_series(str(cik), asof=asof)
-            vals = [s["val"] for s in series if s.get("val") is not None and s["val"] > 0]
-            return float(vals[-1]) if vals else None
-        except Exception:
-            return None
+        from _deepdive_concepts import instant_share_evidence
+        return instant_share_evidence(cik, asof)
     return _fn
 
 
 def benchmark_return(
     asof: str,
     horizon_months: int = DEFAULT_HORIZON_MONTHS,
-    price_fn=_yf_price_fn,
+    price_fn=None,
     benchmark: str = DEFAULT_BENCHMARK,
 ) -> dict:
     """Forward total return of the benchmark (IWM) over the SAME [asof, asof+horizon] window.

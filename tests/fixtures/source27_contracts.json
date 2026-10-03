@@ -1,0 +1,893 @@
+{
+  "debt": {
+    "complete": {
+      "data": {
+        "ticker": "SYNTA",
+        "derived": {
+          "latest_cash": 20000000,
+          "latest_total_debt": 12000000,
+          "latest_revenue": 100000000,
+          "latest_net_income": 15000000,
+          "latest_ocf": 25000000,
+          "latest_ebit": 18000000,
+          "latest_dep_amort": 4000000,
+          "latest_capex": 5000000,
+          "latest_ebitda": 22000000,
+          "latest_fcf": 20000000,
+          "fcf_is_ocf_proxy": false,
+          "sic": "3990",
+          "debt_evidence_status": "reported"
+        },
+        "financials": {
+          "assets": [
+            {
+              "end": "2024-12-31",
+              "val": 200000000
+            }
+          ],
+          "equity": [
+            {
+              "end": "2024-12-31",
+              "val": 150000000
+            }
+          ],
+          "ebit": [
+            {
+              "end": "2024-12-31",
+              "val": 18000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "dep_amort": [
+            {
+              "end": "2024-12-31",
+              "val": 4000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "revenue": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000
+            }
+          ],
+          "shares_outstanding": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000
+            }
+          ],
+          "ocf": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 25000000
+            }
+          ],
+          "capex": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 5000000
+            }
+          ],
+          "total_debt": [
+            {
+              "end": "2024-12-31",
+              "val": 12000000,
+              "source": "synthetic_complete_components",
+              "debt_evidence_status": "reported",
+              "debt_evidence_detail": null,
+              "components": {
+                "LongTermDebtNoncurrent": 12000000,
+                "LongTermDebtCurrent": 0,
+                "ShortTermBorrowings": 0,
+                "FinanceLeaseLiabilityNoncurrent": 0,
+                "FinanceLeaseLiabilityCurrent": 0
+              },
+              "aggregates": {},
+              "missing_components": [],
+              "conflicting_aggregates": []
+            }
+          ]
+        }
+      },
+      "status": "reported",
+      "uncertain": false
+    },
+    "zero": {
+      "data": {
+        "ticker": "SYNTA",
+        "derived": {
+          "latest_cash": 20000000,
+          "latest_total_debt": 0,
+          "latest_revenue": 100000000,
+          "latest_net_income": 15000000,
+          "latest_ocf": 25000000,
+          "latest_ebit": 18000000,
+          "latest_dep_amort": 4000000,
+          "latest_capex": 5000000,
+          "latest_ebitda": 22000000,
+          "latest_fcf": 20000000,
+          "fcf_is_ocf_proxy": false,
+          "sic": "3990",
+          "debt_evidence_status": "reported"
+        },
+        "financials": {
+          "assets": [
+            {
+              "end": "2024-12-31",
+              "val": 200000000
+            }
+          ],
+          "equity": [
+            {
+              "end": "2024-12-31",
+              "val": 150000000
+            }
+          ],
+          "ebit": [
+            {
+              "end": "2024-12-31",
+              "val": 18000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "dep_amort": [
+            {
+              "end": "2024-12-31",
+              "val": 4000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "revenue": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000
+            }
+          ],
+          "shares_outstanding": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000
+            }
+          ],
+          "ocf": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 25000000
+            }
+          ],
+          "capex": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 5000000
+            }
+          ],
+          "total_debt": [
+            {
+              "end": "2024-12-31",
+              "val": 0,
+              "source": "synthetic_complete_components",
+              "debt_evidence_status": "reported",
+              "debt_evidence_detail": null,
+              "components": {
+                "LongTermDebtNoncurrent": 0,
+                "LongTermDebtCurrent": 0,
+                "ShortTermBorrowings": 0,
+                "FinanceLeaseLiabilityNoncurrent": 0,
+                "FinanceLeaseLiabilityCurrent": 0
+              },
+              "aggregates": {},
+              "missing_components": [],
+              "conflicting_aggregates": []
+            }
+          ]
+        }
+      },
+      "status": "reported",
+      "uncertain": false
+    },
+    "invalid_scalar": {
+      "data": {
+        "ticker": "SYNTA",
+        "derived": {
+          "latest_cash": 20000000,
+          "latest_total_debt": true,
+          "latest_revenue": 100000000,
+          "latest_net_income": 15000000,
+          "latest_ocf": 25000000,
+          "latest_ebit": 18000000,
+          "latest_dep_amort": 4000000,
+          "latest_capex": 5000000,
+          "latest_ebitda": 22000000,
+          "latest_fcf": 20000000,
+          "fcf_is_ocf_proxy": false,
+          "sic": "3990",
+          "debt_evidence_status": "reported"
+        },
+        "financials": {
+          "assets": [
+            {
+              "end": "2024-12-31",
+              "val": 200000000
+            }
+          ],
+          "equity": [
+            {
+              "end": "2024-12-31",
+              "val": 150000000
+            }
+          ],
+          "ebit": [
+            {
+              "end": "2024-12-31",
+              "val": 18000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "dep_amort": [
+            {
+              "end": "2024-12-31",
+              "val": 4000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "revenue": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000
+            }
+          ],
+          "shares_outstanding": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000
+            }
+          ],
+          "ocf": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 25000000
+            }
+          ],
+          "capex": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 5000000
+            }
+          ],
+          "total_debt": [
+            {
+              "end": "2024-12-31",
+              "val": 12000000,
+              "source": "synthetic_complete_components",
+              "debt_evidence_status": "reported",
+              "debt_evidence_detail": null,
+              "components": {
+                "LongTermDebtNoncurrent": 12000000,
+                "LongTermDebtCurrent": 0,
+                "ShortTermBorrowings": 0,
+                "FinanceLeaseLiabilityNoncurrent": 0,
+                "FinanceLeaseLiabilityCurrent": 0
+              },
+              "aggregates": {},
+              "missing_components": [],
+              "conflicting_aggregates": []
+            }
+          ]
+        }
+      },
+      "status": "invalid",
+      "uncertain": true
+    },
+    "oversized_scalar": {
+      "data": {
+        "ticker": "SYNTA",
+        "derived": {
+          "latest_cash": 20000000,
+          "latest_total_debt": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+          "latest_revenue": 100000000,
+          "latest_net_income": 15000000,
+          "latest_ocf": 25000000,
+          "latest_ebit": 18000000,
+          "latest_dep_amort": 4000000,
+          "latest_capex": 5000000,
+          "latest_ebitda": 22000000,
+          "latest_fcf": 20000000,
+          "fcf_is_ocf_proxy": false,
+          "sic": "3990",
+          "debt_evidence_status": "reported"
+        },
+        "financials": {
+          "assets": [
+            {
+              "end": "2024-12-31",
+              "val": 200000000
+            }
+          ],
+          "equity": [
+            {
+              "end": "2024-12-31",
+              "val": 150000000
+            }
+          ],
+          "ebit": [
+            {
+              "end": "2024-12-31",
+              "val": 18000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "dep_amort": [
+            {
+              "end": "2024-12-31",
+              "val": 4000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "revenue": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000
+            }
+          ],
+          "shares_outstanding": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000
+            }
+          ],
+          "ocf": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 25000000
+            }
+          ],
+          "capex": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 5000000
+            }
+          ],
+          "total_debt": [
+            {
+              "end": "2024-12-31",
+              "val": 12000000,
+              "source": "synthetic_complete_components",
+              "debt_evidence_status": "reported",
+              "debt_evidence_detail": null,
+              "components": {
+                "LongTermDebtNoncurrent": 12000000,
+                "LongTermDebtCurrent": 0,
+                "ShortTermBorrowings": 0,
+                "FinanceLeaseLiabilityNoncurrent": 0,
+                "FinanceLeaseLiabilityCurrent": 0
+              },
+              "aggregates": {},
+              "missing_components": [],
+              "conflicting_aggregates": []
+            }
+          ]
+        }
+      },
+      "status": "invalid",
+      "uncertain": true
+    },
+    "oversized_period": {
+      "data": {
+        "ticker": "SYNTA",
+        "derived": {
+          "latest_cash": 20000000,
+          "latest_total_debt": 12000000,
+          "latest_revenue": 100000000,
+          "latest_net_income": 15000000,
+          "latest_ocf": 25000000,
+          "latest_ebit": 18000000,
+          "latest_dep_amort": 4000000,
+          "latest_capex": 5000000,
+          "latest_ebitda": 22000000,
+          "latest_fcf": 20000000,
+          "fcf_is_ocf_proxy": false,
+          "sic": "3990",
+          "debt_evidence_status": "reported"
+        },
+        "financials": {
+          "assets": [
+            {
+              "end": "2024-12-31",
+              "val": 200000000
+            }
+          ],
+          "equity": [
+            {
+              "end": "2024-12-31",
+              "val": 150000000
+            }
+          ],
+          "ebit": [
+            {
+              "end": "2024-12-31",
+              "val": 18000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "dep_amort": [
+            {
+              "end": "2024-12-31",
+              "val": 4000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "revenue": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000
+            }
+          ],
+          "shares_outstanding": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000
+            }
+          ],
+          "ocf": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 25000000
+            }
+          ],
+          "capex": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 5000000
+            }
+          ],
+          "total_debt": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+              "source": "synthetic_complete_components",
+              "debt_evidence_status": "reported",
+              "debt_evidence_detail": null,
+              "components": {
+                "LongTermDebtNoncurrent": 12000000,
+                "LongTermDebtCurrent": 0,
+                "ShortTermBorrowings": 0,
+                "FinanceLeaseLiabilityNoncurrent": 0,
+                "FinanceLeaseLiabilityCurrent": 0
+              },
+              "aggregates": {},
+              "missing_components": [],
+              "conflicting_aggregates": []
+            }
+          ]
+        }
+      },
+      "status": "invalid",
+      "uncertain": true
+    },
+    "oversized_component": {
+      "data": {
+        "ticker": "SYNTA",
+        "derived": {
+          "latest_cash": 20000000,
+          "latest_total_debt": 12000000,
+          "latest_revenue": 100000000,
+          "latest_net_income": 15000000,
+          "latest_ocf": 25000000,
+          "latest_ebit": 18000000,
+          "latest_dep_amort": 4000000,
+          "latest_capex": 5000000,
+          "latest_ebitda": 22000000,
+          "latest_fcf": 20000000,
+          "fcf_is_ocf_proxy": false,
+          "sic": "3990",
+          "debt_evidence_status": "reported"
+        },
+        "financials": {
+          "assets": [
+            {
+              "end": "2024-12-31",
+              "val": 200000000
+            }
+          ],
+          "equity": [
+            {
+              "end": "2024-12-31",
+              "val": 150000000
+            }
+          ],
+          "ebit": [
+            {
+              "end": "2024-12-31",
+              "val": 18000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "dep_amort": [
+            {
+              "end": "2024-12-31",
+              "val": 4000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "revenue": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000
+            }
+          ],
+          "shares_outstanding": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000
+            }
+          ],
+          "ocf": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 25000000
+            }
+          ],
+          "capex": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 5000000
+            }
+          ],
+          "total_debt": [
+            {
+              "end": "2024-12-31",
+              "val": 12000000,
+              "source": "synthetic_complete_components",
+              "debt_evidence_status": "reported",
+              "debt_evidence_detail": null,
+              "components": {
+                "LongTermDebtNoncurrent": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "LongTermDebtCurrent": 0,
+                "ShortTermBorrowings": 0,
+                "FinanceLeaseLiabilityNoncurrent": 0,
+                "FinanceLeaseLiabilityCurrent": 0
+              },
+              "aggregates": {},
+              "missing_components": [],
+              "conflicting_aggregates": []
+            }
+          ]
+        }
+      },
+      "status": "invalid",
+      "uncertain": true
+    },
+    "oversized_component_sum": {
+      "data": {
+        "ticker": "SYNTA",
+        "derived": {
+          "latest_cash": 20000000,
+          "latest_total_debt": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+          "latest_revenue": 100000000,
+          "latest_net_income": 15000000,
+          "latest_ocf": 25000000,
+          "latest_ebit": 18000000,
+          "latest_dep_amort": 4000000,
+          "latest_capex": 5000000,
+          "latest_ebitda": 22000000,
+          "latest_fcf": 20000000,
+          "fcf_is_ocf_proxy": false,
+          "sic": "3990",
+          "debt_evidence_status": "reported"
+        },
+        "financials": {
+          "assets": [
+            {
+              "end": "2024-12-31",
+              "val": 200000000
+            }
+          ],
+          "equity": [
+            {
+              "end": "2024-12-31",
+              "val": 150000000
+            }
+          ],
+          "ebit": [
+            {
+              "end": "2024-12-31",
+              "val": 18000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "dep_amort": [
+            {
+              "end": "2024-12-31",
+              "val": 4000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "revenue": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000
+            }
+          ],
+          "shares_outstanding": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000
+            }
+          ],
+          "ocf": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 25000000
+            }
+          ],
+          "capex": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 5000000
+            }
+          ],
+          "total_debt": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+              "source": "synthetic_complete_components",
+              "debt_evidence_status": "reported",
+              "debt_evidence_detail": null,
+              "components": {
+                "LongTermDebtNoncurrent": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "LongTermDebtCurrent": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "ShortTermBorrowings": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "FinanceLeaseLiabilityNoncurrent": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "FinanceLeaseLiabilityCurrent": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+              },
+              "aggregates": {},
+              "missing_components": [],
+              "conflicting_aggregates": []
+            }
+          ]
+        }
+      },
+      "status": "invalid",
+      "uncertain": true
+    },
+    "oversized_mixed_component_sum": {
+      "data": {
+        "ticker": "SYNTA",
+        "derived": {
+          "latest_cash": 20000000,
+          "latest_total_debt": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+          "latest_revenue": 100000000,
+          "latest_net_income": 15000000,
+          "latest_ocf": 25000000,
+          "latest_ebit": 18000000,
+          "latest_dep_amort": 4000000,
+          "latest_capex": 5000000,
+          "latest_ebitda": 22000000,
+          "latest_fcf": 20000000,
+          "fcf_is_ocf_proxy": false,
+          "sic": "3990",
+          "debt_evidence_status": "reported"
+        },
+        "financials": {
+          "assets": [
+            {
+              "end": "2024-12-31",
+              "val": 200000000
+            }
+          ],
+          "equity": [
+            {
+              "end": "2024-12-31",
+              "val": 150000000
+            }
+          ],
+          "ebit": [
+            {
+              "end": "2024-12-31",
+              "val": 18000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "dep_amort": [
+            {
+              "end": "2024-12-31",
+              "val": 4000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "revenue": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000
+            }
+          ],
+          "shares_outstanding": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000
+            }
+          ],
+          "ocf": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 25000000
+            }
+          ],
+          "capex": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 5000000
+            }
+          ],
+          "total_debt": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+              "source": "synthetic_complete_components",
+              "debt_evidence_status": "reported",
+              "debt_evidence_detail": null,
+              "components": {
+                "LongTermDebtNoncurrent": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "LongTermDebtCurrent": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "ShortTermBorrowings": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "FinanceLeaseLiabilityNoncurrent": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "FinanceLeaseLiabilityCurrent": 1.0
+              },
+              "aggregates": {},
+              "missing_components": [],
+              "conflicting_aggregates": []
+            }
+          ]
+        }
+      },
+      "status": "invalid",
+      "uncertain": true
+    }
+  },
+  "market_cap": 120000000
+}

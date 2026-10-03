@@ -1,0 +1,440 @@
+{
+  "market_cap": {
+    "ticker": "SYNCAP",
+    "cik": "901",
+    "name": "AcmeCorp Synthetic Capital",
+    "price": 32.0,
+    "shares": 27000000,
+    "value": 864000000.0,
+    "large_cik": "902",
+    "large_price": 32.0,
+    "large_shares": 260000000,
+    "large_value": 8320000000.0
+  },
+  "positive_ocf": {
+    "ticker": "SYNOCF",
+    "name": "AcmeCorp Synthetic Components",
+    "mktcap": 720000000,
+    "cash": 37000000,
+    "net_income": -65000000,
+    "ocf_latest": 54000000,
+    "revenue": 960000000,
+    "runway_periods": null,
+    "flag_ocf_ni_divergence": true,
+    "killflag_count": 0,
+    "kf_going_concern": 0,
+    "kf_substantial_doubt": 0,
+    "kf_material_weakness": 0,
+    "kf_death_spiral": 0,
+    "kf_reverse_split": 0,
+    "kf_scanned": true,
+    "business_blurb": "AcmeCorp manufactures synthetic example components."
+  },
+  "concentration_base": {
+    "ticker": "SYNCONC",
+    "name": "AcmeCorp Synthetic Concentration",
+    "mktcap": 720000000,
+    "cash": 37000000,
+    "net_income": 14000000,
+    "ocf_latest": 35000000,
+    "revenue": 960000000,
+    "runway_periods": null,
+    "flag_ocf_ni_divergence": false,
+    "killflag_count": 0,
+    "kf_going_concern": 0,
+    "kf_substantial_doubt": 0,
+    "kf_material_weakness": 0,
+    "kf_death_spiral": 0,
+    "kf_reverse_split": 0,
+    "kf_scanned": true,
+    "business_blurb": "AcmeCorp manufactures synthetic example components."
+  },
+  "recall_union": {
+    "rows": [
+      {
+        "cik": "901",
+        "ticker": "SYNRA",
+        "name": "AcmeCorp Synthetic Alpha"
+      },
+      {
+        "cik": "902",
+        "ticker": "SYNRB",
+        "name": "AcmeCorp Synthetic Beta & Co, Inc."
+      },
+      {
+        "cik": "903",
+        "ticker": "SYNRC",
+        "name": "AcmeCorp Synthetic Gamma"
+      }
+    ],
+    "html": "<tr><td scope=\"row\"><a href=\"x&amp;CIK=0000000901&amp;owner=include&amp;count=100&amp;type=10-K\">0000000901</a></td><td scope=\"row\">AcmeCorp Synthetic Alpha</td></tr><tr><td scope=\"row\"><a href=\"x&amp;CIK=0000000902&amp;owner=include&amp;count=100&amp;type=10-K\">0000000902</a></td><td scope=\"row\">AcmeCorp Synthetic Beta &amp; Co, Inc.</td></tr>",
+    "page1": "<tr><td scope=\"row\"><a href=\"x&amp;CIK=0000000901&amp;owner=include&amp;count=100&amp;type=10-K\">0000000901</a></td><td scope=\"row\">AcmeCorp Synthetic Alpha</td></tr><tr><td scope=\"row\"><a href=\"x&amp;CIK=0000000902&amp;owner=include&amp;count=100&amp;type=10-K\">0000000902</a></td><td scope=\"row\">AcmeCorp Synthetic Beta &amp; Co, Inc.</td></tr>",
+    "page2": "<tr><td scope=\"row\"><a href=\"x&amp;CIK=0000000903&amp;owner=include&amp;count=100&amp;type=10-K\">0000000903</a></td><td scope=\"row\">AcmeCorp Synthetic Gamma</td></tr><tr><td scope=\"row\"><a href=\"x&amp;CIK=0000000902&amp;owner=include&amp;count=100&amp;type=10-K\">0000000902</a></td><td scope=\"row\">AcmeCorp Synthetic Beta &amp; Co, Inc.</td></tr>",
+    "all_rows": "<tr><td scope=\"row\"><a href=\"x&amp;CIK=0000000901&amp;owner=include&amp;count=100&amp;type=10-K\">0000000901</a></td><td scope=\"row\">AcmeCorp Synthetic Alpha</td></tr><tr><td scope=\"row\"><a href=\"x&amp;CIK=0000000902&amp;owner=include&amp;count=100&amp;type=10-K\">0000000902</a></td><td scope=\"row\">AcmeCorp Synthetic Beta &amp; Co, Inc.</td></tr><tr><td scope=\"row\"><a href=\"x&amp;CIK=0000000903&amp;owner=include&amp;count=100&amp;type=10-K\">0000000903</a></td><td scope=\"row\">AcmeCorp Synthetic Gamma</td></tr>",
+    "other_cik": "904",
+    "other_ticker": "SYNRD",
+    "other_name": "AcmeCorp Synthetic Delta"
+  },
+  "recall": {
+    "theme": "synthetic-recall",
+    "gold": [
+      "SYNRD",
+      "SYNRA",
+      "SYNRC",
+      "SYNRB",
+      "SYNRF",
+      "SYNRE"
+    ],
+    "universe": [
+      {
+        "name": "AcmeCorp Synthetic Recall 2",
+        "ticker": "SYNRA",
+        "cik": "921",
+        "sic": "7200",
+        "matched_phrase": "synthetic-service",
+        "flag_too_big": false,
+        "flag_illiquid": false,
+        "band": "deep",
+        "smallcap_candidate": true,
+        "recall_channel": "both"
+      },
+      {
+        "name": "AcmeCorp Synthetic Recall 6",
+        "ticker": "SYNRE",
+        "cik": "925",
+        "sic": "7200",
+        "matched_phrase": "synthetic-service",
+        "flag_too_big": false,
+        "flag_illiquid": false,
+        "band": "deep",
+        "smallcap_candidate": true,
+        "recall_channel": "fts"
+      },
+      {
+        "name": "AcmeCorp Synthetic Recall 3",
+        "ticker": "SYNRC",
+        "cik": "922",
+        "sic": "7200",
+        "matched_phrase": "[sic_reverse]",
+        "flag_too_big": false,
+        "flag_illiquid": false,
+        "band": "deep",
+        "smallcap_candidate": true,
+        "recall_channel": "sic_reverse"
+      },
+      {
+        "name": "AcmeCorp Synthetic Recall 1",
+        "ticker": "SYNRD",
+        "cik": "920",
+        "sic": "7200",
+        "matched_phrase": "synthetic-service",
+        "flag_too_big": true,
+        "flag_illiquid": false,
+        "band": "large",
+        "smallcap_candidate": false,
+        "recall_channel": "both"
+      },
+      {
+        "name": "AcmeCorp Synthetic Recall 4",
+        "ticker": "SYNRB",
+        "cik": "923",
+        "sic": "7200",
+        "matched_phrase": "synthetic-service",
+        "flag_too_big": false,
+        "flag_illiquid": true,
+        "band": "unknown",
+        "smallcap_candidate": false,
+        "recall_channel": "fts"
+      }
+    ]
+  },
+  "shell": {
+    "name": "AcmeCorp Synthetic Finance Subsidiary"
+  },
+  "cross_source": {
+    "debt_mismatch": [
+      18000000,
+      360000000,
+      72000000,
+      {
+        "total_debt": 810000000,
+        "revenue": 375000000,
+        "shares_outstanding": 70000000
+      }
+    ],
+    "agreement": [
+      180000000,
+      360000000,
+      72000000,
+      {
+        "total_debt": 195000000,
+        "revenue": 375000000,
+        "shares_outstanding": 70000000
+      }
+    ],
+    "unavailable": [
+      18000000,
+      360000000,
+      72000000,
+      null
+    ],
+    "revenue_mismatch": [
+      180000000,
+      36000000,
+      72000000,
+      {
+        "total_debt": 195000000,
+        "revenue": 375000000,
+        "shares_outstanding": 70000000
+      }
+    ],
+    "floor": [
+      250000,
+      360000000,
+      null,
+      {
+        "total_debt": 810000000,
+        "revenue": 375000000,
+        "shares_outstanding": 70000000
+      }
+    ]
+  },
+  "report": {
+    "date": "2001-06-20",
+    "deep": {
+      "ticker": "SYNREPORT",
+      "derived": {
+        "latest_revenue": 144000000,
+        "latest_net_income": 12000000,
+        "latest_ocf": 28000000,
+        "revenue_growth_pct": -27.0,
+        "concentration_flag": "kill",
+        "concentration_detail": "AcmeCorp synthetic program supplies 74% of revenue",
+        "fundamental_decline_flag": true,
+        "contamination_ratio": 0.61,
+        "rev_slope_sign": -1,
+        "latest_below_avg": true
+      },
+      "tenk": {
+        "has_going_concern": false,
+        "has_material_weakness": false,
+        "has_death_spiral": false
+      },
+      "signals": {
+        "price_divergence": {
+          "price_return_6m": 0.12,
+          "price_return_12m": 0.28,
+          "price_source": "synthetic",
+          "fundamental_trajectory": {
+            "rev_slope_sign": -1,
+            "contamination_ratio": 0.61,
+            "fundamental_decline_flag": true,
+            "read_from": "deepdive_derived (NOT recomputed)"
+          },
+          "divergence_label": "melting_ice_cube_priced",
+          "note": "fundamentals down, price elevated"
+        },
+        "ownership": {
+          "recent_13d_13g": [
+            {
+              "form": "SC 13D",
+              "file_date": "2001-05-01",
+              "filer": "AcmeCorp Synthetic Holder A"
+            },
+            {
+              "form": "SC 13G",
+              "file_date": "2001-02-14",
+              "filer": "AcmeCorp Synthetic Holder B"
+            }
+          ],
+          "recent_13d_13g_count": 2,
+          "short_interest_pct": null,
+          "short_trend": null,
+          "staleness_note": "Synthetic unavailable short-interest evidence."
+        },
+        "signals_meta": {
+          "diagnostic_only": true,
+          "never_affects_buy": true,
+          "sources": [
+            "synthetic price",
+            "synthetic filing"
+          ],
+          "notes": "Diagnostic context is excluded from rating inputs."
+        }
+      }
+    },
+    "valuation": {
+      "ticker": "SYNREPORT",
+      "mos_basis": "fcf_cap",
+      "margin_of_safety_pct": 0.76,
+      "nav_margin_of_safety_pct": null,
+      "ev_sales": 1.1,
+      "ev_ebitda": 4.2,
+      "ebit_source": "OperatingIncomeLoss",
+      "reverse_dcf_implied_growth": -12.0,
+      "data_quality": [
+        "capex_unavailable_fcf_uses_ocf_proxy",
+        "rdcf_implied_growth_very_negative:market_pricing_in_decline"
+      ],
+      "buy_eligible": false,
+      "buy_ineligible_reasons": [
+        "concentration_flag=kill",
+        "fundamental_decline_flag"
+      ]
+    }
+  },
+  "signals": {
+    "ticker": "SYNSIGNAL",
+    "cik": "905",
+    "base_date": [
+      2000,
+      1,
+      1
+    ],
+    "declining": {
+      "rev_slope_sign": -1,
+      "contamination_ratio": 0.73,
+      "fundamental_decline_flag": true
+    },
+    "price_points": [
+      [
+        0,
+        20.0
+      ],
+      [
+        183,
+        22.0
+      ],
+      [
+        366,
+        25.0
+      ],
+      [
+        400,
+        28.0
+      ]
+    ]
+  },
+  "acquisition": {
+    "row": {
+      "ticker": "SYNACQUIRE",
+      "cik": "42",
+      "asof": "2000-01-01"
+    },
+    "good": {
+      "facts": {
+        "us-gaap": {
+          "CashAndCashEquivalentsAtCarryingValue": {
+            "units": {
+              "USD": [
+                {
+                  "end": "1999-12-31",
+                  "filed": "2000-01-01",
+                  "val": 30,
+                  "form": "20-F",
+                  "fp": "FY"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "shares": [
+      {
+        "end": "1999-12-31",
+        "val": 100
+      }
+    ],
+    "malformed": [
+      {
+        "name": "concept_list",
+        "payload": {
+          "facts": {
+            "us-gaap": {
+              "CashAndCashEquivalentsAtCarryingValue": [
+                "synthetic-invalid-concept"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "name": "units_list",
+        "payload": {
+          "facts": {
+            "us-gaap": {
+              "CashAndCashEquivalentsAtCarryingValue": {
+                "units": [
+                  "synthetic-invalid-units"
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "units_empty_list",
+        "payload": {
+          "facts": {
+            "us-gaap": {
+              "CashAndCashEquivalentsAtCarryingValue": {
+                "units": []
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "values_mapping",
+        "payload": {
+          "facts": {
+            "us-gaap": {
+              "CashAndCashEquivalentsAtCarryingValue": {
+                "units": {
+                  "USD": {
+                    "synthetic": "invalid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "value_scalar",
+        "payload": {
+          "facts": {
+            "us-gaap": {
+              "CashAndCashEquivalentsAtCarryingValue": {
+                "units": {
+                  "USD": [
+                    "synthetic-invalid-fact"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "unusable_fact",
+        "payload": {
+          "facts": {
+            "us-gaap": {
+              "CashAndCashEquivalentsAtCarryingValue": {
+                "units": {
+                  "USD": [
+                    {
+                      "end": "1999-12-31"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

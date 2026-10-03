@@ -22,17 +22,16 @@ Method (most reliable free EDGAR path):
      (Spec: "seed the CIK set from the SIC browse/full-text recall.")
   2. For EACH seed CIK, read its per-CIK submissions index
      (data.sec.gov/submissions/CIK<10>.json, plus any older "files" overflow
-     shards) and KEEP it iff it has a 10-K OR 10-Q with filingDate <= T. This is
-     the per-CIK submissions filter the spec calls for, and it is what makes the
-     set point-in-time correct: a CIK whose FIRST 10-K/10-Q is filed AFTER T was
-     not yet a theme filer as-of T and is dropped; a CIK that filed before T and
-     later delisted is KEPT (its filings persist).
+     shards) and retain observed periodic filings with filingDate <= T. This
+     dates the observed filing evidence. Current SIC membership and missing
+     source work still limit historical coverage; they cannot establish a
+     complete point-in-time universe.
 
 Each surviving row is {cik, name, ticker, recall_channel, first_periodic_filing,
-earliest_filing_asof, delisted_after_asof?} — `ticker` is the POINT-IN-TIME symbol
-resolved from dei:TradingSymbol (filed<=asof), and survivors are restricted to
-entities with such a resolvable as-of ticker (ticker-less shells are dropped +
-counted as dropped_no_asof_ticker). recall_channel records how the CIK
+earliest_filing_asof, delisted_after_asof?}. Dated symbol facts and current-symbol
+fallbacks are distinguished in completion.identities. Missing symbols remain
+unavailable evidence; dropped_no_asof_ticker counts unresolved identities, not
+proven nontrading entities. recall_channel records how the CIK
 entered the universe (currently always "sic_reverse" — the SIC floor is the seed;
 the field is preserved so a future FTS-as-of seed can tag "fts"/"both" via the
 same union semantics as filter_by_sic.union_recall).
@@ -51,11 +50,13 @@ import argparse
 import json
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import http_get
-from filter_by_sic import theme_sics, sic_reverse_recall
+from filter_by_sic import (theme_sics, sic_reverse_recall, StageRows,
+                           stage_work, rows_completion, _canonical_cik)
 
 # Periodic ("was a filer") forms that establish theme-filer status as-of T. A
 # company is a theme filer as-of T iff it filed one of these on/before T. Foreign
@@ -122,7 +123,7 @@ def _scan_recent_block(recent: dict, asof: str) -> tuple[bool, str | None, str |
     return (earliest is not None, earliest, latest)
 
 
-def _latest_string_fact_le_asof(units: dict, asof: str) -> str | None:
+def _latest_string_fact_le_asof(units: dict, asof: str, evidence=None) -> str | None:
     """Pick the latest-FILED non-empty string fact value with filed <= asof.
 
     Pure helper (no network) so the selftest exercises the date logic on a
@@ -149,9 +150,17 @@ def _latest_string_fact_le_asof(units: dict, asof: str) -> str | None:
                 filed = str(v.get("filed") or "")
             except AttributeError:
                 continue
-            if not filed or filed > asof:  # undated or future-filed -> drop (no look-ahead)
+            try:
+                parsed = datetime.strptime(filed, "%Y-%m-%d")
+            except ValueError:
+                continue
+            if parsed.strftime("%Y-%m-%d") != filed:
+                continue
+            if filed > asof:  # future-filed -> drop (no look-ahead)
                 continue
             raw = v.get("val")
+            if not isinstance(raw, str):
+                continue
             sym = str(raw or "").strip()
             if not sym:
                 continue
@@ -159,11 +168,13 @@ def _latest_string_fact_le_asof(units: dict, asof: str) -> str | None:
             if best_filed is None or filed >= best_filed:
                 best_filed = filed
                 best_val = sym.upper()
+    if evidence is not None:
+        evidence["filed"] = best_filed
     return best_val
 
 
 def cik_trading_symbol_asof(cik: str | int, asof: str, fetch=None,
-                            submissions_tickers=None) -> str | None:
+                            submissions_tickers=None, evidence=None) -> str | None:
     """Resolve a POINT-IN-TIME trading symbol for ONE CIK as-of `asof`.
 
     Survivorship-safe ticker resolution (FIX 2). Strategy:
@@ -177,45 +188,85 @@ def cik_trading_symbol_asof(cik: str | int, asof: str, fetch=None,
          sparse. It is NOT survivorship-safe (goes empty for delisted names), so it
          is strictly a secondary path — the primary path is what keeps delisted
          names resolvable.
-    Returns an upper-cased symbol string, or None when NEITHER path yields one
-    (a ticker-less shell / financing-sub -> the caller drops + counts it).
+    Returns an upper-cased symbol or None. The optional evidence mapping records
+    the date and source; current-symbol fallback is not historical identity proof.
+    None means unavailable identity evidence, not proven nontrading.
     `fetch` and `submissions_tickers` are injectable for the offline selftest.
     """
     if fetch is None:
         fetch = http_get
-    cik10 = str(cik).split(".")[0].strip().lstrip("0").zfill(10) or "0".zfill(10)
+    datetime.strptime(asof, "%Y-%m-%d")
+    evidence = evidence if evidence is not None else {}
+    evidence.update({"asof": asof, "source": "unavailable", "filed": None,
+                     "pit_proven": False, "work": [],
+                     "observed_at": datetime.now(timezone.utc).isoformat()})
+    cik10 = _canonical_cik(cik).zfill(10)
 
     # PRIMARY: dei:TradingSymbol, latest fact filed <= asof.
     try:
         r = fetch(_DEI_CONCEPT.format(cik10=cik10, concept="TradingSymbol"), timeout=20)
-        if getattr(r, "status_code", 200) == 200:
-            units = (r.json() or {}).get("units", {}) or {}
-            sym = _latest_string_fact_le_asof(units, asof)
-            if sym:
-                return sym
+        if getattr(r, "status_code", 200) != 200:
+            raise ValueError("symbol request failed")
+        doc = r.json()
+        if (not isinstance(doc, dict) or _canonical_cik(doc.get("cik")).zfill(10) != cik10
+                or doc.get("taxonomy") != "dei" or doc.get("tag") != "TradingSymbol"
+                or not isinstance(doc.get("units"), dict)):
+            raise ValueError("invalid symbol envelope")
+        units = doc["units"]
+        if any(not isinstance(values, list) or any(not isinstance(v, dict) for v in values)
+               for values in units.values()):
+            raise ValueError("invalid symbol facts")
+        sym = _latest_string_fact_le_asof(units, asof, evidence)
+        evidence["work"].append(stage_work("dei_trading_symbol", cik10))
+        if sym:
+            evidence.update({"source": "dei_trading_symbol", "pit_proven": True, "symbol": sym})
+            return sym
     except Exception:
-        pass
+        evidence["work"].append(stage_work("dei_trading_symbol", cik10,
+                                           status="unavailable", reason="request_or_schema_failed"))
 
     # FALLBACK: current submissions tickers (still-listed names only).
     if submissions_tickers:
         for t in submissions_tickers:
             s = str(t or "").strip()
             if s:
+                evidence.update({"source": "current_submissions", "symbol": s.upper()})
+                evidence["work"].append(stage_work("symbol_identity", cik10,
+                    status="unavailable", reason="current_symbol_unproved_asof"))
                 return s.upper()
+    evidence["work"].append(stage_work("symbol_identity", cik10,
+                                       status="unavailable", reason="symbol_evidence_unavailable"))
     return None
 
 
+def _valid_filing_block(block):
+    if not isinstance(block, dict):
+        return False
+    forms, dates = block.get("form"), block.get("filingDate")
+    if not isinstance(forms, list) or not isinstance(dates, list) or len(forms) != len(dates):
+        return False
+    try:
+        for form, filed in zip(forms, dates):
+            if not isinstance(form, str) or not form or not isinstance(filed, str):
+                return False
+            if datetime.strptime(filed, "%Y-%m-%d").strftime("%Y-%m-%d") != filed:
+                return False
+    except ValueError:
+        return False
+    return True
+
+
 def cik_periodic_asof(cik: str | int, asof: str, fetch=None,
-                      sleep: float = 0.0, resolve_ticker: bool = True) -> dict | None:
+                      sleep: float = 0.0, resolve_ticker: bool = True, evidence=None) -> dict | None:
     """PIT submissions probe for ONE CIK: was it a periodic filer on/before asof?
 
     Reads the per-CIK submissions index (and any older "files" overflow shards, so
     pre-2015 history is not missed for early as-of dates) and scans every periodic
     report (10-K/10-Q/20-F/40-F, incl. /A) for filingDate <= asof.
 
-    Returns None when the CIK has NO periodic filing on/before asof — i.e. it was
-    NOT yet a theme filer as-of asof (e.g. a company whose first 10-K is filed
-    AFTER asof is correctly excluded). Otherwise returns:
+    Returns None when no qualifying filing was observed or retrieval failed.
+    Pass an evidence dict to distinguish those outcomes and retain failed shards.
+    Otherwise returns:
       {
         "cik": <plain digit string>,
         "name": <entity name from submissions>,
@@ -226,22 +277,29 @@ def cik_periodic_asof(cik: str | int, asof: str, fetch=None,
         "latest_filing_asof": <MAX periodic filingDate <= asof>,
         "delisted_after_asof": <bool | None>,  # see below
       }
-    `ticker` is resolved POINT-IN-TIME (FIX 2): the dei:TradingSymbol fact filed
-    on/before asof (survivorship-safe — persists for later-delisted names), falling
-    back to the current submissions tickers only for still-listed names. "" when the
-    CIK is a ticker-less shell/financing-sub (the universe builder drops + counts
-    those). Set resolve_ticker=False to skip the extra companyconcept fetch (used by
-    callers that resolve the symbol themselves).
+    `ticker` uses a dated dei:TradingSymbol fact when available. Current-symbol
+    fallback is explicitly unproved historical identity in evidence["identity"].
+    An empty ticker means unavailable symbol evidence. Set resolve_ticker=False
+    to skip the extra companyconcept fetch.
     `delisted_after_asof` is a best-effort flag derived from whether ANY periodic
     filing exists AFTER asof: if the entity kept filing periodic reports after asof
     it was clearly still active (False); if its last periodic report is on/before
     asof it MAY have delisted (True) — survivorship-safe either way, because we KEEP
     the row regardless (the realized return / last-close logic lives in PIECE 3).
-    None when undeterminable. fetch is injectable for offline selftests.
+    This legacy filing-activity flag is not delisting proof; evidence records
+    delisting_proven=False. fetch is injectable for offline selftests.
     """
     if fetch is None:
         fetch = http_get
-    cik_plain = str(cik).split(".")[0].strip().lstrip("0") or "0"
+    datetime.strptime(asof, "%Y-%m-%d")
+    evidence = evidence if evidence is not None else {}
+    evidence.update({"asof": asof, "work": [], "identity": {}, "outcome": "unavailable",
+                     "delisting_proven": False})
+    try:
+        cik_plain = _canonical_cik(cik)
+    except ValueError:
+        evidence["work"].append(stage_work("submissions", status="invalid", reason="invalid_query_identity"))
+        return None
     cik10 = cik_plain.zfill(10)
 
     blocks: list[dict] = []
@@ -253,40 +311,73 @@ def cik_periodic_asof(cik: str | int, asof: str, fetch=None,
     try:
         r = fetch(_SUBMISSIONS.format(cik10=cik10), timeout=20)
         if getattr(r, "status_code", 200) != 200:
-            return None
+            raise ValueError("submissions request failed")
         doc = r.json()
+        if not isinstance(doc, dict) or not isinstance(doc.get("filings"), dict):
+            raise ValueError("invalid submissions envelope")
     except Exception:
+        evidence["work"].append(stage_work("submissions", cik_plain,
+                                           status="unavailable", reason="request_or_schema_failed"))
+        return None
+
+    try:
+        if _canonical_cik(doc.get("cik")) != cik_plain:
+            raise ValueError("submissions issuer mismatch")
+    except ValueError:
+        evidence["work"].append(stage_work("submissions", cik_plain,
+                                           status="invalid", reason="invalid_response_identity"))
         return None
 
     name = str(doc.get("name", "") or "")
     current_tickers = doc.get("tickers") or []
+    if not isinstance(current_tickers, list) or any(not isinstance(t, str) for t in current_tickers):
+        current_tickers = []
+        evidence["work"].append(stage_work("submissions_tickers", cik_plain,
+                                           status="unavailable", reason="invalid_ticker_list"))
     # POINT-IN-TIME ticker (FIX 2): dei:TradingSymbol filed<=asof (survivorship-safe),
     # falling back to current submissions tickers only for still-listed names.
     if resolve_ticker:
         ticker = cik_trading_symbol_asof(
-            cik_plain, asof, fetch=fetch, submissions_tickers=current_tickers) or ""
+            cik_plain, asof, fetch=fetch, submissions_tickers=current_tickers,
+            evidence=evidence["identity"]) or ""
 
     filings = doc.get("filings") or {}
-    recent = filings.get("recent") or {}
-    if recent:
+    recent = filings.get("recent")
+    if _valid_filing_block(recent):
         blocks.append(recent)
+        evidence["work"].append(stage_work("submissions", cik_plain))
+    else:
+        evidence["work"].append(stage_work("submissions", cik_plain,
+                                           status="unavailable", reason="invalid_recent_block"))
 
     # Older filings spill into "files" overflow shards (each a {form,filingDate,...}
     # block). For early as-of dates (e.g. 2020) the qualifying first 10-K may live
-    # ONLY in a shard, so we must read them, otherwise we'd wrongly exclude a
-    # long-tenured filer. Best-effort: a shard fetch failure is skipped, not fatal.
-    for shard in (filings.get("files") or []):
-        sname = str(shard.get("name", "") or "")
+    # ONLY in a shard. Failed shards remain explicit unresolved work in evidence.
+    shards = filings.get("files")
+    if not isinstance(shards, list):
+        evidence["work"].append(stage_work("submissions_shards", cik_plain,
+                                           status="unavailable", reason="missing_shard_index"))
+        shards = []
+    for shard in shards:
+        sname = str(shard.get("name", "") or "") if isinstance(shard, dict) else ""
         if not sname:
+            evidence["work"].append(stage_work("submissions_shard", cik_plain,
+                                               status="unavailable", reason="invalid_shard_descriptor"))
             continue
         if sleep:
             time.sleep(sleep)
         try:
             sr = fetch(_SUBMISSIONS_SHARD.format(name=sname), timeout=20)
             if getattr(sr, "status_code", 200) != 200:
-                continue
-            blocks.append(sr.json())
+                raise ValueError("shard request failed")
+            block = sr.json()
+            if not _valid_filing_block(block):
+                raise ValueError("invalid shard block")
+            blocks.append(block)
+            evidence["work"].append(stage_work("submissions_shard", sname))
         except Exception:
+            evidence["work"].append(stage_work("submissions_shard", sname,
+                                               status="unavailable", reason="request_or_schema_failed"))
             continue
 
     earliest_asof: str | None = None
@@ -316,7 +407,11 @@ def cik_periodic_asof(cik: str | int, asof: str, fetch=None,
                 has_periodic_after_asof = True
 
     if not has_periodic_le:
-        return None  # not yet a theme filer as-of asof -> excluded
+        evidence["outcome"] = ("no_periodic_observed" if all(
+            item["status"] == "complete" for item in evidence["work"]) else "unavailable")
+        return None
+
+    evidence["outcome"] = "periodic_observed"
 
     return {
         "cik": cik_plain,
@@ -334,23 +429,19 @@ def cik_periodic_asof(cik: str | int, asof: str, fetch=None,
 def pit_universe(theme: str, asof: str, fetch=None, max_pages: int = 20,
                  sleep: float = 0.0, seed_fn=None, probe_fn=None,
                  return_stats: bool = False):
-    """Survivorship-safe PIT universe of theme filers as-of `asof` (YYYY-MM-DD).
+    """Observed historical theme candidates as-of `asof` (YYYY-MM-DD).
 
     Returns a list of {cik, name, ticker, recall_channel, first_periodic_filing,
-    earliest_filing_asof, latest_filing_asof, delisted_after_asof} for EVERY entity
+    earliest_filing_asof, latest_filing_asof, delisted_after_asof} for each observed entity
     that (a) lives in the theme's dedicated SIC (the recall seed), (b) had a
     10-K/10-Q (or 20-F/40-F) with filingDate <= asof — INCLUDING entities that
-    later delisted (NOT excluded) — AND (c) has a RESOLVABLE point-in-time ticker
-    (dei:TradingSymbol filed<=asof, or current submissions ticker for still-listed).
-    Empty list for a theme with no dedicated SIC.
+    later delisted (NOT excluded) — AND (c) has a resolved symbol. Completion
+    evidence distinguishes dated facts from unproved current-symbol fallback.
+    A theme with no historical seed returns unavailable empty rows.
 
-    TRADABILITY FILTER (FIX 2): a periodic filer with NO as-of ticker is a
-    ticker-less shell / financing-sub (e.g. "155 East Tropicana Finance Corp" —
-    a financing subsidiary that files 10-Ks for its bonds but never trades equity).
-    Those have no priceable security, would yield null returns, and are DROPPED.
-    Every surviving row is a tradable issuer (incl. later-delisted ones, which the
-    survivorship-safe dei:TradingSymbol path keeps resolvable) and CARRIES its
-    resolved `ticker`.
+    The existing symbol-required output selection is preserved. Missing symbols
+    remain unresolved identities in the evidence. Neither a current SIC seed nor
+    a successful symbol lookup establishes historical universe completeness.
 
     return_stats=False (default) -> the survivor list (backward-compatible: the
     harness's `len(universe)` and per-row access are unchanged).
@@ -370,21 +461,32 @@ def pit_universe(theme: str, asof: str, fetch=None, max_pages: int = 20,
     if seed_fn is None:
         def seed_fn(t):
             return sic_reverse_recall(t, fetch=fetch, max_pages=max_pages)
-    if probe_fn is None:
-        def probe_fn(c, a):
-            return cik_periodic_asof(c, a, fetch=fetch, sleep=sleep)
+    use_default_probe = probe_fn is None
+    datetime.strptime(asof, "%Y-%m-%d")
+    if max_pages < 1 or sleep < 0:
+        raise ValueError("max_pages must be positive and sleep nonnegative")
 
     if not theme_sics(theme):
         # No dedicated SIC -> no SIC seed. (FTS-as-of seed is a future add per spec.)
-        return ([], {"seeds": 0, "periodic_filers": 0,
-                     "dropped_no_asof_ticker": 0, "kept": 0}) if return_stats else []
+        empty = StageRows(stage="pit_universe", reasons=["no_historical_seed_for_theme"])
+        stats = {"seeds": 0, "periodic_filers": 0, "dropped_no_asof_ticker": 0,
+                 "kept": 0, "unavailable_probes": 0, "unproved_historical_symbols": 0,
+                 "completion": empty.completion}
+        return (empty, stats) if return_stats else empty
 
-    seeds = seed_fn(theme)
+    try:
+        seeds = seed_fn(theme)
+    except Exception:
+        seeds = StageRows(stage="pit_seed", work=[stage_work(
+            "sic_seed", theme, status="unavailable", reason="seed_failed")])
     out: list[dict] = []
     seen: set[str] = set()
     n_seeds = 0
     n_periodic = 0
     n_dropped_no_ticker = 0
+    n_unavailable = 0
+    n_unproved = 0
+    work, identities = [], []
     for s in seeds:
         cik = str(s.get("cik", "")).split(".")[0].strip().lstrip("0") or ""
         if not cik or cik in seen:
@@ -393,18 +495,41 @@ def pit_universe(theme: str, asof: str, fetch=None, max_pages: int = 20,
         n_seeds += 1
         if sleep:
             time.sleep(sleep)
-        probe = probe_fn(cik, asof)
+        probe_evidence = {}
+        try:
+            if use_default_probe:
+                probe = cik_periodic_asof(cik, asof, fetch=fetch, sleep=sleep,
+                                          evidence=probe_evidence)
+            else:
+                probe = probe_fn(cik, asof)
+                probe_evidence = {"outcome": "unavailable", "work": [stage_work(
+                    "periodic_probe", cik, status="unavailable", reason="missing_probe_evidence")]}
+        except Exception:
+            probe = None
+            probe_evidence["outcome"] = "unavailable"
+            probe_evidence.setdefault("work", []).append(stage_work(
+                "periodic_probe", cik, status="unavailable", reason="probe_failed"))
+        work.extend(probe_evidence.get("work", []))
+        identity = probe_evidence.get("identity", {})
+        work.extend(identity.get("work", []))
+        identities.append({"cik": cik, **probe_evidence})
         if probe is None:
-            continue  # not a periodic filer on/before asof -> excluded (or fetch failed)
+            if probe_evidence.get("outcome") != "no_periodic_observed":
+                n_unavailable += 1
+            continue
         n_periodic += 1
-        # TRADABILITY FILTER: drop + count ticker-less shells / financing-subs.
-        # The as-of ticker is survivorship-safe (dei:TradingSymbol persists for
-        # later-delisted names), so a missing ticker means a genuinely non-trading
-        # entity, not just a since-delisted one.
+        # Preserve the existing output selection while recording unresolved identity.
+        # A missing symbol is unavailable evidence, never proof of nontrading.
         ticker = str(probe.get("ticker", "") or "").strip()
         if not ticker:
             n_dropped_no_ticker += 1
+            work.append(stage_work("symbol_identity", cik, status="unavailable",
+                                   reason="symbol_evidence_unavailable"))
             continue
+        if not identity.get("pit_proven", False):
+            n_unproved += 1
+            work.append(stage_work("symbol_identity", cik, status="unavailable",
+                                   reason="historical_identity_unproved"))
         row = dict(probe)
         row["ticker"] = ticker.upper()
         # Preserve the recall channel the seed carried (sic_reverse today; the union
@@ -414,12 +539,21 @@ def pit_universe(theme: str, asof: str, fetch=None, max_pages: int = 20,
         if not row.get("name"):
             row["name"] = str(s.get("name", "") or "")
         out.append(row)
+    out = StageRows(out, stage="pit_universe", work=work,
+                    upstream=[rows_completion(seeds)],
+                    reasons=["historical_seed_coverage_unproved"])
+    out.completion["asof"] = asof
+    out.completion["identities"] = identities
+    out.completion["coverage_scope"] = "current_sic_seed_and_observed_submissions"
     if return_stats:
         stats = {
             "seeds": n_seeds,
             "periodic_filers": n_periodic,
             "dropped_no_asof_ticker": n_dropped_no_ticker,
             "kept": len(out),
+            "unavailable_probes": n_unavailable,
+            "unproved_historical_symbols": n_unproved,
+            "completion": out.completion,
         }
         return out, stats
     return out
@@ -427,6 +561,8 @@ def pit_universe(theme: str, asof: str, fetch=None, max_pages: int = 20,
 
 def _selftest() -> None:
     """Offline (mock/guarded) PIT-universe unit assertions. No network."""
+    from make_fixtures import source36_pit_submissions
+    submissions = source36_pit_submissions()
 
     # ----- _is_periodic: periodic-form prefix matcher --------------------------
     assert _is_periodic("10-K") and _is_periodic("10-Q"), "10-K/10-Q are periodic"
@@ -467,10 +603,7 @@ def _selftest() -> None:
 
     # (A) A CIK whose ONLY filing is a single 10-K BEFORE asof -> INCLUDED. It also
     #     has no periodic filing after asof -> delisted_after_asof flag True (kept).
-    sub_only_before = {
-        "name": "ONLY BEFORE CO", "tickers": ["OBC"],
-        "filings": {"recent": {"form": ["10-K"], "filingDate": ["2018-04-01"]}, "files": []},
-    }
+    sub_only_before = submissions['sub_only_before']
     def _fetch_A(url, params=None, timeout=20):
         return _Resp(sub_only_before)
     rA = cik_periodic_asof("0000111111", asof, fetch=_fetch_A)
@@ -481,11 +614,7 @@ def _selftest() -> None:
         "only-before filer with nothing after asof -> delisted_after_asof True (still KEPT)")
 
     # (B) A CIK whose FIRST filing is AFTER asof -> EXCLUDED (was not a filer yet).
-    sub_only_after = {
-        "name": "FUTURE CO", "tickers": ["FUT"],
-        "filings": {"recent": {"form": ["10-K", "10-Q"],
-                               "filingDate": ["2021-03-15", "2021-08-10"]}, "files": []},
-    }
+    sub_only_after = submissions['sub_only_after']
     def _fetch_B(url, params=None, timeout=20):
         return _Resp(sub_only_after)
     rB = cik_periodic_asof("0000222222", asof, fetch=_fetch_B)
@@ -493,12 +622,7 @@ def _selftest() -> None:
 
     # (C) A later-DELISTED filer: filed before asof, then stopped (last 10-K = 2019)
     #     -> INCLUDED and NOT dropped (delisted_after_asof True). The whole point.
-    sub_delisted = {
-        "name": "BLEW UP INC", "tickers": ["BUI"],
-        "filings": {"recent": {"form": ["10-K", "10-Q", "10-K"],
-                               "filingDate": ["2017-03-01", "2018-08-01", "2019-03-01"]},
-                    "files": []},
-    }
+    sub_delisted = submissions['sub_delisted']
     def _fetch_C(url, params=None, timeout=20):
         return _Resp(sub_delisted)
     rC = cik_periodic_asof("0000333333", asof, fetch=_fetch_C)
@@ -507,12 +631,7 @@ def _selftest() -> None:
     assert rC["latest_filing_asof"] == "2019-03-01", f"latest<=asof for delisted: {rC}"
 
     # (D) A still-active filer (kept filing AFTER asof) -> delisted_after_asof False.
-    sub_active = {
-        "name": "STILL HERE CORP", "tickers": ["SHC"],
-        "filings": {"recent": {"form": ["10-K", "10-K", "10-K"],
-                               "filingDate": ["2019-03-01", "2021-03-01", "2023-03-01"]},
-                    "files": []},
-    }
+    sub_active = submissions['sub_active']
     def _fetch_D(url, params=None, timeout=20):
         return _Resp(sub_active)
     rD = cik_periodic_asof("0000444444", asof, fetch=_fetch_D)
@@ -521,13 +640,7 @@ def _selftest() -> None:
 
     # (E) Overflow "files" shard: the qualifying first 10-K lives ONLY in a shard
     #     (recent has only post-asof + non-periodic forms). Must still be INCLUDED.
-    sub_shard_main = {
-        "name": "OLD TIMER CO", "tickers": ["OTC"],
-        "filings": {
-            "recent": {"form": ["8-K", "10-K"], "filingDate": ["2020-01-05", "2022-03-01"]},
-            "files": [{"name": "CIK0000555555-submissions-001.json"}],
-        },
-    }
+    sub_shard_main = submissions['sub_shard_main']
     shard_payload = {"form": ["10-K", "10-Q"], "filingDate": ["2010-03-01", "2011-08-01"]}
     def _fetch_E(url, params=None, timeout=20):
         if "submissions-001" in url:
@@ -573,7 +686,7 @@ def _selftest() -> None:
     # ----- FIX 2: cik_trading_symbol_asof, PIT ticker resolution (mock fetch) --
     # (G1) PRIMARY: a CIK with a dei:TradingSymbol fact filed<=asof resolves to that
     #      symbol (survivorship-safe; persists even for later-delisted names).
-    ts_payload = {"units": {"USD": [
+    ts_payload = {"cik": 777777, "taxonomy": "dei", "tag": "TradingSymbol", "units": {"USD": [
         {"val": "KEEP", "filed": "2020-03-15", "end": "2019-12-31"}]}}
     def _fetch_ts(url, params=None, timeout=20):
         if "TradingSymbol" in url:
@@ -586,7 +699,7 @@ def _selftest() -> None:
     #      None (a ticker-less shell / financing-sub; the universe drops + counts it).
     def _fetch_ts_none(url, params=None, timeout=20):
         if "TradingSymbol" in url:
-            return _Resp({"units": {}})  # no facts at all
+            return _Resp({"cik": 888888, "taxonomy": "dei", "tag": "TradingSymbol", "units": {}})  # no facts at all
         return _Resp({}, status=404)
     assert cik_trading_symbol_asof("0000888888", asof, fetch=_fetch_ts_none) is None, (
         "a ticker-less shell (no TradingSymbol, no current ticker) must NOT resolve")
@@ -595,7 +708,7 @@ def _selftest() -> None:
     #      ticker (still-listed name) -> resolves via the current-ticker fallback.
     def _fetch_ts_fallback(url, params=None, timeout=20):
         if "TradingSymbol" in url:
-            return _Resp({"units": {}})
+            return _Resp({"cik": 999999, "taxonomy": "dei", "tag": "TradingSymbol", "units": {}})
         return _Resp({}, status=404)
     sym_fb = cik_trading_symbol_asof(
         "0000999999", asof, fetch=_fetch_ts_fallback, submissions_tickers=["nasdaqsym"])
@@ -604,7 +717,7 @@ def _selftest() -> None:
     # (G4) DELISTED-AS-OF-T: dei:TradingSymbol fact present as-of T but the entity
     #      later delisted (current submissions tickers EMPTY). The PRIMARY path still
     #      resolves the as-of symbol -> KEPT. This is the survivorship-safe core.
-    ts_delisted = {"units": {"USD": [
+    ts_delisted = {"cik": 1010101, "taxonomy": "dei", "tag": "TradingSymbol", "units": {"USD": [
         {"val": "GONE", "filed": "2019-03-15", "end": "2018-12-31"}]}}
     def _fetch_ts_delisted(url, params=None, timeout=20):
         if "TradingSymbol" in url:
@@ -624,7 +737,9 @@ def _selftest() -> None:
     #   111 only-before, tradable -> INCLUDED; 222 first-after-asof -> EXCLUDED;
     #   333 later-delisted, tradable (as-of ticker) -> INCLUDED (not dropped);
     #   444 periodic filer but TICKER-LESS shell (no as-of ticker) -> DROPPED+counted.
-    shell_probe = dict(rA, cik="444", name="155 EAST TROPICANA FINANCE CORP", ticker="")
+    from make_fixtures import source34_scenarios
+    _shell = source34_scenarios()["shell"]
+    shell_probe = dict(rA, cik="444", name=_shell["name"], ticker="")
     probe_table = {
         "111": dict(rA, cik="111"),       # ticker resolved via fallback -> "OBC"
         "222": None,
@@ -635,7 +750,7 @@ def _selftest() -> None:
         {"cik": "111", "name": "ONLY BEFORE CO", "recall_channel": "sic_reverse"},
         {"cik": "222", "name": "FUTURE CO", "recall_channel": "sic_reverse"},
         {"cik": "333", "name": "BLEW UP INC", "recall_channel": "sic_reverse"},
-        {"cik": "444", "name": "155 EAST TROPICANA FINANCE CORP", "recall_channel": "sic_reverse"},
+        {"cik": "444", "name": _shell["name"], "recall_channel": "sic_reverse"},
         {"cik": "0000000333", "name": "BLEW UP INC DUPE", "recall_channel": "sic_reverse"},  # dupe of 333
     ]
     uni, stats = pit_universe(

@@ -1,0 +1,2431 @@
+{
+  "event": [
+    {
+      "name": "complete",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "large",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "band": "deep",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 3,
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "band": "large",
+          "screening_decision": "excluded_existing_large_band",
+          "evidence_complete": false
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "1",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "complete",
+      "expected_status": "complete",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": false
+    },
+    {
+      "name": "source_partial",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "large",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "band": "deep",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 3,
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "band": "large",
+          "screening_decision": "excluded_existing_large_band",
+          "evidence_complete": false
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "1",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "partial",
+      "expected_status": "partial",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": false
+    },
+    {
+      "name": "missing_scan",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "large",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "band": "deep",
+          "screening_decision": "retained",
+          "evidence_complete": false
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 3,
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "band": "large",
+          "screening_decision": "excluded_existing_large_band",
+          "evidence_complete": false
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "rejected": "False",
+          "kf_scanned": "False",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "1",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "complete",
+      "expected_status": "partial",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": false
+    },
+    {
+      "name": "unknown_rejected_identity",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "large",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "band": "deep",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 3,
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "band": "large",
+          "screening_decision": "excluded_existing_large_band",
+          "evidence_complete": false
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "1",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "complete",
+      "expected_status": "partial",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": false
+    },
+    {
+      "name": "unknown_band",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "unknown",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "large",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "band": "unknown",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 3,
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "band": "large",
+          "screening_decision": "excluded_existing_large_band",
+          "evidence_complete": false
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "1",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "complete",
+      "expected_status": "partial",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": false
+    },
+    {
+      "name": "missing_decision",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "large",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "band": "deep",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "1",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "complete",
+      "expected_status": "complete",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": true
+    },
+    {
+      "name": "wrong_csv_identity",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "large",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "band": "deep",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 3,
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "band": "large",
+          "screening_decision": "excluded_existing_large_band",
+          "evidence_complete": false
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "UNRELATED",
+          "cik": "0000000001",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "1",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "complete",
+      "expected_status": "complete",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": true
+    },
+    {
+      "name": "wrong_csv_rejection",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "large",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "band": "deep",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 3,
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "band": "large",
+          "screening_decision": "excluded_existing_large_band",
+          "evidence_complete": false
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "1",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "complete",
+      "expected_status": "complete",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": true
+    },
+    {
+      "name": "duplicate_csv_index",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "large",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "band": "deep",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 3,
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "band": "large",
+          "screening_decision": "excluded_existing_large_band",
+          "evidence_complete": false
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "0",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "complete",
+      "expected_status": "complete",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": true
+    },
+    {
+      "name": "zero_cik",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000000",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "large",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000000",
+          "band": "deep",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 3,
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "band": "large",
+          "screening_decision": "excluded_existing_large_band",
+          "evidence_complete": false
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "SYNTHA",
+          "cik": "0000000000",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "1",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "complete",
+      "expected_status": "complete",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": true
+    },
+    {
+      "name": "unproved_large_exclusion",
+      "source": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "name": "AcmeCorp Synthetic A",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "name": "AcmeCorp Synthetic B",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "watch",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "name": "AcmeCorp Synthetic C",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "deep",
+          "mktcap": 1000000
+        },
+        {
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "name": "AcmeCorp Synthetic D",
+          "event_type": "spinoff",
+          "catalyst": "Synthetic Form 10-12B event",
+          "file_date": "2000-12-10",
+          "form": "10-12B",
+          "band": "unknown",
+          "mktcap": 1000000
+        }
+      ],
+      "decisions": [
+        {
+          "input_index": 0,
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "band": "deep",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 1,
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "band": "watch",
+          "screening_decision": "retained",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 2,
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "band": "deep",
+          "screening_decision": "rejected_existing_policy",
+          "evidence_complete": true
+        },
+        {
+          "input_index": 3,
+          "ticker": "SYNTHD",
+          "cik": "0000000004",
+          "band": "large",
+          "screening_decision": "excluded_existing_large_band",
+          "evidence_complete": false
+        }
+      ],
+      "screened": [
+        {
+          "input_index": "0",
+          "ticker": "SYNTHA",
+          "cik": "0000000001",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "1",
+          "ticker": "SYNTHB",
+          "cik": "0000000002",
+          "rejected": "False",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        },
+        {
+          "input_index": "2",
+          "ticker": "SYNTHC",
+          "cik": "0000000003",
+          "rejected": "True",
+          "kf_scanned": "True",
+          "disclosure_review_required": "False"
+        }
+      ],
+      "source_status": "complete",
+      "expected_status": "complete",
+      "expected_indices": [
+        0,
+        1
+      ],
+      "error": true
+    },
+    {
+      "name": "complete_empty",
+      "source": [],
+      "decisions": [],
+      "screened": [],
+      "source_status": "complete",
+      "expected_status": "complete",
+      "expected_indices": [],
+      "error": false
+    }
+  ],
+  "html": [
+    {
+      "name": "valid",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "complete",
+      "records": 1
+    },
+    {
+      "name": "unrelated_table",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table><table><tr><td>Other content</td></tr></table>",
+      "status": "complete",
+      "records": 1
+    },
+    {
+      "name": "ambiguous_tables",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table><table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "unavailable",
+      "records": 0
+    },
+    {
+      "name": "duplicate_header",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th><th>Value</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "unavailable",
+      "records": 0
+    },
+    {
+      "name": "header_only",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr></table>",
+      "status": "unavailable",
+      "records": 0
+    },
+    {
+      "name": "explicit_zero",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td>No results found</td></tr></table>",
+      "status": "complete",
+      "records": 0
+    },
+    {
+      "name": "unclosed",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr>",
+      "status": "unavailable",
+      "records": 0
+    },
+    {
+      "name": "next_page",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table><a href=\"/latest-cluster-buys?page=2\" rel=\"next\">Next</a>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "zero_with_next",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td>No results found</td></tr></table><a href=\"?page=2\" rel=\"next\">Next</a>",
+      "status": "partial",
+      "records": 0
+    },
+    {
+      "name": "zero_with_data",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td>No results found</td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 0
+    },
+    {
+      "name": "money_garbage",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHB</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>garbage$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "money_negative",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHB</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>-$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "money_bad_comma",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHB</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>$1,00</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "money_empty",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHB</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "filing_suffix",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 nonsense</td><td>2000-12-14</td><td>SYNTHB</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "date_invalid",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-02-30</td><td>SYNTHB</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "future_filing",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2001-01-02</td><td>2000-12-14</td><td>SYNTHB</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "trade_after_filing",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-16</td><td>SYNTHB</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "ticker_unicode",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>K</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "ticker_path",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>../SYNTH</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "insider_negative",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHB</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>-2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "trade_unknown",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHB</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>Q - Unknown</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "valid_exclusion",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>1</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "complete",
+      "records": 0
+    },
+    {
+      "name": "invalid_below_threshold",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>1</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>N/A</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 0
+    },
+    {
+      "name": "truncated_sibling",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td></tr></table>",
+      "status": "partial",
+      "records": 1
+    },
+    {
+      "name": "reported_zero",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$0</td><td></td><td></td><td></td><td></td></tr></table>",
+      "status": "complete",
+      "records": 1
+    }
+  ],
+  "pit": [
+    {
+      "name": "valid_integer_cik",
+      "payload": {
+        "cik": 1,
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": true,
+      "expected": "SYNTHLATEST"
+    },
+    {
+      "name": "valid_string_'1'",
+      "payload": {
+        "cik": "1",
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": true,
+      "expected": "SYNTHLATEST"
+    },
+    {
+      "name": "valid_string_'0000000001'",
+      "payload": {
+        "cik": "0000000001",
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": true,
+      "expected": "SYNTHLATEST"
+    },
+    {
+      "name": "valid_string_' 0000000001 '",
+      "payload": {
+        "cik": " 0000000001 ",
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": true,
+      "expected": "SYNTHLATEST"
+    },
+    {
+      "name": "missing_cik",
+      "payload": {
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "missing_taxonomy",
+      "payload": {
+        "cik": 1,
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "missing_tag",
+      "payload": {
+        "cik": 1,
+        "taxonomy": "dei",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_0",
+      "payload": {
+        "cik": null,
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_1",
+      "payload": {
+        "cik": true,
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_2",
+      "payload": {
+        "cik": 1.0,
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_3",
+      "payload": {
+        "cik": 0,
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_4",
+      "payload": {
+        "cik": -1,
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_5",
+      "payload": {
+        "cik": "1.0",
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_6",
+      "payload": {
+        "cik": "+1",
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_7",
+      "payload": {
+        "cik": "10000000000",
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_8",
+      "payload": {
+        "cik": "１",
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_9",
+      "payload": {
+        "cik": [],
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_10",
+      "payload": {
+        "cik": {},
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_cik_11",
+      "payload": {
+        "cik": 2,
+        "taxonomy": "dei",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_taxonomy_0",
+      "payload": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_taxonomy_1",
+      "payload": {
+        "cik": 1,
+        "taxonomy": "DEI",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_taxonomy_2",
+      "payload": {
+        "cik": 1,
+        "taxonomy": " dei ",
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_taxonomy_3",
+      "payload": {
+        "cik": 1,
+        "taxonomy": null,
+        "tag": "TradingSymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_tag_0",
+      "payload": {
+        "cik": 1,
+        "taxonomy": "dei",
+        "tag": "EntityRegistrantName",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_tag_1",
+      "payload": {
+        "cik": 1,
+        "taxonomy": "dei",
+        "tag": "tradingsymbol",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_tag_2",
+      "payload": {
+        "cik": 1,
+        "taxonomy": "dei",
+        "tag": " TradingSymbol ",
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    },
+    {
+      "name": "invalid_tag_3",
+      "payload": {
+        "cik": 1,
+        "taxonomy": "dei",
+        "tag": null,
+        "units": {
+          "pure": [
+            {
+              "val": "SYNTHPAST",
+              "filed": "2000-01-01"
+            },
+            {
+              "val": "SYNTHLATEST",
+              "filed": "2000-12-15"
+            },
+            {
+              "val": "SYNTHFUTURE",
+              "filed": "2001-01-02"
+            }
+          ]
+        }
+      },
+      "proven": false,
+      "expected": "SYNTHFALLBACK"
+    }
+  ],
+  "policy": [
+    {
+      "name": "fcf_threshold",
+      "report": {
+        "ticker": "SYNTHA",
+        "rating": "买入",
+        "confidence": 55,
+        "one_liner": "Synthetic policy boundary.",
+        "is_misrecall": false,
+        "top_long": "Synthetic measured upside.",
+        "top_short": "Synthetic downside.",
+        "killflag_notes": "Synthetic screening outcome.",
+        "margin_of_safety_pct": 30,
+        "mos_basis": "fcf_cap",
+        "catalyst": "Synthetic verified catalyst",
+        "eligibility": {
+          "buy_eligible": true,
+          "active_mos_pct": 30,
+          "tier3_load_bearing": false
+        },
+        "report_md": "```rating\nrating: 买入\nconfidence: 55\nverdict_date: 2001-01-01\nmos_basis: fcf_cap\nmos_pct: 30\nbuy_eligible: true\nkillflag_count: 0\n```\n"
+      },
+      "parsed": {
+        "buy_eligible": true,
+        "mos_pct": 30,
+        "killflag_count": 0
+      },
+      "accepted": true
+    },
+    {
+      "name": "nav_threshold",
+      "report": {
+        "ticker": "SYNTHA",
+        "rating": "买入",
+        "confidence": 55,
+        "one_liner": "Synthetic policy boundary.",
+        "is_misrecall": false,
+        "top_long": "Synthetic measured upside.",
+        "top_short": "Synthetic downside.",
+        "killflag_notes": "Synthetic screening outcome.",
+        "margin_of_safety_pct": null,
+        "mos_basis": "nav",
+        "catalyst": "Synthetic verified catalyst",
+        "eligibility": {
+          "buy_eligible": true,
+          "active_mos_pct": 30,
+          "tier3_load_bearing": false
+        },
+        "report_md": "```rating\nrating: 买入\nconfidence: 55\nverdict_date: 2001-01-01\nmos_basis: nav\nmos_pct: 30\nbuy_eligible: true\nkillflag_count: 0\n```\n"
+      },
+      "parsed": {
+        "buy_eligible": true,
+        "mos_pct": 30,
+        "killflag_count": 0
+      },
+      "accepted": true
+    },
+    {
+      "name": "catalyst_below_threshold",
+      "report": {
+        "ticker": "SYNTHA",
+        "rating": "买入",
+        "confidence": 55,
+        "one_liner": "Synthetic policy boundary.",
+        "is_misrecall": false,
+        "top_long": "Synthetic measured upside.",
+        "top_short": "Synthetic downside.",
+        "killflag_notes": "Synthetic screening outcome.",
+        "margin_of_safety_pct": 29.99,
+        "mos_basis": "fcf_cap",
+        "catalyst": "Synthetic verified catalyst",
+        "eligibility": {
+          "buy_eligible": true,
+          "active_mos_pct": 29.99,
+          "tier3_load_bearing": false
+        },
+        "report_md": "```rating\nrating: 买入\nconfidence: 55\nverdict_date: 2001-01-01\nmos_basis: fcf_cap\nmos_pct: 29.99\nbuy_eligible: true\nkillflag_count: 0\n```\n"
+      },
+      "parsed": {
+        "buy_eligible": true,
+        "mos_pct": 29.99,
+        "killflag_count": 0
+      },
+      "accepted": false
+    },
+    {
+      "name": "nav_below_threshold",
+      "report": {
+        "ticker": "SYNTHA",
+        "rating": "买入",
+        "confidence": 55,
+        "one_liner": "Synthetic policy boundary.",
+        "is_misrecall": false,
+        "top_long": "Synthetic measured upside.",
+        "top_short": "Synthetic downside.",
+        "killflag_notes": "Synthetic screening outcome.",
+        "margin_of_safety_pct": null,
+        "mos_basis": "nav",
+        "catalyst": "Synthetic verified catalyst",
+        "eligibility": {
+          "buy_eligible": true,
+          "active_mos_pct": 29.99,
+          "tier3_load_bearing": false
+        },
+        "report_md": "```rating\nrating: 买入\nconfidence: 55\nverdict_date: 2001-01-01\nmos_basis: nav\nmos_pct: 29.99\nbuy_eligible: true\nkillflag_count: 0\n```\n"
+      },
+      "parsed": {
+        "buy_eligible": true,
+        "mos_pct": 29.99,
+        "killflag_count": 0
+      },
+      "accepted": false
+    },
+    {
+      "name": "blocked_eligibility",
+      "report": {
+        "ticker": "SYNTHA",
+        "rating": "买入",
+        "confidence": 55,
+        "one_liner": "Synthetic policy boundary.",
+        "is_misrecall": false,
+        "top_long": "Synthetic measured upside.",
+        "top_short": "Synthetic downside.",
+        "killflag_notes": "Synthetic screening outcome.",
+        "margin_of_safety_pct": 40,
+        "mos_basis": "fcf_cap",
+        "catalyst": "Synthetic verified catalyst",
+        "eligibility": {
+          "buy_eligible": false,
+          "active_mos_pct": 40,
+          "tier3_load_bearing": false
+        },
+        "report_md": "```rating\nrating: 买入\nconfidence: 55\nverdict_date: 2001-01-01\nmos_basis: fcf_cap\nmos_pct: 40\nbuy_eligible: false\nkillflag_count: 0\n```\n"
+      },
+      "parsed": {
+        "buy_eligible": false,
+        "mos_pct": 40,
+        "killflag_count": 0
+      },
+      "accepted": false
+    },
+    {
+      "name": "missing_mos",
+      "report": {
+        "ticker": "SYNTHA",
+        "rating": "买入",
+        "confidence": 55,
+        "one_liner": "Synthetic policy boundary.",
+        "is_misrecall": false,
+        "top_long": "Synthetic measured upside.",
+        "top_short": "Synthetic downside.",
+        "killflag_notes": "Synthetic screening outcome.",
+        "margin_of_safety_pct": null,
+        "mos_basis": "fcf_cap",
+        "catalyst": "Synthetic verified catalyst",
+        "eligibility": {
+          "buy_eligible": true,
+          "active_mos_pct": null,
+          "tier3_load_bearing": false
+        },
+        "report_md": "```rating\nrating: 买入\nconfidence: 55\nverdict_date: 2001-01-01\nmos_basis: fcf_cap\nmos_pct: null\nbuy_eligible: true\nkillflag_count: 0\n```\n"
+      },
+      "parsed": {
+        "buy_eligible": true,
+        "mos_pct": null,
+        "killflag_count": 0
+      },
+      "accepted": false
+    },
+    {
+      "name": "abstain_buy",
+      "report": {
+        "ticker": "SYNTHA",
+        "rating": "买入",
+        "confidence": 55,
+        "one_liner": "Synthetic policy boundary.",
+        "is_misrecall": false,
+        "top_long": "Synthetic measured upside.",
+        "top_short": "Synthetic downside.",
+        "killflag_notes": "Synthetic screening outcome.",
+        "margin_of_safety_pct": null,
+        "mos_basis": "abstain",
+        "catalyst": "Synthetic verified catalyst",
+        "eligibility": {
+          "buy_eligible": true,
+          "active_mos_pct": 40,
+          "tier3_load_bearing": false
+        },
+        "report_md": "```rating\nrating: 买入\nconfidence: 55\nverdict_date: 2001-01-01\nmos_basis: abstain\nmos_pct: 40\nbuy_eligible: true\nkillflag_count: 0\n```\n"
+      },
+      "parsed": {
+        "buy_eligible": true,
+        "mos_pct": 40,
+        "killflag_count": 0
+      },
+      "accepted": false
+    },
+    {
+      "name": "tier3_buy",
+      "report": {
+        "ticker": "SYNTHA",
+        "rating": "买入",
+        "confidence": 55,
+        "one_liner": "Synthetic policy boundary.",
+        "is_misrecall": false,
+        "top_long": "Synthetic measured upside.",
+        "top_short": "Synthetic downside.",
+        "killflag_notes": "Synthetic screening outcome.",
+        "margin_of_safety_pct": 40,
+        "mos_basis": "fcf_cap",
+        "catalyst": "Synthetic verified catalyst",
+        "eligibility": {
+          "buy_eligible": true,
+          "active_mos_pct": 40,
+          "tier3_load_bearing": true
+        },
+        "report_md": "```rating\nrating: 买入\nconfidence: 55\nverdict_date: 2001-01-01\nmos_basis: fcf_cap\nmos_pct: 40\nbuy_eligible: true\nkillflag_count: 0\n```\n"
+      },
+      "parsed": {
+        "buy_eligible": true,
+        "mos_pct": 40,
+        "killflag_count": 0
+      },
+      "accepted": false
+    },
+    {
+      "name": "killflag_buy",
+      "report": {
+        "ticker": "SYNTHA",
+        "rating": "买入",
+        "confidence": 55,
+        "one_liner": "Synthetic policy boundary.",
+        "is_misrecall": false,
+        "top_long": "Synthetic measured upside.",
+        "top_short": "Synthetic downside.",
+        "killflag_notes": "Synthetic screening outcome.",
+        "margin_of_safety_pct": 40,
+        "mos_basis": "fcf_cap",
+        "catalyst": "Synthetic verified catalyst",
+        "eligibility": {
+          "buy_eligible": true,
+          "active_mos_pct": 40,
+          "tier3_load_bearing": false
+        },
+        "report_md": "```rating\nrating: 买入\nconfidence: 55\nverdict_date: 2001-01-01\nmos_basis: fcf_cap\nmos_pct: 40\nbuy_eligible: true\nkillflag_count: 1\n```\n"
+      },
+      "parsed": {
+        "buy_eligible": true,
+        "mos_pct": 40,
+        "killflag_count": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "watch_catalyst",
+      "report": {
+        "ticker": "SYNTHA",
+        "rating": "观察",
+        "confidence": 55,
+        "one_liner": "Synthetic policy boundary.",
+        "is_misrecall": false,
+        "top_long": "Synthetic measured upside.",
+        "top_short": "Synthetic downside.",
+        "killflag_notes": "Synthetic screening outcome.",
+        "margin_of_safety_pct": 20,
+        "mos_basis": "fcf_cap",
+        "catalyst": "Synthetic verified catalyst",
+        "eligibility": {
+          "buy_eligible": true,
+          "active_mos_pct": 20,
+          "tier3_load_bearing": false
+        },
+        "report_md": "```rating\nrating: 观察\nconfidence: 55\nverdict_date: 2001-01-01\nmos_basis: fcf_cap\nmos_pct: 20\nbuy_eligible: true\nkillflag_count: 0\n```\n"
+      },
+      "parsed": {
+        "buy_eligible": true,
+        "mos_pct": 20,
+        "killflag_count": 0
+      },
+      "accepted": true
+    }
+  ],
+  "asof": "2001-01-01",
+  "request_cik": "0000000001",
+  "response_url": "https://openinsider.com/latest-cluster-buys",
+  "tamper_targets": [
+    "source",
+    "cheap",
+    "admitted"
+  ]
+}

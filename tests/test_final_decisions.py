@@ -25,8 +25,9 @@ def test_authoritative_unfinished_rating_cannot_replace_ranking(state, monkeypat
     run = make_run(state, report)
     output = run / 'RANKING.md'
     output.write_text(CASE['prior_output'], encoding='utf-8')
-    with pytest.raises(ValueError, match='rating|unfinished|decision'):
-        invoke('rank', ['--input', str(run)], monkeypatch)
+    before = output.read_bytes()
+    assert invoke('rank', ['--input', str(run)], monkeypatch) == 2
+    assert output.read_bytes() == before
     assert output.read_text(encoding='utf-8') == CASE['prior_output']
 
 
@@ -53,15 +54,22 @@ def test_report_risks_survive_verdict_emission(state):
 
 def test_refinalizing_preserves_timestamp_locked_date(state, monkeypatch):
     import _common
+    from filter_by_sic import read_stage_receipt
     run = make_run(state, CASE['report'])
     monkeypatch.setattr(_common, 'today', lambda: CASE['later_date'])
-    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 0
+    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 2
     output = run / 'deepdive_verdicts.json'
     first = json.loads(output.read_text(encoding='utf-8'))
     assert first[0]['verdict_date'] == CASE['date']
     assert len(first[0]['report_sha256']) == 64
+    assert read_stage_receipt(output, 1)['status'] != 'complete'
+    sealed = [output, Path(str(output) + '.stage.json'),
+              run / 'finalization.json', run / 'finalization.json.stage.json']
+    snapshots = {path: path.read_bytes() for path in sealed}
     monkeypatch.setattr(_common, 'today', lambda: CASE['date'])
-    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 0
+    with pytest.raises(FileExistsError, match='already|sealed'):
+        invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch)
+    assert {path: path.read_bytes() for path in sealed} == snapshots
     assert json.loads(output.read_text(encoding='utf-8')) == first
 
 
@@ -73,32 +81,46 @@ def test_prior_verdict_output_is_not_a_deepdive_candidate(state):
 
 
 @pytest.mark.parametrize('survivors', CASE['empty_survivors'])
-def test_completed_empty_gate2_result_resolves_every_candidate(state, monkeypatch, survivors):
+def test_unreceipted_empty_survivors_leave_candidates_incomplete(state, monkeypatch, survivors):
     run = make_run(state)
     (run / 'all_candidates.json').write_text(json.dumps([CASE['candidate']]), encoding='utf-8')
     (run / 'candidates_gate2_survivors.json').write_text(json.dumps(survivors), encoding='utf-8')
-    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 0
-    assert json.loads((run / 'deepdive_verdicts.json').read_text(encoding='utf-8')) == []
+    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 2
+    completion = json.loads((run / 'finalization.json').read_text(encoding='utf-8'))
+    assert completion['status'] != 'complete'
+    assert completion['deep_tickers'] == completion['missing_reports'] == [CASE['ticker']]
+    assert not (run / 'deepdive_verdicts.json').exists()
+    assert not (run / 'deepdive_verdicts.json.stage.json').exists()
 
 
 @pytest.mark.parametrize('content', CASE['invalid_candidates'])
 def test_invalid_candidate_evidence_cannot_disable_completeness(state, monkeypatch, content):
+    from filter_by_sic import read_stage_receipt
     run = make_run(state, CASE['report'])
     (run / 'all_candidates.json').write_text(content, encoding='utf-8')
     output = run / 'deepdive_verdicts.json'
     output.write_text(CASE['prior_output'], encoding='utf-8')
-    with pytest.raises(ValueError, match='candidate|JSON|schema|universe'):
-        invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch)
+    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 2
     assert output.read_text(encoding='utf-8') == CASE['prior_output']
+    finalization = run / 'finalization.json'
+    completion = json.loads(finalization.read_text(encoding='utf-8'))
+    assert completion['status'] == read_stage_receipt(finalization, 0)['status'] == 'invalid'
+    assert completion['work'][0]['reason'] == 'invalid_or_unreadable_input'
+    assert not (run / 'deepdive_verdicts.json.stage.json').exists()
 
 
 @pytest.mark.parametrize('content', CASE['invalid_candidates'])
 def test_invalid_survivor_evidence_is_not_an_empty_completed_gate(state, monkeypatch, content):
     run = make_run(state)
     (run / 'all_candidates.json').write_text(json.dumps([CASE['candidate']]), encoding='utf-8')
-    (run / 'candidates_gate2_survivors.json').write_text(content, encoding='utf-8')
-    with pytest.raises(ValueError, match='candidate|JSON|schema|universe'):
-        invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch)
+    survivors = run / 'candidates_gate2_survivors.json'
+    survivors.write_text(content, encoding='utf-8')
+    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 2
+    completion = json.loads((run / 'finalization.json').read_text(encoding='utf-8'))
+    assert completion['status'] != 'complete'
+    assert completion['deep_tickers'] == completion['missing_reports'] == [CASE['ticker']]
+    assert survivors.read_text(encoding='utf-8') == content
+    assert not (run / 'deepdive_verdicts.json').exists()
 
 
 def test_tracker_retains_finalizer_risks_and_date_evidence(state, monkeypatch):

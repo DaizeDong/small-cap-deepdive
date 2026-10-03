@@ -1,0 +1,941 @@
+{
+  "annual": [
+    {
+      "name": "matched",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 5000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        15000000
+      ],
+      "reason": null
+    },
+    {
+      "name": "zero",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 0,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        10000000
+      ],
+      "reason": null
+    },
+    {
+      "name": "both_zero",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 0,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 0,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        0
+      ],
+      "reason": null
+    },
+    {
+      "name": "cross_year",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "1999-01-01",
+          "end": "1999-12-31",
+          "val": 5000000,
+          "duration_days": 364,
+          "unit": "USD",
+          "filed": "2000-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null,
+        null
+      ],
+      "reason": "missing_or_ambiguous_annual_operand"
+    },
+    {
+      "name": "different_start",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "1999-12-01",
+          "end": "2000-12-31",
+          "val": 5000000,
+          "duration_days": 396,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "matching_annual_period_unproven"
+    },
+    {
+      "name": "short_period",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-10-01",
+          "end": "2000-12-31",
+          "val": 5000000,
+          "duration_days": 91,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "matching_annual_period_unproven"
+    },
+    {
+      "name": "end_only",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "end": "2000-12-31",
+          "val": 5000000
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "matching_annual_period_unproven"
+    },
+    {
+      "name": "missing",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [],
+      "values": [
+        null
+      ],
+      "reason": "missing_or_ambiguous_annual_operand"
+    },
+    {
+      "name": "duplicate",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 5000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        },
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 5000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "missing_or_ambiguous_annual_operand"
+    },
+    {
+      "name": "unit_conflict",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 5000000,
+          "duration_days": 365,
+          "unit": "shares",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "fact_identity_conflict:unit"
+    },
+    {
+      "name": "nonmonetary_unit",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "shares",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 5000000,
+          "duration_days": 365,
+          "unit": "shares",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "annual_sum_unit_not_usd"
+    },
+    {
+      "name": "nan",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": {
+            "special_number": "nan"
+          },
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "annual_sum_value_unavailable"
+    },
+    {
+      "name": "positive_infinity",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": {
+            "special_number": "inf"
+          },
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "annual_sum_value_unavailable"
+    },
+    {
+      "name": "negative_infinity",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": {
+            "special_number": "-inf"
+          },
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "annual_sum_value_unavailable"
+    },
+    {
+      "name": "boolean_true",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": true,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "annual_sum_value_unavailable"
+    },
+    {
+      "name": "boolean_false",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": false,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "annual_sum_value_unavailable"
+    },
+    {
+      "name": "oversized_integer",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "annual_sum_value_unavailable"
+    },
+    {
+      "name": "overflow",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 1e+308,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 1e+308,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        null
+      ],
+      "reason": "annual_sum_value_nonfinite"
+    },
+    {
+      "name": "newest_unmatched",
+      "left": [
+        {
+          "start": "1999-01-01",
+          "end": "1999-12-31",
+          "val": 10000000,
+          "duration_days": 364,
+          "unit": "USD",
+          "filed": "2000-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        },
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "1999-01-01",
+          "end": "1999-12-31",
+          "val": 5000000,
+          "duration_days": 364,
+          "unit": "USD",
+          "filed": "2000-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        15000000,
+        null
+      ],
+      "reason": null
+    },
+    {
+      "name": "reversed_input",
+      "left": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 10000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        },
+        {
+          "start": "1999-01-01",
+          "end": "1999-12-31",
+          "val": 10000000,
+          "duration_days": 364,
+          "unit": "USD",
+          "filed": "2000-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "right": [
+        {
+          "start": "2000-01-01",
+          "end": "2000-12-31",
+          "val": 5000000,
+          "duration_days": 365,
+          "unit": "USD",
+          "filed": "2001-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        },
+        {
+          "start": "1999-01-01",
+          "end": "1999-12-31",
+          "val": 5000000,
+          "duration_days": 364,
+          "unit": "USD",
+          "filed": "2000-02-01",
+          "fp": "FY",
+          "form": "10-K"
+        }
+      ],
+      "values": [
+        15000000,
+        15000000
+      ],
+      "reason": null
+    }
+  ],
+  "confidence_invalid": [
+    {
+      "name": "nan",
+      "value": {
+        "special_number": "nan"
+      }
+    },
+    {
+      "name": "positive_infinity",
+      "value": {
+        "special_number": "inf"
+      }
+    },
+    {
+      "name": "negative_infinity",
+      "value": {
+        "special_number": "-inf"
+      }
+    },
+    {
+      "name": "boolean_true",
+      "value": true
+    },
+    {
+      "name": "boolean_false",
+      "value": false
+    },
+    {
+      "name": "oversized_integer",
+      "value": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+    },
+    {
+      "name": "negative",
+      "value": -0.01
+    },
+    {
+      "name": "above_hundred",
+      "value": 100.01
+    },
+    {
+      "name": "invalid_text",
+      "value": "invalid"
+    },
+    {
+      "name": "object",
+      "value": {}
+    },
+    {
+      "name": "list",
+      "value": []
+    },
+    {
+      "name": "nan_text",
+      "value": "NaN"
+    },
+    {
+      "name": "infinity_text",
+      "value": "Infinity"
+    }
+  ],
+  "confidence_valid": [
+    {
+      "name": "zero",
+      "value": 0,
+      "fraction": 0
+    },
+    {
+      "name": "fraction",
+      "value": 0.7,
+      "fraction": 0.7
+    },
+    {
+      "name": "one",
+      "value": 1,
+      "fraction": 1
+    },
+    {
+      "name": "percent",
+      "value": 70,
+      "fraction": 0.7
+    },
+    {
+      "name": "hundred",
+      "value": 100,
+      "fraction": 1
+    },
+    {
+      "name": "fraction_text",
+      "value": "0.7",
+      "fraction": 0.7
+    },
+    {
+      "name": "percent_text",
+      "value": "70",
+      "fraction": 0.7
+    }
+  ],
+  "probability_invalid": [
+    {
+      "name": "nan",
+      "value": {
+        "special_number": "nan"
+      }
+    },
+    {
+      "name": "positive_infinity",
+      "value": {
+        "special_number": "inf"
+      }
+    },
+    {
+      "name": "negative_infinity",
+      "value": {
+        "special_number": "-inf"
+      }
+    },
+    {
+      "name": "boolean_true",
+      "value": true
+    },
+    {
+      "name": "boolean_false",
+      "value": false
+    },
+    {
+      "name": "oversized_integer",
+      "value": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+    },
+    {
+      "name": "negative",
+      "value": -0.01
+    },
+    {
+      "name": "above_one",
+      "value": 1.01
+    },
+    {
+      "name": "numeric_text",
+      "value": "0.7"
+    },
+    {
+      "name": "object",
+      "value": {}
+    },
+    {
+      "name": "null",
+      "value": null
+    },
+    {
+      "name": "missing",
+      "missing": true
+    }
+  ],
+  "omitted_confidence": [
+    null,
+    "",
+    "null",
+    "none"
+  ],
+  "bound": [
+    {
+      "name": "consistent_buy",
+      "report": {
+        "rating": "买入"
+      },
+      "error": null
+    },
+    {
+      "name": "independent_watch",
+      "report": {
+        "rating": "观察"
+      },
+      "error": null
+    },
+    {
+      "name": "ineligible_forged_buy",
+      "valuation_ineligible": true,
+      "report": {
+        "rating": "买入"
+      },
+      "error": "report_valuation_eligibility_mismatch"
+    },
+    {
+      "name": "eligible_claim_mismatch",
+      "report": {
+        "rating": "观察",
+        "eligible": false
+      },
+      "error": "report_valuation_eligibility_mismatch"
+    },
+    {
+      "name": "basis_mismatch",
+      "report": {
+        "rating": "观察",
+        "basis": "nav"
+      },
+      "error": "report_valuation_eligibility_mismatch"
+    },
+    {
+      "name": "mos_mismatch",
+      "report": {
+        "rating": "买入",
+        "mos": 40
+      },
+      "error": "report_valuation_mos_mismatch"
+    }
+  ],
+  "concepts": [
+    {
+      "name": "monetary_usd",
+      "concept": "NetIncomeLoss",
+      "unit": "USD",
+      "status": "complete"
+    },
+    {
+      "name": "monetary_shares",
+      "concept": "NetIncomeLoss",
+      "unit": "shares",
+      "status": "invalid"
+    },
+    {
+      "name": "monetary_per_share",
+      "concept": "NetIncomeLoss",
+      "unit": "USD/shares",
+      "status": "invalid"
+    },
+    {
+      "name": "monetary_eur",
+      "concept": "NetIncomeLoss",
+      "unit": "EUR",
+      "status": "invalid"
+    },
+    {
+      "name": "shares",
+      "concept": "CommonStockSharesOutstanding",
+      "unit": "shares",
+      "status": "complete"
+    },
+    {
+      "name": "shares_usd",
+      "concept": "CommonStockSharesOutstanding",
+      "unit": "USD",
+      "status": "invalid"
+    },
+    {
+      "name": "eps",
+      "concept": "EarningsPerShareBasic",
+      "unit": "USD/shares",
+      "status": "complete"
+    },
+    {
+      "name": "eps_usd",
+      "concept": "EarningsPerShareBasic",
+      "unit": "USD",
+      "status": "invalid"
+    }
+  ],
+  "concept_fact": {
+    "start": "2000-01-01",
+    "end": "2000-12-31",
+    "val": 10000000,
+    "duration_days": 365,
+    "unit": "USD",
+    "filed": "2001-02-01",
+    "fp": "FY",
+    "form": "10-K"
+  },
+  "display": [
+    {
+      "name": "null",
+      "value": null
+    },
+    {
+      "name": "zero",
+      "value": 0
+    },
+    {
+      "name": "positive",
+      "value": 2000000
+    },
+    {
+      "name": "negative",
+      "value": -2000000
+    }
+  ]
+}

@@ -1,0 +1,245 @@
+{
+  "resume_row": {
+    "ticker": "SYNTHA",
+    "cik": "9000000001",
+    "asof": "2025-01-01",
+    "year": "2025",
+    "theme": "synthetic machinery",
+    "series": {
+      "cash": []
+    }
+  },
+  "resume_invalid": [
+    {
+      "name": "malformed-json",
+      "content": "{"
+    },
+    {
+      "name": "object-envelope",
+      "content": "{}"
+    },
+    {
+      "name": "null-envelope",
+      "content": "null"
+    },
+    {
+      "name": "scalar-envelope",
+      "content": "\"synthetic\""
+    },
+    {
+      "name": "scalar-row",
+      "content": "[1]"
+    },
+    {
+      "name": "missing-ticker",
+      "content": "[{\"asof\": \"2025-01-01\"}]"
+    },
+    {
+      "name": "missing-asof",
+      "content": "[{\"ticker\": \"SYNTHA\"}]"
+    },
+    {
+      "name": "empty-ticker",
+      "content": "[{\"ticker\": \" \", \"asof\": \"2025-01-01\"}]"
+    },
+    {
+      "name": "non-string-asof",
+      "content": "[{\"ticker\": \"SYNTHA\", \"asof\": 2025}]"
+    },
+    {
+      "name": "valid-prefix-invalid-tail",
+      "content": "[{\"ticker\": \"SYNTHA\", \"cik\": \"9000000001\", \"asof\": \"2025-01-01\", \"year\": \"2025\", \"theme\": \"synthetic machinery\", \"series\": {\"cash\": []}}, {}]"
+    }
+  ],
+  "resume_valid": [
+    {
+      "name": "absent",
+      "exists": false,
+      "rows": []
+    },
+    {
+      "name": "valid-empty",
+      "exists": true,
+      "rows": []
+    },
+    {
+      "name": "valid-observations",
+      "exists": true,
+      "rows": [
+        {
+          "ticker": "SYNTHA",
+          "cik": "9000000001",
+          "asof": "2025-01-01",
+          "year": "2025",
+          "theme": "synthetic machinery",
+          "series": {
+            "cash": []
+          }
+        }
+      ]
+    }
+  ],
+  "candidate": {
+    "ticker": "SYNTHA",
+    "cik": "9000000001",
+    "name": "AcmeCorp Synthetic",
+    "sic": "3714",
+    "band": "deep",
+    "mktcap": 100000000,
+    "health_score": 60,
+    "killflag_count": 0,
+    "avg_dollar_vol": 3000000,
+    "business_blurb": "Synthetic machinery and components.",
+    "theme": "synthetic machinery",
+    "theme_slug": "synthetic"
+  },
+  "flags": {
+    "kf_scanned": true,
+    "disclosure_review_required": false,
+    "kf_going_concern": false,
+    "kf_substantial_doubt": false,
+    "kf_material_weakness": false,
+    "kf_death_spiral": false,
+    "kf_reverse_split": false,
+    "concentration_flag": ""
+  },
+  "cash": [
+    {
+      "name": "missing-cash",
+      "cash": null,
+      "ocf": -2000000,
+      "runway": null,
+      "reject": false
+    },
+    {
+      "name": "zero-cash-burning",
+      "cash": 0,
+      "ocf": -2000000,
+      "runway": 0.0,
+      "reject": true
+    },
+    {
+      "name": "one-dollar-burning",
+      "cash": 1,
+      "ocf": -2000000,
+      "runway": 0.0,
+      "reject": true
+    },
+    {
+      "name": "partial-period",
+      "cash": 500000,
+      "ocf": -2000000,
+      "runway": 0.2,
+      "reject": true
+    },
+    {
+      "name": "one-period",
+      "cash": 2000000,
+      "ocf": -2000000,
+      "runway": 1.0,
+      "reject": false
+    },
+    {
+      "name": "two-periods",
+      "cash": 4000000,
+      "ocf": -2000000,
+      "runway": 2.0,
+      "reject": false
+    },
+    {
+      "name": "negative-cash",
+      "cash": -2000000,
+      "ocf": -2000000,
+      "runway": -1.0,
+      "reject": true
+    },
+    {
+      "name": "zero-ocf",
+      "cash": 0,
+      "ocf": 0,
+      "runway": null,
+      "reject": false
+    },
+    {
+      "name": "positive-ocf",
+      "cash": 0,
+      "ocf": 2000000,
+      "runway": null,
+      "reject": false
+    },
+    {
+      "name": "missing-ocf",
+      "cash": 0,
+      "ocf": null,
+      "runway": null,
+      "reject": false
+    }
+  ],
+  "channels": [
+    {
+      "name": "fts",
+      "input": "fts",
+      "expected": "fts",
+      "fts": true,
+      "sic": false
+    },
+    {
+      "name": "sic-only",
+      "input": "sic_reverse",
+      "expected": "sic_reverse",
+      "fts": false,
+      "sic": true
+    },
+    {
+      "name": "both",
+      "input": "both",
+      "expected": "both",
+      "fts": true,
+      "sic": true
+    },
+    {
+      "name": "legacy-sic",
+      "input": "sic",
+      "expected": "sic",
+      "fts": false,
+      "sic": true
+    },
+    {
+      "name": "missing-column",
+      "missing": true,
+      "input": null,
+      "expected": "unknown",
+      "fts": false,
+      "sic": false
+    },
+    {
+      "name": "null-cell",
+      "input": null,
+      "expected": "unknown",
+      "fts": false,
+      "sic": false
+    },
+    {
+      "name": "empty-cell",
+      "input": "",
+      "expected": "unknown",
+      "fts": false,
+      "sic": false
+    },
+    {
+      "name": "unrecognized",
+      "input": "unrecorded",
+      "expected": "unknown",
+      "fts": false,
+      "sic": false
+    }
+  ],
+  "net_income": -1000000,
+  "revenue": 3000000,
+  "judgment": {
+    "judgment_status": "complete",
+    "theme_fit": "pure_play",
+    "reason": "Synthetic company makes the theme product.",
+    "real_business": "Synthetic machinery"
+  }
+}

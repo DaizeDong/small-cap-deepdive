@@ -15,6 +15,8 @@ FIX = debt_scenarios()
 
 @pytest.fixture
 def debt_module(monkeypatch):
+    # Load shared stage helpers before replacing application configuration for this unit scope.
+    importlib.import_module("filter_by_sic")
     common = ModuleType("_common")
     common.init_edgar = lambda: None
     common.UA = "user1@example.com"
@@ -28,6 +30,8 @@ def debt_module(monkeypatch):
     common.http_get = blocked
     monkeypatch.setitem(sys.modules, "_common", common)
     monkeypatch.setitem(sys.modules, "edgar", SimpleNamespace(Company=blocked))
+    monkeypatch.setitem(sys.modules, "signals", SimpleNamespace(
+        compute_signals=lambda *args, **kwargs: deepcopy(FIX["signals"])))
     for name in ("deepdive_data", "_deepdive_flags", "_deepdive_concepts"):
         monkeypatch.setitem(sys.modules, name, None)
         monkeypatch.delitem(sys.modules, name)

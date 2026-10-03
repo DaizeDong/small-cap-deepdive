@@ -1,0 +1,2063 @@
+{
+  "legacy": {
+    "valuation_financial": {
+      "ticker": "SYNFINANCIAL",
+      "derived": {
+        "latest_cash": 100000000,
+        "latest_total_debt": 500000000,
+        "latest_revenue": 200000000,
+        "latest_net_income": 50000000,
+        "latest_ocf": 80000000,
+        "latest_ebit": 60000000,
+        "latest_dep_amort": 5000000,
+        "latest_capex": 10000000,
+        "latest_ebitda": 65000000,
+        "latest_fcf": 70000000,
+        "fcf_is_ocf_proxy": false,
+        "latest_goodwill": 0,
+        "latest_intangibles": 0,
+        "sic": "6726",
+        "debt_truncation_suspected": false,
+        "debt_stale": false,
+        "wrong_entity_suspected": false,
+        "data_quality_warn": null,
+        "debt_source": "LongTermDebt"
+      },
+      "financials": {
+        "assets": [
+          {
+            "end": "2024-12-31",
+            "val": 2000000000
+          }
+        ],
+        "equity": [
+          {
+            "end": "2024-12-31",
+            "val": 1500000000
+          }
+        ],
+        "ebit": [
+          {
+            "end": "2024-12-31",
+            "val": 60000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "dep_amort": [
+          {
+            "end": "2024-12-31",
+            "val": 5000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "ocf": [
+          {
+            "end": "2024-12-31",
+            "val": 80000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "capex": [
+          {
+            "end": "2024-12-31",
+            "val": 10000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "revenue": [
+          {
+            "end": "2024-12-31",
+            "val": 200000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "shares_outstanding": [
+          {
+            "end": "2024-12-31",
+            "val": 10000000
+          }
+        ]
+      },
+      "synthetic_fixture": true
+    },
+    "valuation_no_sic_bdc": {
+      "ticker": "SYNNOSICBDC",
+      "derived": {
+        "latest_cash": 25000000,
+        "latest_total_debt": 260000000,
+        "latest_revenue": null,
+        "latest_net_income": 35000000,
+        "latest_ocf": 90000000,
+        "latest_ebit": null,
+        "latest_dep_amort": null,
+        "latest_capex": null,
+        "latest_ebitda": null,
+        "latest_fcf": 90000000,
+        "fcf_is_ocf_proxy": true,
+        "latest_goodwill": 0,
+        "latest_intangibles": 0,
+        "sic": null,
+        "debt_truncation_suspected": false,
+        "debt_stale": false,
+        "wrong_entity_suspected": false,
+        "data_quality_warn": null,
+        "debt_source": "LongTermDebt"
+      },
+      "financials": {
+        "assets": [
+          {
+            "end": "2024-12-31",
+            "val": 820000000
+          }
+        ],
+        "equity": [
+          {
+            "end": "2024-12-31",
+            "val": 560000000
+          }
+        ],
+        "ocf": [
+          {
+            "end": "2024-12-31",
+            "val": 90000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "revenue": [],
+        "shares_outstanding": [
+          {
+            "end": "2024-12-31",
+            "val": 24000000
+          }
+        ]
+      },
+      "synthetic_fixture": true
+    },
+    "valuation_extreme": {
+      "ticker": "SYNEXTREME",
+      "derived": {
+        "latest_cash": 0,
+        "latest_total_debt": 0,
+        "latest_revenue": 10000000,
+        "latest_net_income": 3000000,
+        "latest_ocf": 3800000,
+        "latest_ebit": 3000000,
+        "latest_dep_amort": 500000,
+        "latest_capex": 200000,
+        "latest_ebitda": 3500000,
+        "latest_fcf": 3600000,
+        "fcf_is_ocf_proxy": false,
+        "latest_goodwill": 0,
+        "latest_intangibles": 0,
+        "sic": "3990",
+        "debt_truncation_suspected": false,
+        "debt_stale": false,
+        "wrong_entity_suspected": false,
+        "data_quality_warn": null,
+        "debt_source": "LongTermDebt"
+      },
+      "financials": {
+        "assets": [
+          {
+            "end": "2024-12-31",
+            "val": 5000000
+          }
+        ],
+        "equity": [
+          {
+            "end": "2024-12-31",
+            "val": 4000000
+          }
+        ],
+        "ebit": [
+          {
+            "end": "2024-12-31",
+            "val": 3000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "dep_amort": [
+          {
+            "end": "2024-12-31",
+            "val": 500000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "ocf": [
+          {
+            "end": "2024-12-31",
+            "val": 3800000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "capex": [
+          {
+            "end": "2024-12-31",
+            "val": 200000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "revenue": [
+          {
+            "end": "2024-12-31",
+            "val": 10000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "shares_outstanding": [
+          {
+            "end": "2024-12-31",
+            "val": 1000000
+          }
+        ]
+      },
+      "synthetic_fixture": true
+    },
+    "valuation_proxy_light": {
+      "ticker": "SYNPROXYLIGHT",
+      "derived": {
+        "latest_cash": 5000000,
+        "latest_total_debt": 0,
+        "latest_revenue": 50000000,
+        "latest_net_income": 8000000,
+        "latest_ocf": 10000000,
+        "latest_ebit": 9000000,
+        "latest_dep_amort": 500000,
+        "latest_capex": null,
+        "latest_ebitda": 9500000,
+        "latest_fcf": 10000000,
+        "fcf_is_ocf_proxy": true,
+        "latest_goodwill": 0,
+        "latest_intangibles": 0,
+        "sic": "3990",
+        "debt_truncation_suspected": false,
+        "debt_stale": false,
+        "wrong_entity_suspected": false,
+        "data_quality_warn": null,
+        "debt_source": "LongTermDebt"
+      },
+      "financials": {
+        "assets": [
+          {
+            "end": "2024-12-31",
+            "val": 80000000
+          }
+        ],
+        "equity": [
+          {
+            "end": "2024-12-31",
+            "val": 70000000
+          }
+        ],
+        "ebit": [
+          {
+            "end": "2024-12-31",
+            "val": 9000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "dep_amort": [
+          {
+            "end": "2024-12-31",
+            "val": 500000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "ocf": [
+          {
+            "end": "2024-12-31",
+            "val": 10000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "capex": [],
+        "revenue": [
+          {
+            "end": "2024-12-31",
+            "val": 50000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "shares_outstanding": [
+          {
+            "end": "2024-12-31",
+            "val": 10000000
+          }
+        ]
+      },
+      "synthetic_fixture": true
+    },
+    "valuation_clean_base": {
+      "ticker": "SYNCLEANBASE",
+      "derived": {
+        "latest_cash": 20000000,
+        "latest_total_debt": 10000000,
+        "latest_revenue": 100000000,
+        "latest_net_income": 15000000,
+        "latest_ocf": 20000000,
+        "latest_ebit": 18000000,
+        "latest_dep_amort": 4000000,
+        "latest_capex": 5000000,
+        "latest_ebitda": 22000000,
+        "latest_fcf": 15000000,
+        "fcf_is_ocf_proxy": false,
+        "latest_goodwill": 0,
+        "latest_intangibles": 0,
+        "sic": "3990",
+        "debt_truncation_suspected": false,
+        "debt_stale": false,
+        "wrong_entity_suspected": false,
+        "data_quality_warn": null,
+        "debt_source": "LongTermDebt",
+        "ebit_source": "OperatingIncomeLoss",
+        "concentration_flag": null,
+        "top_customer_pct": null,
+        "top_program_pct": null,
+        "fundamental_decline_flag": false,
+        "rev_slope_sign": 1,
+        "rev_accel_sign": 0,
+        "latest_below_avg": false,
+        "contamination_ratio": 1.05,
+        "peak_contamination_flag": false,
+        "low_revenue_loss_ratio": false,
+        "form_used": "10-K"
+      },
+      "financials": {
+        "assets": [
+          {
+            "end": "2024-12-31",
+            "val": 200000000
+          }
+        ],
+        "equity": [
+          {
+            "end": "2024-12-31",
+            "val": 150000000
+          }
+        ],
+        "ebit": [
+          {
+            "end": "2024-12-31",
+            "val": 18000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "dep_amort": [
+          {
+            "end": "2024-12-31",
+            "val": 4000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "ocf": [
+          {
+            "end": "2024-12-31",
+            "val": 20000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "capex": [
+          {
+            "end": "2024-12-31",
+            "val": 5000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "revenue": [
+          {
+            "end": "2024-12-31",
+            "val": 100000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "shares_outstanding": [
+          {
+            "end": "2024-12-31",
+            "val": 10000000
+          }
+        ]
+      },
+      "synthetic_fixture": true
+    },
+    "valuation_blocked": {
+      "ticker": "SYNBLOCKED",
+      "derived": {
+        "latest_cash": 40000000,
+        "latest_total_debt": 70000000,
+        "latest_revenue": 60000000,
+        "latest_net_income": -180000000,
+        "latest_ocf": null,
+        "latest_ebit": null,
+        "latest_dep_amort": null,
+        "latest_capex": null,
+        "latest_ebitda": null,
+        "latest_fcf": null,
+        "fcf_is_ocf_proxy": false,
+        "latest_goodwill": 0,
+        "latest_intangibles": 0,
+        "sic": "1040",
+        "debt_truncation_suspected": false,
+        "debt_stale": false,
+        "wrong_entity_suspected": false,
+        "low_revenue_loss_ratio": true,
+        "low_revenue_loss_ratio_detail": "early-revenue resource pattern, right entity",
+        "data_quality_warn": null,
+        "debt_source": "LongTermDebt",
+        "ebit_source": null,
+        "concentration_flag": null,
+        "top_customer_pct": null,
+        "top_program_pct": null,
+        "fundamental_decline_flag": false,
+        "peak_contamination_flag": false,
+        "rev_slope_sign": 1,
+        "rev_accel_sign": 0,
+        "latest_below_avg": false,
+        "contamination_ratio": null,
+        "form_used": "10-K"
+      },
+      "financials": {
+        "assets": [
+          {
+            "end": "2024-12-31",
+            "val": 500000000
+          }
+        ],
+        "equity": [
+          {
+            "end": "2024-12-31",
+            "val": 300000000
+          }
+        ],
+        "ocf": [],
+        "revenue": [
+          {
+            "end": "2024-12-31",
+            "val": 60000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "shares_outstanding": [
+          {
+            "end": "2024-12-31",
+            "val": 400000000
+          }
+        ]
+      },
+      "synthetic_fixture": true
+    },
+    "valuation_lumpy": {
+      "ticker": "SYNLUMPY",
+      "derived": {
+        "latest_cash": 8000000,
+        "latest_total_debt": 0,
+        "latest_revenue": 70000000,
+        "latest_net_income": 15000000,
+        "latest_ocf": 30000000,
+        "latest_ebit": 22000000,
+        "latest_dep_amort": 3000000,
+        "latest_capex": 2000000,
+        "latest_ebitda": 25000000,
+        "latest_fcf": 28000000,
+        "fcf_is_ocf_proxy": false,
+        "latest_goodwill": 0,
+        "latest_intangibles": 0,
+        "sic": "2836",
+        "debt_truncation_suspected": false,
+        "debt_stale": false,
+        "wrong_entity_suspected": false,
+        "data_quality_warn": null,
+        "debt_source": "LongTermDebt",
+        "ebit_source": "OperatingIncomeLoss",
+        "contamination_ratio": 0.7,
+        "fundamental_decline_flag": false,
+        "rev_slope_sign": 0,
+        "latest_below_avg": true
+      },
+      "financials": {
+        "assets": [
+          {
+            "end": "2024-12-31",
+            "val": 240000000
+          }
+        ],
+        "equity": [
+          {
+            "end": "2024-12-31",
+            "val": 210000000
+          }
+        ],
+        "ebit": [
+          {
+            "end": "2020-12-31",
+            "val": 8000000,
+            "start": "2020-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2021-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2021-12-31",
+            "val": 24000000,
+            "start": "2021-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2022-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2022-12-31",
+            "val": 100000000,
+            "start": "2022-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2023-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2023-12-31",
+            "val": 30000000,
+            "start": "2023-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2024-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2024-12-31",
+            "val": 22000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "dep_amort": [
+          {
+            "end": "2020-12-31",
+            "val": 3000000,
+            "start": "2020-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2021-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2021-12-31",
+            "val": 3000000,
+            "start": "2021-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2022-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2022-12-31",
+            "val": 3000000,
+            "start": "2022-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2023-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2023-12-31",
+            "val": 3000000,
+            "start": "2023-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2024-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2024-12-31",
+            "val": 3000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "ocf": [
+          {
+            "end": "2020-12-31",
+            "val": 10000000,
+            "start": "2020-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2021-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2021-12-31",
+            "val": 25000000,
+            "start": "2021-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2022-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2022-12-31",
+            "val": 110000000,
+            "start": "2022-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2023-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2023-12-31",
+            "val": 38000000,
+            "start": "2023-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2024-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2024-12-31",
+            "val": 30000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "capex": [
+          {
+            "end": "2020-12-31",
+            "val": 2000000,
+            "start": "2020-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2021-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2021-12-31",
+            "val": 2000000,
+            "start": "2021-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2022-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2022-12-31",
+            "val": 2000000,
+            "start": "2022-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2023-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2023-12-31",
+            "val": 2000000,
+            "start": "2023-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2024-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2024-12-31",
+            "val": 2000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "revenue": [
+          {
+            "end": "2020-12-31",
+            "val": 35000000,
+            "start": "2020-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2021-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2021-12-31",
+            "val": 75000000,
+            "start": "2021-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2022-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2022-12-31",
+            "val": 150000000,
+            "start": "2022-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2023-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2023-12-31",
+            "val": 85000000,
+            "start": "2023-01-01",
+            "duration_days": 364,
+            "unit": "USD",
+            "filed": "2024-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          },
+          {
+            "end": "2024-12-31",
+            "val": 70000000,
+            "start": "2024-01-01",
+            "duration_days": 365,
+            "unit": "USD",
+            "filed": "2025-02-01",
+            "fp": "FY",
+            "form": "10-K",
+            "cik": "0000000042",
+            "taxonomy": "us-gaap"
+          }
+        ],
+        "shares_outstanding": [
+          {
+            "end": "2024-12-31",
+            "val": 60000000
+          }
+        ]
+      },
+      "synthetic_fixture": true
+    },
+    "deepdive_decline_revenue": [
+      {
+        "end": "2019-09-30",
+        "val": 2000000
+      },
+      {
+        "end": "2019-12-31",
+        "val": 7000000
+      },
+      {
+        "end": "2020-12-31",
+        "val": 160000000
+      },
+      {
+        "end": "2021-12-31",
+        "val": 180000000
+      },
+      {
+        "end": "2022-12-31",
+        "val": 155000000
+      },
+      {
+        "end": "2023-12-31",
+        "val": 130000000
+      },
+      {
+        "end": "2024-12-31",
+        "val": 105000000
+      },
+      {
+        "end": "2025-12-31",
+        "val": 80000000
+      }
+    ],
+    "deepdive_peak_revenue": [
+      {
+        "end": "2020-12-31",
+        "val": 100000000
+      },
+      {
+        "end": "2021-12-31",
+        "val": 220000000
+      },
+      {
+        "end": "2022-12-31",
+        "val": 360000000
+      },
+      {
+        "end": "2023-12-31",
+        "val": 280000000
+      },
+      {
+        "end": "2024-12-31",
+        "val": 240000000
+      }
+    ],
+    "deepdive_peak_ocf": [
+      {
+        "end": "2020-12-31",
+        "val": 60000000
+      },
+      {
+        "end": "2021-12-31",
+        "val": 180000000
+      },
+      {
+        "end": "2022-12-31",
+        "val": 240000000
+      },
+      {
+        "end": "2023-12-31",
+        "val": 140000000
+      },
+      {
+        "end": "2024-12-31",
+        "val": 100000000
+      }
+    ],
+    "deepdive_peak_income": [
+      {
+        "end": "2023-12-31",
+        "val": 40000000
+      },
+      {
+        "end": "2024-12-31",
+        "val": -60000000
+      }
+    ],
+    "deepdive_negative_income": [
+      {
+        "end": "2024-12-31",
+        "val": -60000000
+      }
+    ],
+    "deepdive_early_revenue": [
+      {
+        "end": "2024-12-31",
+        "val": 60000000
+      }
+    ],
+    "deepdive_early_income": [
+      {
+        "end": "2024-12-31",
+        "val": -180000000
+      }
+    ],
+    "deepdive_early_shares": [
+      {
+        "end": "2024-12-31",
+        "val": 400000000
+      }
+    ],
+    "deepdive_masked_ocf": [
+      {
+        "end": "2020-12-31",
+        "val": 40000000
+      },
+      {
+        "end": "2021-12-31",
+        "val": 50000000
+      },
+      {
+        "end": "2022-12-31",
+        "val": 35000000
+      },
+      {
+        "end": "2023-12-31",
+        "val": 25000000
+      },
+      {
+        "end": "2024-12-31",
+        "val": -20000000
+      }
+    ],
+    "deepdive_lessor_balance": [
+      2400000000,
+      5000000000
+    ],
+    "ni_anomaly_cases": [
+      [
+        30000000000,
+        400000000
+      ],
+      [
+        40000000000,
+        400000000
+      ],
+      [
+        -40000000000,
+        400000000
+      ],
+      [
+        40000000,
+        400000000
+      ],
+      [
+        20000000000,
+        400000000
+      ]
+    ],
+    "masked_loss_inputs": [
+      -20000000,
+      -75000000,
+      -1.5
+    ],
+    "concentration_receivables": "Our largest customer represented 83% and 47%, respectively, of accounts receivable at the end of 2001 and 2000. This customer is AcmeCorp.",
+    "concentration_program": "Our sole program accounted for approximately 84% of total revenue for the year. No single customer represented more than 10% of net sales.",
+    "concentration_bracket_segment": "Note 12. Segment information. Our Retail Branch Division generated 100% of [Retail Branch Division] revenue from sales within the region during fiscal 2000.",
+    "concentration_collapsed_segment": "Our largest customer accounted for approximately 5% of consolidated revenue. Approximately100% ofRetail Branch Division’s revenue came from regional sales during fiscal 2000.",
+    "concentration_possessive_segment": "In 2000 the AcmeCorp Retail segment accounted for approximately 3% of AcmeCorp Retail’s revenue. In 2001, approximately 87% of AcmeCorp Retail’s revenue was generated by repair products. Our largest customer accounted for less than 5% of consolidated revenue.",
+    "concentration_diversified": "In fiscal 2001 the top 18 customers represented approximately 81% of AcmeCorp Services’ 2001 total revenue, reflecting a broad and diversified customer base.",
+    "concentration_customer": "Our largest customer accounted for 68% of total revenue in fiscal 2000; no other customer exceeded 10%.",
+    "concentration_patterns": {
+      "collapsed": "100% ofretail branch division’s revenue",
+      "possessive": "87% of AcmeCorp Retail’s revenue",
+      "plural": "81% of AcmeCorp Services’ 2001 total revenue",
+      "diversified": "the top 18 customers represented 81%"
+    },
+    "valuation_overrides": {
+      "decline_ratio": 0.7,
+      "customer_pct": 83,
+      "peak_ratio": 0.72,
+      "peak_income": -60000000,
+      "current_ocf": -20000000,
+      "lessor_high_debt": 420000000,
+      "lessor_low_debt": 340000000,
+      "lessor_assets": 1000000000,
+      "current_fcf": -75000000
+    },
+    "deepdive_lumpy_ocf": [
+      {
+        "end": "2021-12-31",
+        "val": 12000000
+      },
+      {
+        "end": "2022-12-31",
+        "val": 36000000
+      },
+      {
+        "end": "2023-12-31",
+        "val": 108000000
+      },
+      {
+        "end": "2024-12-31",
+        "val": 48000000
+      },
+      {
+        "end": "2025-12-31",
+        "val": 36000000
+      }
+    ],
+    "deepdive_clean_decline_revenue": [
+      {
+        "end": "2021-12-31",
+        "val": 140000000
+      },
+      {
+        "end": "2022-12-31",
+        "val": 130000000
+      },
+      {
+        "end": "2023-12-31",
+        "val": 115000000
+      },
+      {
+        "end": "2024-12-31",
+        "val": 100000000
+      },
+      {
+        "end": "2025-12-31",
+        "val": 90000000
+      }
+    ],
+    "deepdive_lumpy_ratio": 0.75
+  },
+  "acquisition": {
+    "concepts": {
+      "1:Revenues": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "Revenues",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:SalesRevenueNet": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "SalesRevenueNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:RevenueFromContractWithCustomerIncludingAssessedTax": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "RevenueFromContractWithCustomerIncludingAssessedTax",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:RevenueFromContractWithCustomerExcludingAssessedTax": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:OperatingIncomeLoss": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "OperatingIncomeLoss",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:InterestExpense": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "InterestExpense",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:InterestAndDebtExpense": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "InterestAndDebtExpense",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:InterestExpenseDebt": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "InterestExpenseDebt",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:PropertyPlantAndEquipmentNet": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "PropertyPlantAndEquipmentNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:PropertySubjectToOrAvailableForOperatingLeaseNet": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "PropertySubjectToOrAvailableForOperatingLeaseNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "1:EquipmentLeasedToOtherPartyNet": {
+        "cik": 1,
+        "taxonomy": "us-gaap",
+        "tag": "EquipmentLeasedToOtherPartyNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:Revenues": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "Revenues",
+        "units": {
+          "USD": [
+            {
+              "start": "2018-01-01",
+              "end": "2018-12-31",
+              "val": 20000000,
+              "fy": 2018,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2019-03-01"
+            }
+          ]
+        }
+      },
+      "901:SalesRevenueNet": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "SalesRevenueNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:RevenueFromContractWithCustomerIncludingAssessedTax": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "RevenueFromContractWithCustomerIncludingAssessedTax",
+        "units": {
+          "USD": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 70000000,
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-03-01"
+            },
+            {
+              "start": "2025-01-01",
+              "end": "2025-12-31",
+              "val": 80000000,
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2026-03-01"
+            }
+          ]
+        }
+      },
+      "901:RevenueFromContractWithCustomerExcludingAssessedTax": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:OperatingIncomeLoss": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "OperatingIncomeLoss",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:InterestExpense": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "InterestExpense",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:InterestAndDebtExpense": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "InterestAndDebtExpense",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:InterestExpenseDebt": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "InterestExpenseDebt",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:PropertyPlantAndEquipmentNet": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "PropertyPlantAndEquipmentNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:PropertySubjectToOrAvailableForOperatingLeaseNet": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "PropertySubjectToOrAvailableForOperatingLeaseNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "901:EquipmentLeasedToOtherPartyNet": {
+        "cik": 901,
+        "taxonomy": "us-gaap",
+        "tag": "EquipmentLeasedToOtherPartyNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:Revenues": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "Revenues",
+        "units": {
+          "USD": [
+            {
+              "start": "2017-05-01",
+              "end": "2018-04-30",
+              "val": 30000000,
+              "fy": 2018,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2018-07-01"
+            }
+          ]
+        }
+      },
+      "902:SalesRevenueNet": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "SalesRevenueNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:RevenueFromContractWithCustomerIncludingAssessedTax": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "RevenueFromContractWithCustomerIncludingAssessedTax",
+        "units": {
+          "USD": [
+            {
+              "start": "2023-05-01",
+              "end": "2024-04-30",
+              "val": 90000000,
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-07-01"
+            },
+            {
+              "start": "2024-05-01",
+              "end": "2025-04-30",
+              "val": 100000000,
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-07-01"
+            }
+          ]
+        }
+      },
+      "902:RevenueFromContractWithCustomerExcludingAssessedTax": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:OperatingIncomeLoss": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "OperatingIncomeLoss",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:InterestExpense": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "InterestExpense",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:InterestAndDebtExpense": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "InterestAndDebtExpense",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:InterestExpenseDebt": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "InterestExpenseDebt",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:PropertyPlantAndEquipmentNet": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "PropertyPlantAndEquipmentNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:PropertySubjectToOrAvailableForOperatingLeaseNet": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "PropertySubjectToOrAvailableForOperatingLeaseNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "902:EquipmentLeasedToOtherPartyNet": {
+        "cik": 902,
+        "taxonomy": "us-gaap",
+        "tag": "EquipmentLeasedToOtherPartyNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:Revenues": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "Revenues",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:SalesRevenueNet": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "SalesRevenueNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:RevenueFromContractWithCustomerIncludingAssessedTax": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "RevenueFromContractWithCustomerIncludingAssessedTax",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:RevenueFromContractWithCustomerExcludingAssessedTax": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "units": {
+          "USD": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 500000000,
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-03-01"
+            },
+            {
+              "start": "2025-01-01",
+              "end": "2025-12-31",
+              "val": 600000000,
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2026-03-01"
+            }
+          ],
+          "shares": [
+            {
+              "start": "2025-01-01",
+              "end": "2025-12-31",
+              "val": 600,
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2026-03-01"
+            }
+          ]
+        }
+      },
+      "903:OperatingIncomeLoss": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "OperatingIncomeLoss",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:InterestExpense": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "InterestExpense",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:InterestAndDebtExpense": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "InterestAndDebtExpense",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:InterestExpenseDebt": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "InterestExpenseDebt",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:PropertyPlantAndEquipmentNet": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "PropertyPlantAndEquipmentNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:PropertySubjectToOrAvailableForOperatingLeaseNet": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "PropertySubjectToOrAvailableForOperatingLeaseNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "903:EquipmentLeasedToOtherPartyNet": {
+        "cik": 903,
+        "taxonomy": "us-gaap",
+        "tag": "EquipmentLeasedToOtherPartyNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:Revenues": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "Revenues",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:SalesRevenueNet": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "SalesRevenueNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:RevenueFromContractWithCustomerIncludingAssessedTax": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "RevenueFromContractWithCustomerIncludingAssessedTax",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:RevenueFromContractWithCustomerExcludingAssessedTax": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:OperatingIncomeLoss": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "OperatingIncomeLoss",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+        "units": {
+          "USD": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 40000000,
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-03-01"
+            }
+          ]
+        }
+      },
+      "904:InterestExpense": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "InterestExpense",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:InterestAndDebtExpense": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "InterestAndDebtExpense",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:InterestExpenseDebt": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "InterestExpenseDebt",
+        "units": {
+          "USD": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 5000000,
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-03-01"
+            }
+          ]
+        }
+      },
+      "904:PropertyPlantAndEquipmentNet": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "PropertyPlantAndEquipmentNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:PropertySubjectToOrAvailableForOperatingLeaseNet": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "PropertySubjectToOrAvailableForOperatingLeaseNet",
+        "units": {
+          "USD": []
+        }
+      },
+      "904:EquipmentLeasedToOtherPartyNet": {
+        "cik": 904,
+        "taxonomy": "us-gaap",
+        "tag": "EquipmentLeasedToOtherPartyNet",
+        "units": {
+          "USD": []
+        }
+      }
+    },
+    "filings": {
+      "SYNANNUAL": {
+        "form": "10-K",
+        "filing_date": "2001-03-01",
+        "text": "AcmeCorp synthetic annual filing. Item 1A. Risk factors. General business risks."
+      },
+      "SYNFOREIGN": {
+        "form": "20-F",
+        "filing_date": "2001-04-01",
+        "text": "AcmeCorp synthetic foreign annual filing. Item 3. Risk factors. General business risks."
+      }
+    },
+    "insider": {
+      "ticker": "SYNINSIDER",
+      "observed_at": "2001-07-01",
+      "html": "<table><tr><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Trade Type</th><th>Value</th></tr><tr><td>2001-06-15</td><td>2001-06-14</td><td>SYNINSIDER</td><td>P - Purchase</td><td>$12,500</td></tr><tr><td>2001-06-16</td><td>2001-06-15</td><td>SYNINSIDER</td><td>S - Sale</td><td>$4,000</td></tr></table>",
+      "buys": 1,
+      "sells": 1,
+      "buy_value": 12500,
+      "sell_value": 4000
+    }
+  },
+  "resume": [
+    {
+      "name": "absent_failed",
+      "prior": [
+        {
+          "ticker": "SYNFAILED",
+          "cik": "42",
+          "asof": "2000-01-01",
+          "synthetic_marker": "retained-prior-observation",
+          "series": {},
+          "pull_error": "synthetic prior failure"
+        }
+      ],
+      "tickers": [],
+      "failures": [],
+      "checkpoint": false
+    },
+    {
+      "name": "absent_missing_series",
+      "prior": [
+        {
+          "ticker": "SYNMISSING",
+          "cik": "42",
+          "asof": "2000-01-01",
+          "synthetic_marker": "retained-prior-observation",
+          "pull_error": "synthetic prior failure"
+        }
+      ],
+      "tickers": [],
+      "failures": [],
+      "checkpoint": false
+    },
+    {
+      "name": "absent_success",
+      "prior": [
+        {
+          "ticker": "SYNSUCCESS",
+          "cik": "42",
+          "asof": "2000-01-01",
+          "synthetic_marker": "retained-prior-observation",
+          "series": {
+            "cash": [
+              {
+                "end": "1999-12-31",
+                "val": 10
+              }
+            ]
+          }
+        }
+      ],
+      "tickers": [],
+      "failures": [],
+      "checkpoint": false
+    },
+    {
+      "name": "retry_succeeds",
+      "prior": [
+        {
+          "ticker": "SYNFAILED",
+          "cik": "42",
+          "asof": "2000-01-01",
+          "synthetic_marker": "retained-prior-observation",
+          "series": {},
+          "pull_error": "synthetic prior failure"
+        }
+      ],
+      "tickers": [
+        "SYNFAILED"
+      ],
+      "failures": [],
+      "checkpoint": false
+    },
+    {
+      "name": "retry_fails",
+      "prior": [
+        {
+          "ticker": "SYNFAILED",
+          "cik": "42",
+          "asof": "2000-01-01",
+          "synthetic_marker": "retained-prior-observation",
+          "series": {},
+          "pull_error": "synthetic prior failure"
+        }
+      ],
+      "tickers": [
+        "SYNFAILED"
+      ],
+      "failures": [
+        "SYNFAILED"
+      ],
+      "checkpoint": false
+    },
+    {
+      "name": "success_skipped_new_added",
+      "prior": [
+        {
+          "ticker": "SYNSUCCESS",
+          "cik": "42",
+          "asof": "2000-01-01",
+          "synthetic_marker": "retained-prior-observation",
+          "series": {
+            "cash": [
+              {
+                "end": "1999-12-31",
+                "val": 10
+              }
+            ]
+          }
+        }
+      ],
+      "tickers": [
+        "SYNSUCCESS",
+        "SYNNEW"
+      ],
+      "failures": [],
+      "checkpoint": false
+    },
+    {
+      "name": "mixed_retention_and_retry",
+      "prior": [
+        {
+          "ticker": "SYNFAILED",
+          "cik": "42",
+          "asof": "2000-01-01",
+          "synthetic_marker": "retained-prior-observation",
+          "series": {},
+          "pull_error": "synthetic prior failure"
+        },
+        {
+          "ticker": "SYNSUCCESS",
+          "cik": "42",
+          "asof": "2000-01-01",
+          "synthetic_marker": "retained-prior-observation",
+          "series": {
+            "cash": [
+              {
+                "end": "1999-12-31",
+                "val": 10
+              }
+            ]
+          }
+        },
+        {
+          "ticker": "SYNRETRY",
+          "cik": "42",
+          "asof": "2000-01-01",
+          "synthetic_marker": "retained-prior-observation",
+          "series": {},
+          "pull_error": "synthetic prior failure"
+        }
+      ],
+      "tickers": [
+        "SYNSUCCESS",
+        "SYNRETRY",
+        "SYNNEW"
+      ],
+      "failures": [
+        "SYNRETRY"
+      ],
+      "checkpoint": false
+    },
+    {
+      "name": "checkpoint_retains_pending_failure",
+      "prior": [
+        {
+          "ticker": "SYNFAILED",
+          "cik": "42",
+          "asof": "2000-01-01",
+          "synthetic_marker": "retained-prior-observation",
+          "series": {},
+          "pull_error": "synthetic prior failure"
+        }
+      ],
+      "tickers": [
+        "SYNNEW00",
+        "SYNNEW01",
+        "SYNNEW02",
+        "SYNNEW03",
+        "SYNNEW04",
+        "SYNNEW05",
+        "SYNNEW06",
+        "SYNNEW07",
+        "SYNNEW08",
+        "SYNNEW09",
+        "SYNNEW10",
+        "SYNNEW11",
+        "SYNNEW12",
+        "SYNNEW13",
+        "SYNNEW14",
+        "SYNNEW15",
+        "SYNNEW16",
+        "SYNNEW17",
+        "SYNNEW18",
+        "SYNNEW19",
+        "SYNNEW20",
+        "SYNNEW21",
+        "SYNNEW22",
+        "SYNNEW23",
+        "SYNNEW24",
+        "SYNNEW25",
+        "SYNNEW26",
+        "SYNNEW27",
+        "SYNNEW28",
+        "SYNNEW29",
+        "SYNNEW30",
+        "SYNNEW31",
+        "SYNNEW32",
+        "SYNNEW33",
+        "SYNNEW34",
+        "SYNNEW35",
+        "SYNNEW36",
+        "SYNNEW37",
+        "SYNNEW38",
+        "SYNNEW39",
+        "SYNFAILED"
+      ],
+      "failures": [],
+      "checkpoint": true
+    }
+  ]
+}

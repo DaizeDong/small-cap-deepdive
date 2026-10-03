@@ -68,7 +68,7 @@ disclosure non-filers, before any analyst time is spent.
 
 **Use when:** you have an investment theme and want a ranked shortlist of small-cap pure-plays.
 
-**Natural-language orchestration (primary path, works in any Claude Code session):**
+**Natural-language orchestration (requires a configured Workflow host for bound stage completion):**
 
 1. **Stages 1 to 3 in one driver.** Run `tools/run_theme.py --theme "<逗号分隔关键词>" --slug <slug>`.
    It shells `discover.py`, then `cheap_pass.py`, then applies Gate 1 inline, and writes
@@ -84,9 +84,10 @@ disclosure non-filers, before any analyst time is spent.
    no-op.
 
    1b. **Mechanical de-risk.** `tools/cheap_pass.py --universe <universe_csv> --out-slug <slug>`
-   marks `rejected` on any name with a hard kill-flag (`going_concern`, `death_spiral`,
-   `material_weakness` in the most recent filing period), two or more kill-flags, a cash-burn
-   rejection, or a `kill` concentration. Rejected names never reach Gate 1 or the deep-dive.
+   marks `rejected` for a connected current going-concern and substantial-doubt assertion,
+   two or more counted kill-flags, a cash-burn rejection, or a `kill` concentration.
+   A lone death-spiral or material-weakness flag survives this screen but blocks BUY under
+   the judgment rubric. Rejected names never reach Gate 1 or the deep-dive.
 
    1c. **Gate 1, SIC coarse review.** Applied **inline by `run_theme.py`**, which imports
    `filter_by_sic.sic_classify` as a library and tags each survivor `sic_tier`.
@@ -99,7 +100,8 @@ disclosure non-filers, before any analyst time is spent.
    `pure_play / partial / misrecall`. Drop `misrecall`. Retain `pure_play` and `partial` for
    deep-dive. Gate 2 is the only gate in the theme flow that removes a company for theme-fit.
 
-3. **Deep-dive.** For surviving candidates, run `tools/deepdive_data.py --ticker <T>` to retrieve
+3. **Deep-dive.** Ingest the bound Gate-2 host result with `run_theme.py --gate2-request`
+   and `--gate2-result`, then run `tools/deepdive_data.py --candidates <candidates_gate2_survivors.json>` to retrieve
    the full financial series, insider trade record, and disclosure timeline. Spawn one Agent per
    candidate, instructing it to apply the 7-dimension scorecard from `reference/judgment-rubric.md`,
    preamble first (base-rate anchor + disconfirmation search + staleness check + the
@@ -109,9 +111,15 @@ disclosure non-filers, before any analyst time is spent.
    Report includes: gate survival counts, kill-flag eliminations, score distribution,
    top candidates with dimension scores, and explicit coverage gaps.
 
-**Optional accelerator:** when the Workflow tool is available in the session, `workflows/theme-fit-gate.js`
-automates Gate 2 fan-out and `workflows/deepdive-fanout.js` automates the parallel deep-dive step.
-These are convenience wrappers, the natural-language orchestration above is the primary and always-runnable path.
+**Workflow request contract:** `run_theme.py` emits `gate2_request.json`; use
+`--prepare-gate2 <candidates>` only when preparing an existing artifact without a request.
+Pass the request as `args` through the configured Workflow host, preserve its full result,
+and ingest it with `--gate2-request <request> --gate2-result <result>`.
+After data pull, `deepdive_data.py --prepare-fanout <survivors> --verdict-date <YYYY-MM-DD>`
+prepares `deepdive_request.json`. Run that request through the host and ingest its result
+with `--fanout-request <request> --fanout-result <result>`. Keep all artifacts and receipts.
+The JavaScript files require host functions and cannot run as direct Node scripts.
+Without a host result the stage remains incomplete. See `runbooks/theme-run.md`.
 
 ---
 
@@ -122,11 +130,20 @@ Optionally pass `--theme X` to anchor the theme-fit scoring.
 
 **Natural-language orchestration:**
 
-1. **Mechanical de-risk first.** Run `tools/cheap_pass.py --ticker <代码>`. If any hard kill-flag
-   fires, report the flag and stop, do not proceed to full deep-dive.
+1. **Mechanical de-risk first.** Save a one-company universe in the private run directory, then run
+   `tools/cheap_pass.py --universe <path-to-json-or-csv>`. JSON must be a list of objects with
+   `ticker`, `cik` and `name` keys; CSV also requires boolean `smallcap_candidate`. Event rows may
+   retain blank ticker/CIK values; optional `mktcap` and `price` values must be numeric. If any hard
+   kill-flag fires, report it and stop before full deep-dive. Exit 0 means the requested work is
+   complete; exit 2 means partial, unavailable or invalid, so inspect coverage before proceeding.
+   Nonempty manual input without its `<artifact>.stage.json` completion receipt remains partial;
+   empty input without completion evidence is unavailable. Keep each artifact with its receipt,
+   and use a new run output when a paired receipt already exists.
 
-2. **Data pull.** Run `tools/deepdive_data.py --ticker <代码>` to retrieve financial series,
-   insider trades, filing timeline, and kill-flag detail.
+2. **Data pull.** Run `tools/deepdive_data.py --ticker <代码> --cik <verified-CIK>` to retrieve
+   financial series, insider trades, filing timeline and kill-flag detail. Standalone input
+   retains `unbound_single_input`; inspect its partial status and exit code rather than
+   counting it as a completed theme pipeline.
 
 3. **Judgment pass.** Apply the 7-dimension scorecard from `reference/judgment-rubric.md` in full.
    Required preamble, all four steps: (a) state the reference-class base rates from
@@ -139,7 +156,9 @@ Optionally pass `--theme X` to anchor the theme-fit scoring.
    detail, disconfirmation findings, and a composite rating with the hard-rule ceilings applied
    (`reference/judgment-rubric.md §Rating Hard-Rules`).
 
-**Optional accelerator:** `workflows/deepdive-fanout.js` supports single-ticker mode.
+**Optional Workflow host:** one company may use the same bound survivor/request/result
+contract as a batch. A raw one-row candidate array is not an accepted request.
+See `runbooks/single-deepdive.md` for the standalone boundary.
 
 ---
 
@@ -151,7 +170,7 @@ scored candidate set without re-running discovery or deep-dive.
 **Natural-language orchestration:**
 
 1. Locate the existing scored output directory from a prior `theme` run.
-2. Run `tools/rank.py [--slug <slug>] [--input <dir>]` to produce a ranked table.
+2. Run `tools/rank.py [--slug <slug>] [--input <dir>] --output <fresh-ranking-name>.md` to produce a ranked table. Choose a new basename for every re-rank; existing artifacts are preserved.
 3. Report the ranking with kill-flag eliminations and explicit coverage gaps.
 
 ---
@@ -183,7 +202,7 @@ theme-fit gate needed, form-type enumeration replaces keyword over-recall):
    Kill-flags (`going_concern`, `death_spiral`, `material_weakness`) apply identically to
    event candidates.  A compelling catalyst does not excuse a going-concern filing.
 
-3. **Deep-dive data pull.** Run `tools/deepdive_data.py --candidates <candidates_json>`.
+3. **Deep-dive data pull.** Cheap-pass writes `candidates_event_admitted.json` and a receipt binding the event source, every input identity/band and its screening decision. Run `tools/deepdive_data.py --candidates <run>/candidates_event_admitted.json`. Missing source, identity or kill-scan evidence remains partial; only explicit, observed exclusions resolve an input.
    **Band guard (four explicit bands, C3):**
    - `band="deep"` (mktcap < market_cap_max): **process**, full deep-dive.
    - `band="watch"` (market_cap_max..watch_band_max): **skip**, surfaced separately for human review only; not deep-dived.
@@ -204,7 +223,7 @@ theme-fit gate needed, form-type enumeration replaces keyword over-recall):
    requires the MoS / NAV path AND `buy_eligible == true`. The freeze is deliberate and lifts only
    once catalyst mechanism-verification and a per-category Brier score exist.
    **No theme-fit gate:** skip Gate 1 (SIC) and Gate 2 (LLM theme-fit), form-type
-   precision replaces keyword precision; every record is a valid event by construction.
+   precision replaces keyword precision. Event admission still validates source evidence and mandatory cheap-pass outcomes; a discovered record alone does not prove completed screening.
 
 5. **Output.** Ranked shortlist per `tools/rank.py --slug event_<mode>`.
 
@@ -214,13 +233,10 @@ theme-fit gate needed, form-type enumeration replaces keyword over-recall):
 
 > Full spec: `reference/discovery-engine.md`. This section is a navigational summary only.
 
-Single-keyword FTS over-recalls severely. Measured production result: 192 raw candidates for
-"AI agent" → 13 true theme members after the gate (6.8% precision; 94% false-positives).
-
-The canonical cautionary case (the `refractory` keyword sweeping all of biotech), the worked
-reconstruction of that run, and the three-value contract for `sic_classify` are told once, in
-`reference/discovery-engine.md`: §The Core Problem, §Gate 1, and §Refractory Case: Full
-Reconstruction. Read them before designing new theme keywords.
+A full-text keyword hit does not establish theme membership. A filing can mention a term
+in risk factors, customer industries, or logistics while its core business belongs elsewhere.
+SIC provides a coarse review hint; the bound theme-fit stage must adjudicate each candidate.
+Read the gate contract in `reference/discovery-engine.md` before choosing keywords.
 
 **Gate 1, SIC coarse review + reverse-recall floor** (`filter_by_sic.sic_classify`, applied inline
 by `tools/run_theme.py`).
@@ -298,9 +314,9 @@ python scripts/verify_config.py --json
 # Commit and push config and runtime DATA in this PRIVATE companion.
 ```
 
-The `sec_user_agent` field is the only hard requirement. All other config keys have defaults
-documented in `config.example.json`. Theme-specific overrides (SIC exclusion blocks, keyword
-sets, market-cap ceiling) are set per-run via the `--config` flag or inline JSON.
+Initialize the PRIVATE companion before running the tools. Set `sec_user_agent` there and
+use the supported configuration keys and scalar environment overrides in `CONFIG.md`.
+The runtime does not accept a generic `--config` flag or inline JSON configuration.
 
 ---
 
@@ -314,16 +330,15 @@ Full routing guide, rate-limit discipline, blind spots, and anti-recursion rule:
 - **EDGAR** (EFTS + XBRL + Form 4): primary for all filing-derived data. `edgartools` wrapper
   handles rate discipline. Max 10 req/s, include User-Agent on every request.
 
-- **market-intel skill (read-only catalog reuse):** for commercial/market data that complements
-  SEC filings, competitor pricing, X/Twitter sentiment on a specific company, industry news
-  volume, invoke the `market-intel` skill rather than re-implementing source detection.
-  This skill does not duplicate the market-intel source matrix; it reuses it.
+- **market-intel catalog (optional read-only reuse):** when installed, read its source catalog
+  for qualitative context such as competitor pricing, ticker sentiment, and industry news.
+  Discover the available underlying tools in the current session and call them directly.
+  Do not invoke `market-intel` as a skill. Record unavailable optional sources.
 
-- **X sentiment route (twitterapi.io ② route):** when X investor sentiment is needed for a
-  specific ticker, use the market-intel skill's X-twitter domain shard (`reference/domains/x-twitter.md`
-  in the market-intel repo). The twitterapi.io route ② is the recommended resale source when
-  direct API access is not connected. See `reference/data-sources.md §X Sentiment` for the
-  anti-recursion guardrail (do not re-invoke this skill from within market-intel).
+- **X sentiment:** consult the optional market-intel catalog's X/Twitter shard when available.
+  Use a configured source only after checking current capability and credentials; otherwise
+  use an available search source and label the coverage limitation. See
+  `reference/data-sources.md` for catalog reuse and the no-recursion rule.
 
 - **yfinance / openinsider:** convenience layers for market data and insider trades respectively.
   Both are free but fragile, label sources accordingly in reports.
@@ -350,7 +365,7 @@ no-fallback rule exists: `reference/track-forward.md` §Where the verdict log li
    ```
    Or record a single verdict via CLI flags:
    ```bash
-   python tools/track_forward.py --record --ticker EGAN --rating 观察 --theme aeromro \
+   python tools/track_forward.py --record --ticker "$TICKER" --rating 观察 --theme "$THEME" \
        --mos-pct null --mos-basis abstain --catalyst null
    ```
 
@@ -369,26 +384,24 @@ no-fallback rule exists: `reference/track-forward.md` §Where the verdict log li
    calibration table is statistically meaningless. See `reference/track-forward.md` for
    the full Brier / calibration methodology and the benchmark choice rationale (IWM, not SPY).
 
-5. **Recall@gold (P8), measure discovery recall, not just precision.** Precision at Gate 2 is
-   directly observable (the 6.8%-precision FTS over-recall problem above); recall is not, and a
-   manual blurb re-scan is not a measurement. `track_forward` computes **`recall@gold`** for any
-   theme that has a hand-built gold true-member list: the fraction of gold members the discovery
-   union (FTS ∪ SIC reverse-recall) actually recalled. Example gold list, deathcare:
-   `{SCI, CSV, MATW, HI, STON, SNFCA}`. A miss in `recall@gold` is a direct discovery-floor failure,
-   a true member the union never surfaced. `track_forward` **warns when the FTS arm hit the
-   top-1000 cap**, because a capped FTS arm is the most likely cause of a sub-1.0 `recall@gold` and
-   means the SIC reverse-recall floor should be carrying more of the load.
+5. **Recall@gold, keep final and discovery coverage separate.** `recall@gold` measures
+   eligible gold members retained in the final candidate set. `discovery_recall_at_gold`
+   measures eligible gold members surfaced by the observed discovery union. A final miss
+   can come from discovery, market-evidence availability, or a downstream gate; use the
+   reported loss attribution instead of labeling every miss a discovery failure.
+   Unresolved historical eligibility remains unresolved and must not be counted as proven
+   exclusion. Report FTS caps, failed pages, and any opt-in SIC reverse-recall coverage
+   alongside both measures; neither measure proves an uncapped population census.
 
-6. **Signals snapshot, track-forward-gated, NOT a calibration input.** When a verdict is recorded,
-   `track_forward` snapshots the diagnostic `signals` into the verdict row under `signals_snapshot`
-   (the P16 `divergence_label` plus a P17 ownership summary). The snapshot exists purely so
-   per-signal predictive value can be calibrated later. It is **diagnostic-gated**: it does not
-   change `implied_prob` or the rating, and no signal gates anything until it has accumulated its
-   own Brier score. The firewall holds end-to-end, signals enter the record only as a
-   future-calibration snapshot, never as a driver of the verdict they are stored alongside.
+6. **Diagnostic signals remain inert.** Finalization writes a versioned
+   `signals_snapshot` containing the diagnostic namespace, issuer and verdict
+   identity, and the selected deepdive artifact's byte digest. Recording validates
+   and retains that snapshot for future calibration. It never changes the rating,
+   implied probability, or current scoring. Missing signals remain absent.
 
-**Note:** Verdicts from 2026-06 runs mature in 2027-06. The correct scorecard state until then
-is "0 scored, N pending, calibration unknown." This is not a bug; it is the honest state.
+**Calibration remains unknown until supported outcomes exist.** Each verdict has its own
+entry date and horizon. Report scored, pending, unavailable and unreviewed coverage from
+the current private ledger; do not assume a cohort date or a fixed scorecard result.
 
 **Run finalization, a Gate-2 misrecall is resolved, not missing.** `finalize_run` reads the run's
 `gate2_results.json` and treats names in the Gate-2 misrecall set as **resolved**, not "missing." A

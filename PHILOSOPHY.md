@@ -160,7 +160,7 @@ into two halves on the philosophy line:
   divergence, `tools/signals.py`) reads the deterministic T1 trajectory from `derived` and compares
   it to the trailing 6m/12m price move, labeling `unpriced_improvement` (fundamentals up + price
   flat, the diffusion thesis, previously undetectable) vs `melting_ice_cube_priced` (fundamentals
-  down + price elevated, SIGA-shaped). P17 adds free ownership/short-interest positioning
+  down + price elevated). P17 adds free ownership/short-interest positioning
   (13D/13G + best-effort FINRA, staleness-labeled). P15 alt-data (TrendsMCP / GDELT / news-volume;
   see `reference/data-sources.md`) is agent-gathered T2 corroboration at analysis time. **The
   firewall is the whole point and is non-negotiable:** every signal lives in a SEPARATE top-level

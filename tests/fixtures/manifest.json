@@ -1,8 +1,42 @@
 {
-  "origin": "tools/make_fixtures.py:private_run_scenario",
+  "origin": "tools/make_fixtures.py:generated",
   "synthetic_only": true,
   "files": {
     "private_runs.json": "ea819ece5da7c87c0898cf4f5e58f7901bc6451ced511a122d71694bf052862d",
-    "finalizer.json": "01fb0818cdeffc2e5fd5864df39ce7d9ca6807981f51fdf32414c2e5fd285266"
+    "finalizer.json": "01fb0818cdeffc2e5fd5864df39ce7d9ca6807981f51fdf32414c2e5fd285266",
+    "test_full_review_regressions.py": "f5cc30ccca99fc967e6455226aef82077c9901365e7fe8de79f9225f2b3cf1c9",
+    "source22_contracts.json": "72814f2dcc91a78afae121b7d498a7dd7ff826a1da13beff74baac1ca3ba8404",
+    "test_source22_contracts.py": "b743c31c593c8ce6f07fc957b88c99276e2492a875fa210cd6c551e3529ab268",
+    "source23_contracts.json": "1b3dbbdd2099ffc9c8a44ec09de7e1f20452e7ef43eba169f2218535a2e0938b",
+    "test_source23_contracts.py": "568c11d7196c97298a0578b1bc2bd05ac4fd4e0504501c4b91af3ac7315a1d15",
+    "source24_contracts.json": "16f9dc486b870a6ab14e010133a7513aad7d10cd399c5ce06c2132af76c0410f",
+    "test_source24_contracts.py": "e1b5485d47921a8903a31d27aa0a1ad985f67fd0c1925b2ef913beae504ca716",
+    "source25_contracts.json": "b5ea8a3cafcfb206be1f1f818a7e97ad220c6e318bc9502bda7c44749fc3b812",
+    "test_source25_contracts.py": "9c90601308ecc9bbf4e10600eb3b5735c14f57ec0e200395604a2834aba07e88",
+    "source26_contracts.json": "8fcb327c903a4a6e83127d6ac4c0095ee96e1e25a93ab5c977bd6706325a038c",
+    "test_source26_contracts.py": "ca2d743e06f212684dd7795fa42d840071bb29ce62b9118431639b96b7fcd958",
+    "source27_contracts.json": "a6a7351a01507cf165f58842eedb4d044c71dabca7684d2ac9a6678c9ed1ddcc",
+    "test_source27_contracts.py": "81c930ffb4023831172ae16b5e3256ceb56addb421143c8cdee26999aefc2c65",
+    "source28_contracts.json": "acab04bef3ae3fba0831b7972dd68fc3dcfbf8e1aaed4adb4f2d1e8bab426917",
+    "test_source28_contracts.py": "b6d8ee3511cdb75f036d187e070ce5a828ac96fc1b313bf5838ee8fe5ba7d736",
+    "source29_contracts.json": "d54e91895d3fffa512b2feb10ee792cde7e025a1f40e0304ff3397c07e3b74a9",
+    "test_source29_contracts.py": "72e4b9556aefd01936c887223b9459297b7147ff22606178b4d120e98a0970fc",
+    "source30_contracts.json": "3222a8b1ec96dcab2897f6de03be05d020ea9d35c1bf25676fa8850348c4841d",
+    "test_source30_contracts.py": "12365880a13034c66c821e6cf1c47440b9affcd68eb0a6c1a900567c48ba41fe",
+    "source31_contracts.json": "848260a88d2febb23bceb48ba6257d0bf64c2554a0fd3aefd301a1e563b98fdd",
+    "test_source31_contracts.py": "8154f8c5d177c631373b6deca6ef22c38ad28fafeb2856fb0a093c38f040a2f5",
+    "source32_contracts.json": "09d14a2008fb2c2e5dc12186b149c349aa602cb4e2abd78e66caffb5595877b0",
+    "test_source32_contracts.py": "f137447faafd1aeef084af219394774740cf514837168c637187a8bff0c0875f",
+    "source33_contracts.json": "e63d3e25f21068dd202ba6e3c015306ebefb829b4bf22aabd8a7eaeb067bf899",
+    "test_source33_contracts.py": "628e77554d75c9f85ccbb8a81005b874046076e2ee2b1777d9a2c72f6d439269",
+    "source34_contracts.json": "477cc2e2d3753c49aa7a0621440e39cbde9e7fa654e5313086633e8f01ac329f",
+    "test_source34_contracts.py": "f2dc42545d44c9d30c26dfe5b1cbc225786dafa64af5526cbe63143cc0174b57",
+    "test_source35_contracts.py": "9be855681ba932a4ab28562e831aa8c2c9ed1d955c68bd076039eec6fd9046b8",
+    "test_source36_contracts.py": "fb25aa48744ae05f38b6aede6cdb214986799210b746bcf768857122bead1105"
+  },
+  "repository_examples": {
+    "reference/config.example.json": "1723cf6ab5f5ae528717611f6720e7ddf5eac9a17db5cf718725a5e51a85bed0",
+    "metrics/verdicts.jsonl.example": "44578d879ce29aa381dc90913f5e4be8e1821d8f523b0d48e4aef7c78ad26e2a",
+    "metrics/scorecard.md.example": "d99c1cc27fe2d925e4264a6eed05e73ea96665e2b3e623384cab98e42b699dfb"
   }
 }

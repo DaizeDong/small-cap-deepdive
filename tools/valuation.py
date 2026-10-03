@@ -15,13 +15,21 @@ Philosophy:
   Phase 3's margin-of-safety BUY trigger. An analyst or Phase 3 agent reads this
   block and acts; this module never tells them what to do.
 
-Usage:
-    python valuation.py --json reports/smallcap/deepdive_WLFC_2026-06-19.json --ticker WLFC
-    python valuation.py --json ... --ticker WLFC --mktcap 1644548480
-    python valuation.py --selftest
-Output:
-    reports/smallcap/valuation_<ticker>_<date>.json
-    Also merges the valuation block into the deepdive JSON (adds key "valuation").
+Private path setup:
+    Initialize a versioned PRIVATE companion with SMALL_CAP_DEEPDIVE_CONFIG_DIR.
+    Set REPORTS_ROOT to the absolute path returned by _common.reports_dir():
+        python -c "import sys; sys.path.insert(0, 'tools'); from _common import reports_dir; print(reports_dir())"
+    The resolver includes SMALLCAP_RUN when set and fails if initialization is missing.
+
+Usage (REPORTS_ROOT is the resolved absolute private path):
+    python tools/valuation.py --json "${REPORTS_ROOT}/deepdive_SYNTA_2000-01-01.json" --ticker SYNTA
+    python tools/valuation.py --json "${REPORTS_ROOT}/deepdive_SYNTA_2000-01-01.json" --ticker SYNTA --mktcap 120000000
+    python tools/valuation.py --selftest
+Output: _common.reports_dir()/valuation_<ticker>_<date>.json.
+The CLI also merges the valuation block into the supplied private deepdive JSON;
+both destinations pass the private-output path check. --selftest is synthetic.
+--live-diagnostic is a separate explicit entry point that may acquire live data and
+write private reports.
 """
 from __future__ import annotations
 
@@ -47,15 +55,137 @@ from _valuation_model import (
     _is_cyclical,
     _normalize,
     _build_ebitda_series,
-    _build_fcf_series,
 )
 # buy_eligible composite (the BUY-trigger guard half) extracted to a sibling module.
 from _valuation_eligibility import compose_buy_eligibility
+from _cash_flow_evidence import paired_cash_flow_evidence, paired_annual_sum_evidence
 
 
 # ---------------------------------------------------------------------------
 # Core valuation computation
 # ---------------------------------------------------------------------------
+def _build_fcf_series(ocf_series: list[dict], capex_series: list[dict],
+                      fcf_is_proxy: bool) -> tuple[list[dict], bool]:
+    """Keep the valuation API while applying the same annual-period evidence contract."""
+    periods = paired_cash_flow_evidence(ocf_series, capex_series, fcf_is_proxy)
+    return periods, any(not period["qualified"] for period in periods)
+
+
+def _debt_evidence(derived: dict, financials: dict) -> tuple:
+    """Reconcile a debt scalar with the latest complete, same-period evidence.
+
+    A number or a summary label alone cannot establish contractual-debt coverage.
+    Older complete periods cannot override newer partial, malformed or conflicting rows.
+    """
+    from datetime import date
+    from math import isclose
+    from sys import float_info
+
+    components = ("LongTermDebtNoncurrent", "LongTermDebtCurrent", "ShortTermBorrowings",
+                  "FinanceLeaseLiabilityNoncurrent", "FinanceLeaseLiabilityCurrent")
+    scopes = {
+        "LongTermDebt": components[:2],
+        "LongTermDebtAndCapitalLeaseObligations": components[:2] + components[3:],
+        "DebtLongtermAndShorttermCombinedAmount": components[:3],
+    }
+    known = {"reported", "partial", "conflicting", "invalid", "unavailable", "unverified"}
+
+    def numeric(value):
+        return type(value) in (int, float) and 0 <= value <= float_info.max
+
+    scalar = derived.get("latest_total_debt")
+    value = scalar if numeric(scalar) else None
+    declared = derived.get("debt_evidence_status")
+    if declared is not None and (not isinstance(declared, str) or declared not in known):
+        declared = "unverified"
+    issues = []
+    statuses = []
+    if declared and declared != "reported":
+        statuses.append(declared)
+    series = financials.get("total_debt")
+    if series is None or series == []:
+        statuses.append("unavailable" if value is None else "unverified")
+        if value is not None:
+            issues.append("latest debt-period evidence missing")
+    elif not isinstance(series, list):
+        statuses.append("invalid")
+        issues.append("debt series is not a list")
+    else:
+        dated = []
+        for row in series:
+            if not isinstance(row, dict):
+                statuses.append("invalid")
+                issues.append("debt period is not an object")
+                continue
+            try:
+                end = row.get("end")
+                if not isinstance(end, str) or len(end) != 10:
+                    raise ValueError("invalid period date")
+                period = date.fromisoformat(end)
+            except (TypeError, ValueError):
+                statuses.append("invalid")
+                issues.append("debt period date invalid")
+                continue
+            dated.append((period, row))
+        if dated:
+            latest = max(day for day, _ in dated)
+            latest_rows = [row for day, row in dated if day == latest]
+            for row in latest_rows:
+                status = row.get("debt_evidence_status")
+                status = status if isinstance(status, str) and status in known else "unverified"
+                statuses.append(status)
+                amount = row.get("val")
+                if not numeric(amount):
+                    statuses.append("invalid" if amount is not None else "unavailable")
+                    issues.append("latest debt-period value unavailable or invalid")
+                elif value is not None and not isclose(value, amount, rel_tol=1e-6, abs_tol=1):
+                    statuses.append("conflicting")
+                    issues.append("latest debt scalar differs from latest period")
+                parts = row.get("components")
+                if not isinstance(parts, dict) or any(key not in parts for key in components):
+                    statuses.append("partial")
+                    issues.append("latest period lacks contractual-debt components")
+                elif (any(not numeric(parts[key]) for key in components)
+                      or not numeric(sum(float(parts[key]) for key in components))):
+                    statuses.append("invalid")
+                    issues.append("latest contractual-debt component or total invalid")
+                elif numeric(amount):
+                    if not isclose(sum(float(parts[key]) for key in components), amount, rel_tol=1e-6, abs_tol=1):
+                        statuses.append("conflicting")
+                        issues.append("latest debt total differs from component sum")
+                    aggregates = row.get("aggregates", {})
+                    if not isinstance(aggregates, dict):
+                        statuses.append("invalid")
+                        issues.append("latest debt aggregates malformed")
+                    else:
+                        for key, tags in scopes.items():
+                            if key in aggregates and (not numeric(aggregates[key]) or not isclose(
+                                    aggregates[key], sum(float(parts[tag]) for tag in tags), rel_tol=1e-6, abs_tol=1)):
+                                statuses.append("conflicting")
+                                issues.append("latest debt aggregate conflicts with component evidence")
+                if row.get("missing_components"):
+                    statuses.append("partial")
+                if row.get("conflicting_aggregates"):
+                    statuses.append("conflicting")
+                if "proxy" in str(row.get("source") or "").lower():
+                    statuses.append("partial")
+        else:
+            statuses.append("unavailable")
+    if scalar is not None and value is None:
+        statuses.append("invalid")
+        issues.append("derived debt value invalid")
+    elif value is None:
+        statuses.append("unavailable")
+    priority = ("conflicting", "invalid", "partial", "unavailable", "unverified")
+    status = next((item for item in priority if item in statuses), "reported")
+    uncertain = bool(status != "reported" or derived.get("debt_evidence_uncertain")
+                     or "proxy" in str(derived.get("debt_source") or "").lower())
+    detail = derived.get("debt_evidence_detail")
+    if issues:
+        detail = "; ".join([str(detail)] if detail else []) + ("; " if detail else "") + "; ".join(dict.fromkeys(issues))
+    return value, status, uncertain, detail
+
+
 def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     """
     Compute the full valuation block from a deepdive JSON dict and market cap.
@@ -83,14 +213,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
 
     # --- Inputs ---
     latest_cash = der.get("latest_cash")
-    latest_debt = der.get("latest_total_debt")
-    debt_status = der.get("debt_evidence_status") or (
-        "reported" if latest_debt is not None else "unavailable")
-    debt_uncertain = bool(
-        latest_debt is None or debt_status != "reported"
-        or der.get("debt_evidence_uncertain")
-        or "proxy" in str(der.get("debt_source") or "").lower())
-    debt_detail = der.get("debt_evidence_detail")
+    latest_debt, debt_status, debt_uncertain, debt_detail = _debt_evidence(der, fin)
     if debt_uncertain:
         dq.append(f"debt_evidence_uncertain:{debt_status}:{debt_detail or 'contractual debt not established'}")
     latest_revenue = der.get("latest_revenue")
@@ -132,7 +255,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         _lrl_tag = "low_revenue_loss_ratio_extreme" if der.get("low_revenue_loss_ratio_extreme") else "low_revenue_loss_ratio"
         dq.append(f"{_lrl_tag}:{_lrl_detail}")
     # A2: concentration_unquantified, text customer-concentration flag True but no XBRL magnitude
-    # (text-only / pre-/early-XBRL filer, the SWMR/LFCR SIGA-class blind spot). Advisory ONLY:
+    # Text-only or early-XBRL financial evidence may omit the magnitude. Advisory only:
     # surfaced in data_quality so a PM sees the unquantified concentration; does NOT gate.
     if der.get("concentration_unquantified"):
         dq.append("concentration_unquantified:text_flag_true_but_xbrl_magnitude_null")
@@ -155,8 +278,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # A3: insurance_concepts_present, an insurance underwriter / insurance-subsidiary holdco
     # detected from XBRL concepts (PremiumsEarned / policy reserves / losses&LAE / policyholder
     # funds). These route like a financial_sic name (nav/abstain, never an fcf_cap BUY) EVEN when
-    # the top-level SIC is non-financial, closing the BOC SIC-65 surety-insurance-holdco hole
-    # where prefix 65 is not in _FINANCIAL_SIC_PREFIXES. Distinct buy_eligible gate below.
+    # the top-level SIC is non-financial. Distinct buy_eligible gate below.
     _insurance_concepts_present = bool(der.get("insurance_concepts_present", False))
     _financial_sic_forced_unsuitable = False
     if _financial_sic:
@@ -168,10 +290,9 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         _ins_concept = der.get("insurance_concept_matched", "")
         dq.append(f"insurance_concepts_present_fcf_unsuitable:concept={_ins_concept}")
     elif not sic_code:
-        # C2-fallback: SEC submissions sometimes omit the top-level SIC (observed on
-        # several BDCs / closed-end funds, e.g. WHF). Detect the investment-company
-        # signature, NO GAAP revenue but operating cash flow present (loan/portfolio
-        # cash flows), and treat it as financial-structure: FCF-cap is unsuitable.
+        # Missing SIC leaves financial structure unconfirmed. Revenue absent with
+        # operating cash flow present is a conservative fallback signature for which
+        # FCF capitalization is unsuitable.
         if latest_revenue is None and latest_ocf is not None:
             _financial_sic_forced_unsuitable = True
             dq.append("financial_structure_suspected_no_sic:revenue_absent_ocf_present")
@@ -200,7 +321,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     if latest_da is None:
         dq.append("dep_amort_unavailable")
     if latest_capex is None:
-        dq.append("capex_unavailable_fcf_uses_ocf_proxy")
+        dq.append("capex_unavailable_fcf_unqualified")
     if fcf_is_proxy:
         dq.append("fcf_equals_ocf_proxy_no_capex")
     if latest_ni is None or latest_ni <= 0:
@@ -232,25 +353,19 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
 
     # Build EBITDA series for normalization (full pairs only; skips partial entries)
     ebitda_series, n_ebitda_partial = _build_ebitda_series(ebit_series, da_series)
+    ebitda_periods = paired_annual_sum_evidence(ebit_series, da_series)
+    latest_ebitda_evidence = ebitda_periods[-1] if ebitda_periods else None
     if n_ebitda_partial > 0:
         dq.append(f"ebitda_series_partial_entries:{n_ebitda_partial}")
 
-    # --- P9: EBIT concept cascade → EBITDA recovery ---
-    # The producer tags ebit_source (the concept actually used: OperatingIncomeLoss /
-    # pretax+interest_addback / pretax_proxy). When latest_ebitda is missing but EBIT
-    # was recovered via the cascade, reconstruct latest EBITDA = recovered_EBIT + D&A so
-    # EV/EBITDA computes on the ~47% of names that previously came back null.
+    # Reconstruct current EBITDA from the same qualified annual operands as the producer.
+    # A derived scalar cannot replace a missing or incompatible latest period.
     ebit_source = der.get("ebit_source")
-    latest_ebitda = der.get("latest_ebitda")
-    if latest_ebitda is None and ebit_source:
-        # Prefer the latest full EBIT+D&A pair from the constructed series; fall back to
-        # derived latest_ebit + latest_da.
-        _recovered_ebitda = ebitda_series[-1]["val"] if ebitda_series else None
-        if _recovered_ebitda is None and latest_ebit is not None and latest_da is not None:
-            _recovered_ebitda = latest_ebit + latest_da
-        if _recovered_ebitda is not None:
-            latest_ebitda = _recovered_ebitda
-            dq.append(f"ebitda_recovered_via_ebit_cascade:ebit_source={ebit_source}")
+    latest_ebitda = latest_ebitda_evidence["val"] if latest_ebitda_evidence else None
+    if der.get("latest_ebitda") is not None and der["latest_ebitda"] != latest_ebitda:
+        dq.append("derived_latest_ebitda_not_supported_by_matching_period")
+    if der.get("latest_ebitda") is None and latest_ebitda is not None and ebit_source:
+        dq.append(f"ebitda_recovered_via_ebit_cascade:ebit_source={ebit_source}")
 
     ev_ebitda: float | None = None
     if ev and ev > 0 and latest_ebitda and latest_ebitda > 0:
@@ -262,7 +377,11 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     if latest_ni and latest_ni > 0:
         pe = round(market_cap / latest_ni, 2)
 
-    latest_fcf = der.get("latest_fcf")
+    paired_fcf = paired_cash_flow_evidence(ocf_series, capex_series, bool(fcf_is_proxy))
+    latest_fcf_evidence = paired_fcf[-1] if paired_fcf else None
+    latest_fcf = latest_fcf_evidence["val"] if latest_fcf_evidence else None
+    if der.get("latest_fcf") is not None and der["latest_fcf"] != latest_fcf:
+        dq.append("derived_latest_fcf_not_supported_by_matching_period")
     fcf_yield: float | None = None
     if latest_fcf is not None and market_cap > 0:
         fcf_yield = round(latest_fcf / market_cap, 4)
@@ -275,9 +394,8 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     fcf_periods = []
     if cyclical:
         norm_ebitda = _normalize(ebitda_series, n_years)
-        norm_fcf_series, _ = _build_fcf_series(ocf_series, capex_series, fcf_is_proxy)
-        fcf_periods = norm_fcf_series[-n_years:]
-        fcf_proxy_flag = any(not period["capex_complete"] for period in fcf_periods)
+        fcf_periods = paired_fcf[-n_years:]
+        fcf_proxy_flag = not fcf_periods or any(not period["capex_complete"] for period in fcf_periods)
         norm_fcf = None if fcf_proxy_flag else _normalize(fcf_periods, n_years)
         norm_note = f"cyclical:trailing_{n_years}yr_avg"
         # Flag if the normalization window is shorter than requested
@@ -286,8 +404,9 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
             dq.append(f"normalized_uses_{n_fcf_used}yr_insufficient")
     else:
         norm_ebitda = latest_ebitda
-        fcf_proxy_flag = bool(fcf_is_proxy or latest_capex is None)
-        norm_fcf = None if fcf_proxy_flag else latest_fcf
+        fcf_periods = paired_fcf[-1:]
+        fcf_proxy_flag = not fcf_periods or not fcf_periods[0]["qualified"]
+        norm_fcf = None if fcf_proxy_flag else fcf_periods[0]["val"]
         norm_note = "non_cyclical:latest"
 
     incomplete_periods = [period["end"] for period in fcf_periods if not period["capex_complete"]]
@@ -298,7 +417,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "requested_periods": n_years if cyclical else 1,
         "periods": fcf_periods,
         "incomplete_periods": incomplete_periods,
-        "latest_capex_complete": latest_capex is not None and not fcf_is_proxy,
+        "latest_capex_complete": bool(latest_fcf_evidence and latest_fcf_evidence["qualified"]),
         "policy": "no_capitalization_when_selected_capex_evidence_is_incomplete",
     }
 
@@ -309,10 +428,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
 
     # --- Asset-heavy / leveraged flag ---
     # FCF-cap model is unsuitable when debt/assets > 0.62.
-    # Threshold: 0.62 robustly catches aircraft lessors (WLFC ~64-71% across quarters) and
-    # finance companies while sparing cyclical industrials (LNN ~14%).
-    # The annual FY figure for WLFC is typically ~67-69%; quarterly dips to ~64% during
-    # fleet drawdowns, so 0.62 is the right boundary to avoid false negatives.
+    # This debt ratio is a model-suitability threshold, not evidence of a specific issuer outcome.
     # C2: financial SIC also forces fcf_cap_model_unsuitable regardless of debt/assets ratio.
     fcf_cap_model_unsuitable: bool = False
     if _financial_sic_forced_unsuitable:
@@ -327,9 +443,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
             dq.append(f"fcf_cap_model_unsuitable:debt_to_assets={debt_to_assets:.4f}>0.62")
 
     # --- v0.3.2 #8: lessor / leasing-business NAV routing (debt/assets<0.62 hole) ---
-    # Asset-heavy lessors (railcar/equipment/auto) are textbook lease-fleet NAV candidates, but
-    # their balance sheets sit BELOW the 0.62 debt/assets threshold (GBX 0.41, RAIL 0.35), so the
-    # FCF-cap firewall above did not route them to NAV, they were mis-valued on trough-cycle FCF.
+    # Leasing-business evidence can require NAV even below the debt/assets threshold.
     # The producer (deepdive_data.py) emits derived.lessor_asset_heavy=True on a leasing/rental
     # business signal (leasing SIC, lease-income concept, or very-high PP&E/lease-fleet ratio with
     # rental revenue). Consume it here: a lessor forces fcf_cap_model_unsuitable=True (-> lease-fleet
@@ -342,12 +456,12 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         dq.append(f"lessor_asset_heavy_fcf_unsuitable_route_nav:{_lessor_detail}")
 
     # --- C1 data-quality blocks on valuation routing ---
-    # If debt_truncation or wrong_entity detected, treat EV/MoS as unreliable.
-    # These flags are already in dq; here we force abstain by treating fcf_cap unsuitable.
+    # Unreliable debt or entity evidence blocks FCF routing and BUY eligibility.
+    # A computable NAV band does not clear these guards in the eligibility composite.
     _c1_data_block = (debt_uncertain or der.get("debt_truncation_suspected")
                       or der.get("debt_stale") or der.get("wrong_entity_suspected"))
     if _c1_data_block and not fcf_cap_model_unsuitable:
-        fcf_cap_model_unsuitable = True  # force abstain path
+        fcf_cap_model_unsuitable = True
         dq.append("fcf_cap_blocked_by_c1_data_quality_guard")
 
     # --- Reverse DCF (Gordon growth approximation) ---
@@ -483,7 +597,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     #   (ii) selected CapEx evidence is missing or marked as an OCF proxy
     #   (iii) lumpy OCF (CV high but not fully captured by cyclical flag)
     #
-    # This only fires for fcf_cap path (nav/abstain already route away from BUY).
+    # This guard applies to the FCF basis; NAV has separate evidence requirements.
     _fcf_sustainability_uncertain = bool(fcf_proxy_flag and mos_basis == "fcf_cap")
     if _fcf_sustainability_uncertain:
         dq.append("fcf_sustainability_uncertain:ocf_proxy_capex_unknown_or_incomplete_history")
@@ -494,9 +608,8 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
             dq.append(f"fcf_sustainability_uncertain:rdcf_growth={rdcf_growth:.3f}<-0.15")
 
     # --- P10: lumpy-OCF normalization guard (specced in I1, never coded until now) ---
-    # When a cyclical name is normalized on a trailing 5yr average, a single peak year
-    # (e.g. SIGA's 2023 BARDA delivery, ~8x the trough) over-inflates norm_fcf and
-    # manufactures a false MoS. Flag-and-downgrade, NEVER silently delete the year.
+    # A single peak year can inflate trailing normalized FCF. Flag-and-downgrade;
+    # never silently delete the observation from the normalization window.
     # A year is "lumpy" when its OCF > 2x the median of the OTHER years in the window.
     # This overlaps P6 contamination; we read the producer's contamination_ratio as the
     # corroborating signal (latest below its own 5yr-avg base => over-normalized peak).
@@ -545,7 +658,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
     # Read the producer's peak_contamination_flag (contamination_ratio<0.8 AND latest_below_avg
     # AND latest_net_income<0). This is the V-shape value-trap catch (trough->peak->rollover)
     # that fundamental_decline_flag MISSES because that flag is gated on rev_slope_sign<0; on a
-    # V-shape the whole-window slope is +1 so fundamental_decline_flag stays False (NRP). When set,
+    # positive whole-window slope can leave fundamental_decline_flag false. When set,
     # a static-MoS BUY must be downgraded BUY->WATCH, exactly like fundamental_decline_flag.
     # Downgrade-only: it NEVER manufactures a BUY and never upgrades.
     _peak_contamination_flag = bool(der.get("peak_contamination_flag", False))
@@ -557,10 +670,8 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         )
 
     # --- P3: concentration kill-flag (read from producer) ---
-    # concentration_flag is composed by the producer from XBRL segment members:
-    #   "kill"  if top_program_pct>60 OR top_customer_pct>40
-    #   "watch" if either in 40-60
-    # A "kill" forces buy_eligible=False (catches SIGA's ~90% BARDA dependence).
+    # The producer extracts concentration from filing-footnote context.
+    # Its kill flag forces buy_eligible=False.
     _concentration_flag = der.get("concentration_flag")
     if _concentration_flag == "kill":
         dq.append(
@@ -588,9 +699,8 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         dq.append(f"cross_source_mismatch:{_cross_source_detail}")
 
     # --- v0.3.1 #1: normalization_masks_current_loss (the degenerate-base / divested-stub catch) ---
-    # The TUSK hole: when contamination_ratio<0 (or the latest base is negative) the A1 (0<cr) guard
-    # silences BOTH cyclical vetoes (peak_contamination + fundamental_decline), yet the trailing-5yr
-    # average still emits a POSITIVE normalized_fcf -> a phantom positive MoS (+55.1% mechanical BUY).
+    # Positive-base cyclical vetoes exclude negative contamination ratios, yet a positive
+    # trailing average can still mask current cash losses.
     # The producer (deepdive_data.py) emits normalization_masks_current_loss = normalized_fcf>0 AND
     # (latest_ocf<0 OR latest_fcf<0 OR contamination_ratio<0). We AND (not flag) into buy_eligible
     # here so the BUY is downgraded BUY->WATCH, exactly like fundamental_decline / peak_contamination.
@@ -604,10 +714,9 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         )
 
     # --- P1: compose buy_eligible, the single mechanical boolean the BUY trigger ANDs ---
-    # buy_eligible is True ONLY when every blocking guard is clear. The rubric/SKILL BUY
-    # trigger additionally requires mos_basis=="fcf_cap" AND MoS>=30 AND zero Tier-3-load-
-    # bearing; buy_eligible is the deterministic guard-composite half of that contract.
-    # The composite (all guard reads/reasons) lives in _valuation_eligibility (pure move).
+    # All blocking guards must clear. The rubric also requires active MoS >= 30%,
+    # complete evidence, no kill-flags, and no Tier-3-load-bearing evidence, with
+    # additional model-fit conditions for NAV. The composite records guard reasons.
     _buy_eligible, _buy_ineligible_reasons = compose_buy_eligibility(
         der,
         extreme_mos_review_required=_extreme_mos_review_required,
@@ -624,7 +733,15 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         nav_mos=nav_mos,
         mos_basis=mos_basis,
         debt_evidence_uncertain=debt_uncertain,
+        lumpy_ocf_normalization_suspect=_lumpy_ocf_normalization_suspect,
     )
+
+    if dd.get("as_of") is not None:
+        mos_basis, mos, nav_mos = "abstain", None, None
+        mos_null_reason = "historical_eligibility_contract_incomplete"
+        _buy_eligible = False
+        _buy_ineligible_reasons.append(mos_null_reason)
+        dq.append(mos_null_reason)
 
     # --- Assemble output ---
     block = {
@@ -653,6 +770,10 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "normalization_note": norm_note,
         "normalized_fcf_is_proxy": fcf_proxy_flag,
         "fcf_normalization": fcf_normalization,
+        "latest_fcf": latest_fcf,
+        "latest_fcf_evidence": latest_fcf_evidence,
+        "latest_ebitda_evidence": latest_ebitda_evidence,
+        "ebitda_periods": ebitda_periods,
         # Reverse DCF (equity-FCF basis, denominator is market_cap, not EV)
         "rdcf_basis": rdcf_basis,
         "reverse_dcf_implied_growth": rdcf_growth,
@@ -661,7 +782,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "fcf_cap_model_unsuitable": fcf_cap_model_unsuitable,
         # v0.3.2 #8: lessor_asset_heavy (read from producer derived). When True, this name was
         # routed to NAV/abstain (fcf_cap_model_unsuitable forced True) EVEN at debt/assets<0.62 ,
-        # the GBX/RAIL lease-fleet NAV fix. Surfaced so the report can say "lessor -> NAV basis".
+        # making the lease-fleet NAV basis explicit in reports.
         "lessor_asset_heavy": _lessor_asset_heavy,
         "lessor_asset_heavy_detail": der.get("lessor_asset_heavy_detail") if _lessor_asset_heavy else None,
         "latest_assets": round(latest_assets) if latest_assets is not None else None,
@@ -691,7 +812,7 @@ def compute_valuation(dd: dict, market_cap: int, cfg: dict) -> dict:
         "peak_contamination_flag": _peak_contamination_flag,
         # v0.3.1 #1: degenerate-base / divested-stub catch (read from producer derived). When True,
         # the trailing-avg normalized FCF>0 is masking current cash burn -> buy_eligible=False
-        # (downgrade BUY->WATCH). The TUSK hole the mechanical cyclical vetoes miss.
+        # (downgrade BUY->WATCH), covering current losses outside the cyclical vetoes.
         "normalization_masks_current_loss": _normalization_masks_current_loss,
         # P7: second-source sanity band (read from producer derived). cross_source_mismatch is a
         # DATA-INTEGRITY gate on buy_eligible (>2.5x SEC-vs-yfinance disagreement); checked=False
@@ -756,11 +877,17 @@ def main():
     ap.add_argument("--json", default="", help="Path to deepdive_<ticker>_<date>.json")
     ap.add_argument("--ticker", default="", help="Ticker symbol (used for market cap lookup)")
     ap.add_argument("--mktcap", type=int, default=0, help="Market cap override in dollars (optional)")
-    ap.add_argument("--selftest", action="store_true", help="Run self-test on WLFC and LNN and exit")
+    diagnostic = ap.add_mutually_exclusive_group()
+    diagnostic.add_argument("--selftest", action="store_true", help="Run synthetic valuation assertions")
+    diagnostic.add_argument("--live-diagnostic", action="store_true",
+                            help="Explicit live issuer diagnostic; may fetch data and write private REPORTS")
     args = ap.parse_args()
 
     if args.selftest:
         _selftest()
+        return
+    if args.live_diagnostic:
+        _live_diagnostic()
         return
 
     if not args.json:
@@ -812,20 +939,24 @@ def main():
 
 def _print_valuation_summary(block: dict) -> None:
     """Print a human-readable summary of the valuation block."""
+    def money(value, reason):
+        return f"${value/1e6:.0f}M" if value is not None else f"null ({reason})"
+
     t = block.get("ticker", "?")
-    mc = block.get("market_cap", 0) or 0
+    mc = block.get("market_cap")
     ev = block.get("ev")
     mos_basis = block.get("mos_basis", "?")
     print(f"\n=== {t} Valuation Summary ===")
-    print(f"  Market Cap:      ${mc/1e6:.0f}M")
-    print(f"  EV:              ${(ev or 0)/1e6:.0f}M" + (f"  [{block.get('ev_note')}]" if block.get("ev_note") else ""))
+    print(f"  Market Cap:      {money(mc, 'market_cap_unavailable')}")
+    print(f"  EV:              {money(ev, block.get('ev_note') or 'ev_unavailable')}" +
+          (f"  [{block['ev_note']}]" if ev is not None and block.get("ev_note") else ""))
     print(f"  EV/Sales:        {block.get('ev_sales')}")
     print(f"  EV/EBITDA:       {block.get('ev_ebitda')}")
     print(f"  P/E:             {block.get('pe')}")
     print(f"  FCF Yield:       {block.get('fcf_yield')}")
     print(f"  Cyclical:        {block.get('cyclical')} (CV={block.get('cv_ebitda')})")
-    print(f"  Norm. EBITDA:    ${(block.get('normalized_ebitda') or 0)/1e6:.0f}M  [{block.get('normalization_note')}]")
-    print(f"  Norm. FCF:       ${(block.get('normalized_fcf') or 0)/1e6:.0f}M")
+    print(f"  Norm. EBITDA:    {money(block.get('normalized_ebitda'), 'normalized_ebitda_unavailable')}  [{block.get('normalization_note')}]")
+    print(f"  Norm. FCF:       {money(block.get('normalized_fcf'), 'normalized_fcf_unavailable')}")
     rdcf = block.get("reverse_dcf_implied_growth")
     rdcf_reason = block.get("reverse_dcf_null_reason")
     rdcf_basis = block.get("rdcf_basis", "equity_fcf_vs_market_cap")
@@ -869,16 +1000,8 @@ def _print_valuation_summary(block: dict) -> None:
 # ---------------------------------------------------------------------------
 # Selftest
 # ---------------------------------------------------------------------------
-def _selftest():
-    """Assert the valuation block populates correctly for WLFC and LNN.
-
-    WLFC (CIK 1018164): aircraft lessor — expects fcf_cap_model_unsuitable=True,
-      mos_basis="nav" or "abstain", NO FCF MoS (the old -137% MoS was a bug).
-    LNN (CIK 836157): agricultural irrigation company — expects mos_basis="fcf_cap"
-      with a numeric margin_of_safety_pct.
-
-    Requires fresh deepdive JSONs. If not found, pulls them live.
-    """
+def _live_diagnostic():
+    """Explicit live diagnostic: may fetch issuer data and write private REPORTS."""
     init_edgar()
     cfg = _val_cfg()
 
@@ -961,9 +1084,9 @@ def _selftest():
     dd_wlfc = _get_or_pull("WLFC", "1018164")
     block_wlfc = _assert_valuation("WLFC", "1018164", dd_wlfc)
 
-    # WLFC-specific: must be flagged as asset-heavy (aircraft lessor; debt/assets ~67%)
+    # The live lessor case must establish model suitability from its current inputs.
     assert block_wlfc.get("fcf_cap_model_unsuitable") is True, (
-        f"WLFC: expected fcf_cap_model_unsuitable=True (debt/assets ~67%), got "
+        f"WLFC: expected fcf_cap_model_unsuitable=True from current evidence, got "
         f"{block_wlfc.get('fcf_cap_model_unsuitable')}"
     )
     assert block_wlfc.get("mos_basis") in ("nav", "abstain"), (
@@ -1002,44 +1125,16 @@ def _selftest():
     out_lnn = REPORTS / f"valuation_LNN_{today()}.json"
     out_lnn.write_text(json.dumps(block_lnn, indent=2, ensure_ascii=False), encoding="utf-8")
 
+
+def _selftest():
+    """Run synthetic valuation assertions without live acquisition or report writes."""
+    from make_fixtures import source26_debt_fixture, source28_annual_inputs, source32_legacy_scenarios
+    _legacy = source32_legacy_scenarios()
+    cfg = dict(_VALUATION_DEFAULTS)
     # --- C2: financial-SIC exclusion unit test ---
     # Simulate a BDC (SIC 6726) with positive FCF, must route to nav/abstain, NOT fcf_cap
-    _dd_financial = {
-        "ticker": "TEST_BDC",
-        "derived": {
-            "latest_cash": 100_000_000,
-            "latest_total_debt": 500_000_000,
-            "latest_revenue": 200_000_000,
-            "latest_net_income": 50_000_000,
-            "latest_ocf": 80_000_000,
-            "latest_ebit": 60_000_000,
-            "latest_dep_amort": 5_000_000,
-            "latest_capex": 10_000_000,
-            "latest_ebitda": 65_000_000,
-            "latest_fcf": 70_000_000,
-            "fcf_is_ocf_proxy": False,
-            "latest_goodwill": 0,
-            "latest_intangibles": 0,
-            "latest_cash": 100_000_000,
-            "sic": "6726",  # holding companies/BDCs/REITs
-            "debt_truncation_suspected": False,
-            "debt_stale": False,
-            "wrong_entity_suspected": False,
-            "data_quality_warn": None,
-            "debt_source": "LongTermDebt",
-        },
-        "financials": {
-            "assets": [{"end": "2024-12-31", "val": 2_000_000_000}],
-            "equity": [{"end": "2024-12-31", "val": 1_500_000_000}],
-            "ebit": [{"end": "2024-12-31", "val": 60_000_000}],
-            "dep_amort": [{"end": "2024-12-31", "val": 5_000_000}],
-            "ocf": [{"end": "2024-12-31", "val": 80_000_000}],
-            "capex": [{"end": "2024-12-31", "val": 10_000_000}],
-            "revenue": [{"end": "2024-12-31", "val": 200_000_000}],
-            "shares_outstanding": [{"end": "2024-12-31", "val": 10_000_000}],
-        },
-    }
-    _block_fin = compute_valuation(_dd_financial, 300_000_000, cfg)
+    _dd_financial = _legacy['valuation_financial']
+    _block_fin = compute_valuation(source26_debt_fixture(_dd_financial), 300_000_000, cfg)
     assert _block_fin.get("financial_sic_fcf_unsuitable") is True, (
         f"C2: financial_sic_fcf_unsuitable must be True for SIC 6726, got {_block_fin.get('financial_sic_fcf_unsuitable')}"
     )
@@ -1051,39 +1146,9 @@ def _selftest():
     )
     print("  C2 financial-SIC exclusion: BDC SIC 6726 routes to nav/abstain  OK")
 
-    # --- C2-fallback: SIC absent + BDC signature (no revenue, OCF present), real WHF case ---
-    _dd_no_sic_bdc = {
-        "ticker": "TEST_BDC_NO_SIC",
-        "derived": {
-            "latest_cash": 20_000_000,
-            "latest_total_debt": 300_000_000,
-            "latest_revenue": None,          # BDC: no GAAP revenue
-            "latest_net_income": 40_000_000,
-            "latest_ocf": 77_000_000,        # portfolio cash flow present
-            "latest_ebit": None,
-            "latest_dep_amort": None,
-            "latest_capex": None,
-            "latest_ebitda": None,
-            "latest_fcf": 77_000_000,
-            "fcf_is_ocf_proxy": True,
-            "latest_goodwill": 0,
-            "latest_intangibles": 0,
-            "sic": None,                     # SEC omitted SIC (real WHF behaviour)
-            "debt_truncation_suspected": False,
-            "debt_stale": False,
-            "wrong_entity_suspected": False,
-            "data_quality_warn": None,
-            "debt_source": "LongTermDebt",
-        },
-        "financials": {
-            "assets": [{"end": "2024-12-31", "val": 700_000_000}],
-            "equity": [{"end": "2024-12-31", "val": 380_000_000}],
-            "ocf": [{"end": "2024-12-31", "val": 77_000_000}],
-            "revenue": [],                   # empty revenue series
-            "shares_outstanding": [{"end": "2024-12-31", "val": 20_000_000}],
-        },
-    }
-    _block_no_sic = compute_valuation(_dd_no_sic_bdc, 280_000_000, cfg)
+    # Synthetic absent-SIC financial data must use the BDC fallback.
+    _dd_no_sic_bdc = _legacy['valuation_no_sic_bdc']
+    _block_no_sic = compute_valuation(source26_debt_fixture(_dd_no_sic_bdc), 280_000_000, cfg)
     assert any("financial_structure_suspected_no_sic" in f for f in _block_no_sic.get("data_quality", [])), (
         f"C2-fallback: BDC with no SIC must flag financial_structure_suspected_no_sic, "
         f"got dq={_block_no_sic.get('data_quality')}"
@@ -1093,62 +1158,24 @@ def _selftest():
     )
     print("  C2-fallback: SIC-less BDC (no revenue + OCF) routes to nav/abstain  OK")
 
-    # --- G1: extreme MoS defense unit test ---
-    # Simulate a case where FCF MoS would be >100% (e.g., CISS-like scenario)
-    _dd_extreme = {
-        "ticker": "TEST_EXTREME",
-        "derived": {
-            "latest_cash": 0,
-            "latest_total_debt": 0,
-            "latest_revenue": 10_000_000,
-            "latest_net_income": 3_000_000,
-            "latest_ocf": 3_800_000,
-            "latest_ebit": 3_000_000,
-            "latest_dep_amort": 500_000,
-            "latest_capex": 200_000,
-            "latest_ebitda": 3_500_000,
-            "latest_fcf": 3_600_000,
-            "fcf_is_ocf_proxy": False,
-            "latest_goodwill": 0,
-            "latest_intangibles": 0,
-            "sic": "3990",  # non-financial
-            "debt_truncation_suspected": False,
-            "debt_stale": False,
-            "wrong_entity_suspected": False,
-            "data_quality_warn": None,
-            "debt_source": "LongTermDebt",
-        },
-        "financials": {
-            "assets": [{"end": "2024-12-31", "val": 5_000_000}],
-            "equity": [{"end": "2024-12-31", "val": 4_000_000}],
-            "ebit": [{"end": "2024-12-31", "val": 3_000_000}],
-            "dep_amort": [{"end": "2024-12-31", "val": 500_000}],
-            "ocf": [{"end": "2024-12-31", "val": 3_800_000}],
-            "capex": [{"end": "2024-12-31", "val": 200_000}],
-            "revenue": [{"end": "2024-12-31", "val": 10_000_000}],
-            "shares_outstanding": [{"end": "2024-12-31", "val": 1_000_000}],
-        },
-    }
+    # Synthetic high cash flow exercises an extreme margin-of-safety result.
+    _dd_extreme = _legacy['valuation_extreme']
     # Market cap = $1.2M (micro-cap), FCF = $3.6M → MoS would be (3.6M/0.12 - 1.2M) / 1.2M ~ 2400%
-    _block_extreme = compute_valuation(_dd_extreme, 1_200_000, cfg)
-    if _block_extreme.get("margin_of_safety_pct") is not None:
-        _mos_val = _block_extreme.get("margin_of_safety_pct", 0)
-        if abs(_mos_val) > 1.0:
-            assert _block_extreme.get("extreme_mos_review_required") is True, (
-                f"G1: extreme_mos_review_required must be True for MoS={_mos_val*100:.0f}%"
-            )
-            assert any("extreme_mos" in str(x) for x in _block_extreme.get("data_quality", [])), (
-                f"G1: extreme_mos_review_required must appear in data_quality list"
-            )
-            print(f"  G1 extreme-MoS defense: fires for MoS={_mos_val*100:.0f}%  OK")
-        else:
-            print(f"  G1 extreme-MoS defense: MoS={_mos_val*100:.1f}% not >100%, skipping assertion")
-    else:
-        print("  G1 extreme-MoS defense: MoS null (insufficient data), skipping assertion")
+    _block_extreme = compute_valuation(source26_debt_fixture(_dd_extreme), 1_200_000, cfg)
+    _mos_val = _block_extreme.get("margin_of_safety_pct")
+    assert _mos_val is not None, "G1: generated annual cash flows must produce a numeric MoS"
+    assert _mos_val > 1.0, "G1: the synthetic extreme case must exceed 100% MoS"
+    assert _block_extreme.get("extreme_mos_review_required") is True, (
+        f"G1: extreme_mos_review_required must be True for MoS={_mos_val*100:.0f}%"
+    )
+    assert any("extreme_mos" in str(x) for x in _block_extreme.get("data_quality", [])), (
+        "G1: extreme_mos_review_required must appear in data_quality list"
+    )
+    print(f"  G1 extreme-MoS defense: fires for MoS={_mos_val*100:.0f}%  OK")
 
     # --- G2: large-cap ceiling unit test ---
     # Use a market_cap > 2B, should set large_cap_out_of_scope=True
-    _block_large = compute_valuation(_dd_extreme, 5_000_000_000, cfg)  # $5B market cap
+    _block_large = compute_valuation(source26_debt_fixture(_dd_extreme), 5_000_000_000, cfg)  # $5B market cap
     assert _block_large.get("large_cap_out_of_scope") is True, (
         f"G2: large_cap_out_of_scope must be True for $5B market cap"
     )
@@ -1161,7 +1188,7 @@ def _selftest():
     _dd_with_warn = dict(_dd_extreme)
     _dd_with_warn["derived"] = dict(_dd_extreme["derived"])
     _dd_with_warn["derived"]["data_quality_warn"] = "test_warning:unit_anomaly"
-    _block_warn = compute_valuation(_dd_with_warn, 300_000_000, cfg)
+    _block_warn = compute_valuation(source26_debt_fixture(_dd_with_warn), 300_000_000, cfg)
     assert any("test_warning" in str(x) for x in _block_warn.get("data_quality", [])), (
         f"I3: data_quality_warn must propagate into valuation data_quality list"
     )
@@ -1171,7 +1198,7 @@ def _selftest():
     # Simulate: rdcf_growth would be < -0.15 (market pricing in steep decline)
     # Use tiny market_cap so FCF/mktcap ratio forces g = wacc - FCF/mktcap < -0.15
     # wacc=0.10; FCF=3.6M; mktcap=14M → g = 0.10 - 3.6/14 = 0.10 - 0.257 = -0.157 < -0.15
-    _block_i1 = compute_valuation(_dd_extreme, 14_000_000, cfg)
+    _block_i1 = compute_valuation(source26_debt_fixture(_dd_extreme), 14_000_000, cfg)
     rdcf_g = _block_i1.get("reverse_dcf_implied_growth")
     if rdcf_g is not None and rdcf_g < -0.15:
         assert _block_i1.get("fcf_sustainability_uncertain") is True, (
@@ -1187,43 +1214,9 @@ def _selftest():
     # --- P2: EVERY OCF-proxy now flags (the dead `elif` is fixed) ---
     # Build a clean, capital-light OCF-proxy name with assets present and assets/rev <= 5
     # (the exact path the old code silently skipped). It MUST now flag uncertain.
-    _dd_proxy_light = {
-        "ticker": "TEST_PROXY_LIGHT",
-        "derived": {
-            "latest_cash": 5_000_000,
-            "latest_total_debt": 0,
-            "latest_revenue": 50_000_000,
-            "latest_net_income": 8_000_000,
-            "latest_ocf": 10_000_000,
-            "latest_ebit": 9_000_000,
-            "latest_dep_amort": 500_000,
-            "latest_capex": None,             # capex missing -> OCF proxy
-            "latest_ebitda": 9_500_000,
-            "latest_fcf": 10_000_000,
-            "fcf_is_ocf_proxy": True,         # OCF proxy
-            "latest_goodwill": 0,
-            "latest_intangibles": 0,
-            "sic": "3990",                    # non-financial
-            "debt_truncation_suspected": False,
-            "debt_stale": False,
-            "wrong_entity_suspected": False,
-            "data_quality_warn": None,
-            "debt_source": "LongTermDebt",
-        },
-        "financials": {
-            # assets/rev = 80M/50M = 1.6 (<=5): the old `elif` would NEVER fire here
-            "assets": [{"end": "2024-12-31", "val": 80_000_000}],
-            "equity": [{"end": "2024-12-31", "val": 70_000_000}],
-            "ebit": [{"end": "2024-12-31", "val": 9_000_000}],
-            "dep_amort": [{"end": "2024-12-31", "val": 500_000}],
-            "ocf": [{"end": "2024-12-31", "val": 10_000_000}],
-            "capex": [],                      # no capex series -> proxy
-            "revenue": [{"end": "2024-12-31", "val": 50_000_000}],
-            "shares_outstanding": [{"end": "2024-12-31", "val": 10_000_000}],
-        },
-    }
+    _dd_proxy_light = _legacy['valuation_proxy_light']
     # Market cap chosen so mos_basis=fcf_cap and a numeric MoS exists.
-    _block_proxy = compute_valuation(_dd_proxy_light, 100_000_000, cfg)
+    _block_proxy = compute_valuation(source26_debt_fixture(_dd_proxy_light), 100_000_000, cfg)
     assert _block_proxy.get("mos_basis") == "fcf_cap", (
         f"P2: light proxy fixture must route fcf_cap, got {_block_proxy.get('mos_basis')!r}"
     )
@@ -1244,54 +1237,12 @@ def _selftest():
 
     # --- P1+P6: fundamental_decline_flag forces buy_eligible=False ---
     # Clean non-proxy name (would otherwise be eligible) + producer decline flag set.
-    _dd_clean_base = {
-        "ticker": "TEST_CLEAN",
-        "derived": {
-            "latest_cash": 20_000_000,
-            "latest_total_debt": 10_000_000,
-            "latest_revenue": 100_000_000,
-            "latest_net_income": 15_000_000,
-            "latest_ocf": 20_000_000,
-            "latest_ebit": 18_000_000,
-            "latest_dep_amort": 4_000_000,
-            "latest_capex": 5_000_000,
-            "latest_ebitda": 22_000_000,
-            "latest_fcf": 15_000_000,
-            "fcf_is_ocf_proxy": False,
-            "latest_goodwill": 0,
-            "latest_intangibles": 0,
-            "sic": "3990",                    # non-financial
-            "debt_truncation_suspected": False,
-            "debt_stale": False,
-            "wrong_entity_suspected": False,
-            "data_quality_warn": None,
-            "debt_source": "LongTermDebt",
-            "ebit_source": "OperatingIncomeLoss",
-            "concentration_flag": None,
-            "top_customer_pct": None,
-            "top_program_pct": None,
-            "fundamental_decline_flag": False,
-            "rev_slope_sign": 1,
-            "rev_accel_sign": 0,
-            "latest_below_avg": False,
-            "contamination_ratio": 1.05,
-            "peak_contamination_flag": False,
-            "low_revenue_loss_ratio": False,
-            "form_used": "10-K",
-        },
-        "financials": {
-            "assets": [{"end": "2024-12-31", "val": 200_000_000}],
-            "equity": [{"end": "2024-12-31", "val": 150_000_000}],
-            "ebit": [{"end": "2024-12-31", "val": 18_000_000}],
-            "dep_amort": [{"end": "2024-12-31", "val": 4_000_000}],
-            "ocf": [{"end": "2024-12-31", "val": 20_000_000}],
-            "capex": [{"end": "2024-12-31", "val": 5_000_000}],
-            "revenue": [{"end": "2024-12-31", "val": 100_000_000}],
-            "shares_outstanding": [{"end": "2024-12-31", "val": 10_000_000}],
-        },
-    }
+    _dd_clean_base = _legacy['valuation_clean_base']
+    from make_fixtures import source25_annual_cashflows, source25_equity_basis_scenarios
+    _dd_clean_base["financials"].update(source25_annual_cashflows())
+    source28_annual_inputs(_dd_clean_base)
     # (iv) Clean name keeps buy_eligible=True (small-cap mktcap, non-proxy, no flags).
-    _block_clean = compute_valuation(_dd_clean_base, 120_000_000, cfg)
+    _block_clean = compute_valuation(source26_debt_fixture(_dd_clean_base), 120_000_000, cfg)
     assert _block_clean.get("mos_basis") == "fcf_cap", (
         f"P1: clean fixture must route fcf_cap, got {_block_clean.get('mos_basis')!r}"
     )
@@ -1332,8 +1283,8 @@ def _selftest():
     _dd_decline["derived"]["fundamental_decline_flag"] = True
     _dd_decline["derived"]["rev_slope_sign"] = -1
     _dd_decline["derived"]["latest_below_avg"] = True
-    _dd_decline["derived"]["contamination_ratio"] = 0.68  # SIGA-like
-    _block_decline = compute_valuation(_dd_decline, 120_000_000, cfg)
+    _dd_decline["derived"]["contamination_ratio"] = _legacy["valuation_overrides"]["decline_ratio"]
+    _block_decline = compute_valuation(source26_debt_fixture(_dd_decline), 120_000_000, cfg)
     assert _block_decline.get("fundamental_decline_flag") is True, (
         "P6: producer fundamental_decline_flag must be read into the valuation block"
     )
@@ -1352,8 +1303,8 @@ def _selftest():
     _dd_conc = dict(_dd_clean_base)
     _dd_conc["derived"] = dict(_dd_clean_base["derived"])
     _dd_conc["derived"]["concentration_flag"] = "kill"
-    _dd_conc["derived"]["top_customer_pct"] = 75.0   # SIGA-like single-counterparty
-    _block_conc = compute_valuation(_dd_conc, 120_000_000, cfg)
+    _dd_conc["derived"]["top_customer_pct"] = _legacy["valuation_overrides"]["customer_pct"]
+    _block_conc = compute_valuation(source26_debt_fixture(_dd_conc), 120_000_000, cfg)
     assert _block_conc.get("concentration_flag") == "kill", (
         "P3: concentration_flag kill must be read into the valuation block"
     )
@@ -1368,21 +1319,17 @@ def _selftest():
     )
     print("  P3 concentration kill: forces buy_eligible=False  OK")
 
-    # --- P-A: peak_contamination_flag => buy_eligible False (V-shape value-trap veto) ---
-    # NRP-class: a clean MECHANICAL BUY (rev_slope_sign=+1 so fundamental_decline_flag stays
-    # False) that is actually a melting ice cube, the producer set peak_contamination_flag on
-    # the V-shape (contamination<0.8 AND latest_below_avg AND latest_NI<0). valuation must read
-    # the flag, downgrade BUY->WATCH, and surface the veto, WITHOUT fundamental_decline_flag.
+    # The synthetic peak has a rising whole-window slope, contaminated cash flow and a current loss.
     _dd_peak = dict(_dd_clean_base)
     _dd_peak["derived"] = dict(_dd_clean_base["derived"])
-    _dd_peak["ticker"] = "TEST_NRP_VSHAPE"
+    _dd_peak["ticker"] = "TEST_synthetic peak_VSHAPE"
     _dd_peak["derived"]["peak_contamination_flag"] = True
     _dd_peak["derived"]["fundamental_decline_flag"] = False   # V-shape: slope is +1
     _dd_peak["derived"]["rev_slope_sign"] = 1
     _dd_peak["derived"]["latest_below_avg"] = True
-    _dd_peak["derived"]["contamination_ratio"] = 0.7445       # NRP documented value
-    _dd_peak["derived"]["latest_net_income"] = -84_800_000    # NRP latest NI
-    _block_peak = compute_valuation(_dd_peak, 120_000_000, cfg)
+    _dd_peak["derived"]["contamination_ratio"] = _legacy["valuation_overrides"]["peak_ratio"]
+    _dd_peak["derived"]["latest_net_income"] = _legacy["valuation_overrides"]["peak_income"]
+    _block_peak = compute_valuation(source26_debt_fixture(_dd_peak), 120_000_000, cfg)
     assert _block_peak.get("peak_contamination_flag") is True, (
         "P-A: producer peak_contamination_flag must be read into the valuation block"
     )
@@ -1430,7 +1377,7 @@ def _selftest():
     _dd_xs["derived"]["cross_source_detail"] = (
         "gross disagreement (>2.5x) — total_debt: SEC=11.0M vs yf=4000.0M (ratio 363.6x)"
     )
-    _block_xs = compute_valuation(_dd_xs, 120_000_000, cfg)
+    _block_xs = compute_valuation(source26_debt_fixture(_dd_xs), 120_000_000, cfg)
     assert _block_xs.get("cross_source_mismatch") is True, (
         "P7: producer cross_source_mismatch must be read into the valuation block"
     )
@@ -1451,7 +1398,7 @@ def _selftest():
     _dd_xs_ok["derived"]["cross_source_checked"] = True
     _dd_xs_ok["derived"]["cross_source_mismatch"] = False
     _dd_xs_ok["derived"]["cross_source_detail"] = "second source within 2.5x on all comparable fields"
-    _block_xs_ok = compute_valuation(_dd_xs_ok, 120_000_000, cfg)
+    _block_xs_ok = compute_valuation(source26_debt_fixture(_dd_xs_ok), 120_000_000, cfg)
     assert _block_xs_ok.get("cross_source_checked") is True, (
         "P7: cross_source_checked=True must propagate when a second source was compared"
     )
@@ -1474,7 +1421,7 @@ def _selftest():
     _dd_lrl["derived"]["low_revenue_loss_ratio_detail"] = (
         "latest_net_income=-120.0M vs revenue=45.0M (|NI|/rev=2.7x) — early/pre-revenue resource pattern, right entity"
     )
-    _block_lrl = compute_valuation(_dd_lrl, 120_000_000, cfg)
+    _block_lrl = compute_valuation(source26_debt_fixture(_dd_lrl), 120_000_000, cfg)
     assert _block_lrl.get("low_revenue_loss_ratio") is True, (
         "P-B: producer low_revenue_loss_ratio must be read into the valuation block"
     )
@@ -1491,53 +1438,10 @@ def _selftest():
     print("  P-B low_revenue_loss_ratio: surfaced in data_quality, does NOT flip buy_eligible  OK")
 
     # P-B regression: the relabel must not flip a PREVIOUSLY-BLOCKED name to buy_eligible=true.
-    # Take the real-world early-revenue resource pattern (null FCF -> MoS null, the historical
+    # Take the synthetic early-revenue resource pattern (null FCF -> MoS null, the historical
     # block) and assert that even WITH low_revenue_loss_ratio set it stays NOT buy_eligible.
-    _dd_blocked = {
-        "ticker": "TEST_URG_LIKE",
-        "derived": {
-            "latest_cash": 30_000_000,
-            "latest_total_debt": 50_000_000,
-            "latest_revenue": 45_000_000,
-            "latest_net_income": -120_000_000,
-            "latest_ocf": None,               # no OCF -> FCF null -> MoS null (the real block)
-            "latest_ebit": None,
-            "latest_dep_amort": None,
-            "latest_capex": None,
-            "latest_ebitda": None,
-            "latest_fcf": None,
-            "fcf_is_ocf_proxy": False,
-            "latest_goodwill": 0,
-            "latest_intangibles": 0,
-            "sic": "1040",                    # gold/metal mining, non-financial
-            "debt_truncation_suspected": False,
-            "debt_stale": False,
-            "wrong_entity_suspected": False,  # P-B: NOT mislabeled as wrong entity anymore
-            "low_revenue_loss_ratio": True,   # P-B: surfaced as the correct label instead
-            "low_revenue_loss_ratio_detail": "early-revenue resource pattern, right entity",
-            "data_quality_warn": None,
-            "debt_source": "LongTermDebt",
-            "ebit_source": None,
-            "concentration_flag": None,
-            "top_customer_pct": None,
-            "top_program_pct": None,
-            "fundamental_decline_flag": False,
-            "peak_contamination_flag": False,
-            "rev_slope_sign": 1,
-            "rev_accel_sign": 0,
-            "latest_below_avg": False,
-            "contamination_ratio": None,
-            "form_used": "10-K",
-        },
-        "financials": {
-            "assets": [{"end": "2024-12-31", "val": 400_000_000}],
-            "equity": [{"end": "2024-12-31", "val": 250_000_000}],
-            "ocf": [],                        # empty -> no FCF
-            "revenue": [{"end": "2024-12-31", "val": 45_000_000}],
-            "shares_outstanding": [{"end": "2024-12-31", "val": 350_000_000}],
-        },
-    }
-    _block_blocked = compute_valuation(_dd_blocked, 200_000_000, cfg)
+    _dd_blocked = _legacy['valuation_blocked']
+    _block_blocked = compute_valuation(source26_debt_fixture(_dd_blocked), 200_000_000, cfg)
     # CRITICAL (per data contract): the relabel removed the OLD wrong_entity_suspected misfire
     # from buy_ineligible_reasons, so it must NOT have introduced low_revenue_loss_ratio as a
     # block, and, most importantly, the name must remain a NON-tradeable BUY because its FCF/MoS
@@ -1571,7 +1475,7 @@ def _selftest():
     print("  P-B relabel safety: previously-blocked early-rev name stays NON-tradeable "
           "(MoS null; low_rev_loss never a block)  OK")
 
-    # --- A4: low_revenue_loss_ratio_extreme (>20x) GATES buy_eligible (STSS/MVIS/TIPT tail) ---
+    # --- A4: extreme loss-to-revenue ratio (>20x) gates buy_eligible ---
     # The clean fixture is buy_eligible=True on fcf_cap. Setting ONLY the extreme tier (with the
     # advisory label also True, as the producer always co-sets them) must flip buy_eligible=False
     # with the accurate reason-string, replacing the old wrong_entity_suspected co-fire.
@@ -1584,7 +1488,7 @@ def _selftest():
         "latest_net_income=-1384.0M vs revenue=1.0M (|NI|/rev=1384.0x) — early/pre-revenue pattern, "
         "right entity; EXTREME (>20x) — gates buy_eligible"
     )
-    _block_lrl_ext = compute_valuation(_dd_lrl_ext, 120_000_000, cfg)
+    _block_lrl_ext = compute_valuation(source26_debt_fixture(_dd_lrl_ext), 120_000_000, cfg)
     assert _block_lrl_ext.get("low_revenue_loss_ratio_extreme") is True, (
         "A4: producer low_revenue_loss_ratio_extreme must be read into the valuation block"
     )
@@ -1610,7 +1514,7 @@ def _selftest():
     _dd_lrl_mild["derived"]["low_revenue_loss_ratio"] = True
     _dd_lrl_mild["derived"]["low_revenue_loss_ratio_extreme"] = False
     _dd_lrl_mild["derived"]["low_revenue_loss_ratio_detail"] = "|NI|/rev=2.7x — right entity"
-    _block_lrl_mild = compute_valuation(_dd_lrl_mild, 120_000_000, cfg)
+    _block_lrl_mild = compute_valuation(source26_debt_fixture(_dd_lrl_mild), 120_000_000, cfg)
     assert _block_lrl_mild.get("buy_eligible") == _block_clean.get("buy_eligible"), (
         "A4: non-extreme low_revenue_loss_ratio must NOT change buy_eligible (label-only)"
     )
@@ -1619,17 +1523,14 @@ def _selftest():
     )
     print("  A4 non-extreme low_revenue_loss_ratio: >2x stays label-only (no gate)  OK")
 
-    # --- A3: insurance_concepts_present routes nav/abstain AND gates buy_eligible ---
-    # An insurance-subsidiary holdco on a NON-financial SIC (BOC SIC-65 = 6510, NOT in the
-    # financial-SIC prefix list) must route like financial_sic (nav/abstain, never fcf_cap) and
-    # gate buy_eligible with a distinct, accurate reason, closing the latent fcf_cap-BUY hole.
+    # Synthetic insurance evidence must respect the SIC and concept-count thresholds.
     _dd_ins = dict(_dd_clean_base)
     _dd_ins["derived"] = dict(_dd_clean_base["derived"])
     _dd_ins["ticker"] = "TEST_INSURANCE_HOLDCO"
-    _dd_ins["derived"]["sic"] = "6510"            # SIC-65 real-estate operator (BOC), NON-financial prefix
+    _dd_ins["derived"]["sic"] = "6510"
     _dd_ins["derived"]["insurance_concepts_present"] = True
     _dd_ins["derived"]["insurance_concept_matched"] = "PremiumsEarnedNet"
-    _block_ins = compute_valuation(_dd_ins, 120_000_000, cfg)
+    _block_ins = compute_valuation(source26_debt_fixture(_dd_ins), 120_000_000, cfg)
     assert _block_ins.get("insurance_concepts_present") is True, (
         "A3: producer insurance_concepts_present must be read into the valuation block"
     )
@@ -1650,7 +1551,7 @@ def _selftest():
     assert any("insurance_concepts_present" in str(x) for x in _block_ins.get("data_quality", [])), (
         "A3: insurance_concepts_present must surface in data_quality"
     )
-    # CRITICAL: a SIC-65 insurance holdco must NEVER produce an fcf_cap BUY (the BOC latent hole).
+    # Synthetic insurance evidence must respect the SIC and concept-count thresholds.
     _ins_tradeable_buy = (
         _block_ins.get("buy_eligible") is True
         and _block_ins.get("mos_basis") == "fcf_cap"
@@ -1665,7 +1566,7 @@ def _selftest():
     _dd_cu["derived"] = dict(_dd_clean_base["derived"])
     _dd_cu["ticker"] = "TEST_CONC_UNQUANT"
     _dd_cu["derived"]["concentration_unquantified"] = True
-    _block_cu = compute_valuation(_dd_cu, 120_000_000, cfg)
+    _block_cu = compute_valuation(source26_debt_fixture(_dd_cu), 120_000_000, cfg)
     assert _block_cu.get("concentration_unquantified") is True, (
         "A2: producer concentration_unquantified must be read into the valuation block"
     )
@@ -1680,79 +1581,10 @@ def _selftest():
     )
     print("  A2 concentration_unquantified: surfaced in data_quality, does NOT gate  OK")
 
-    # --- P10: lumpy-OCF normalization guard fires on a peak year > 2x median ---
-    # Cyclical series with one BARDA-like peak (95M) vs others (~11-49M); contamination<1.
-    _dd_lumpy = {
-        "ticker": "TEST_LUMPY",
-        "derived": {
-            "latest_cash": 10_000_000,
-            "latest_total_debt": 0,
-            "latest_revenue": 60_000_000,
-            "latest_net_income": 20_000_000,
-            "latest_ocf": 43_500_000,
-            "latest_ebit": 25_000_000,
-            "latest_dep_amort": 2_000_000,
-            "latest_capex": 1_000_000,
-            "latest_ebitda": 27_000_000,
-            "latest_fcf": 42_500_000,
-            "fcf_is_ocf_proxy": False,
-            "latest_goodwill": 0,
-            "latest_intangibles": 0,
-            "sic": "2836",                    # biological products (SIGA-like), non-financial
-            "debt_truncation_suspected": False,
-            "debt_stale": False,
-            "wrong_entity_suspected": False,
-            "data_quality_warn": None,
-            "debt_source": "LongTermDebt",
-            "ebit_source": "OperatingIncomeLoss",
-            "contamination_ratio": 0.68,      # latest base below its own 5yr-avg
-            "fundamental_decline_flag": False,
-            "rev_slope_sign": 0,
-            "latest_below_avg": True,
-        },
-        "financials": {
-            "assets": [{"end": "2024-12-31", "val": 200_000_000}],
-            "equity": [{"end": "2024-12-31", "val": 180_000_000}],
-            "ebit": [
-                {"end": "2020-12-31", "val": 8_000_000},
-                {"end": "2021-12-31", "val": 35_000_000},
-                {"end": "2022-12-31", "val": 80_000_000},
-                {"end": "2023-12-31", "val": 30_000_000},
-                {"end": "2024-12-31", "val": 25_000_000},
-            ],
-            "dep_amort": [
-                {"end": "2020-12-31", "val": 2_000_000},
-                {"end": "2021-12-31", "val": 2_000_000},
-                {"end": "2022-12-31", "val": 2_000_000},
-                {"end": "2023-12-31", "val": 2_000_000},
-                {"end": "2024-12-31", "val": 2_000_000},
-            ],
-            # OCF: 2022 peak = 94.8M is > 2x the median of the others (~43.5M)
-            "ocf": [
-                {"end": "2020-12-31", "val": 11_500_000},
-                {"end": "2021-12-31", "val": 41_600_000},
-                {"end": "2022-12-31", "val": 94_800_000},
-                {"end": "2023-12-31", "val": 48_800_000},
-                {"end": "2024-12-31", "val": 43_500_000},
-            ],
-            "capex": [
-                {"end": "2020-12-31", "val": 1_000_000},
-                {"end": "2021-12-31", "val": 1_000_000},
-                {"end": "2022-12-31", "val": 1_000_000},
-                {"end": "2023-12-31", "val": 1_000_000},
-                {"end": "2024-12-31", "val": 1_000_000},
-            ],
-            "revenue": [
-                {"end": "2020-12-31", "val": 30_000_000},
-                {"end": "2021-12-31", "val": 60_000_000},
-                {"end": "2022-12-31", "val": 120_000_000},
-                {"end": "2023-12-31", "val": 70_000_000},
-                {"end": "2024-12-31", "val": 60_000_000},
-            ],
-            "shares_outstanding": [{"end": "2024-12-31", "val": 70_000_000}],
-        },
-    }
-    _block_lumpy = compute_valuation(_dd_lumpy, 300_000_000, cfg)
+    # Synthetic declining revenue and a cash-flow peak exercise contamination.
+    _dd_lumpy = _legacy['valuation_lumpy']
+    source28_annual_inputs(_dd_lumpy)
+    _block_lumpy = compute_valuation(source26_debt_fixture(_dd_lumpy), 300_000_000, cfg)
     assert _block_lumpy.get("cyclical") is True, (
         f"P10: lumpy fixture must be cyclical, got {_block_lumpy.get('cyclical')}"
     )
@@ -1767,31 +1599,27 @@ def _selftest():
     )
     print("  P10 lumpy-OCF guard: peak-year>2x-median flags + corroborates contamination  OK")
 
-    # --- v0.3.1 #1: normalization_masks_current_loss gates buy_eligible (the TUSK hole, consumer) ---
-    # The producer emits normalization_masks_current_loss=True for the TUSK shape (normalized_fcf>0
-    # while latest_ocf<0 / latest_fcf<0 / contamination_ratio<0). valuation MUST AND (not flag) into
-    # buy_eligible (downgrade BUY->WATCH) and surface it in data_quality. Start from the clean
-    # otherwise-eligible fixture and set ONLY the producer flag.
-    _dd_tusk = dict(_dd_clean_base)
-    _dd_tusk["derived"] = dict(_dd_clean_base["derived"])
-    _dd_tusk["ticker"] = "TEST_TUSK"
-    _dd_tusk["derived"]["normalization_masks_current_loss"] = True
-    _dd_tusk["derived"]["normalized_fcf_proxy"] = 12_000_000   # trailing-avg POSITIVE
-    _dd_tusk["derived"]["latest_ocf"] = -18_600_000            # current cash BURN (TUSK shape)
-    _dd_tusk["derived"]["latest_fcf"] = -89_100_000
-    _block_tusk = compute_valuation(_dd_tusk, 120_000_000, cfg)
-    assert _block_tusk.get("normalization_masks_current_loss") is True, (
+    # A positive normalized cash-flow base must not conceal a synthetic current loss.
+    _dd_masked_case = dict(_dd_clean_base)
+    _dd_masked_case["derived"] = dict(_dd_clean_base["derived"])
+    _dd_masked_case["ticker"] = "SYNMASKED"
+    _dd_masked_case["derived"]["normalization_masks_current_loss"] = True
+    _dd_masked_case["derived"]["normalized_fcf_proxy"] = 12_000_000   # trailing-avg POSITIVE
+    _dd_masked_case["derived"]["latest_ocf"] = _legacy["valuation_overrides"]["current_ocf"]
+    _dd_masked_case["derived"]["latest_fcf"] = _legacy["valuation_overrides"]["current_fcf"]
+    _block_masked_case = compute_valuation(source26_debt_fixture(_dd_masked_case), 120_000_000, cfg)
+    assert _block_masked_case.get("normalization_masks_current_loss") is True, (
         "#1: producer normalization_masks_current_loss must be read into the valuation block"
     )
-    assert "normalization_masks_current_loss" in _block_tusk.get("buy_ineligible_reasons", []), (
+    assert "normalization_masks_current_loss" in _block_masked_case.get("buy_ineligible_reasons", []), (
         f"#1: normalization_masks_current_loss must gate buy_eligible (downgrade BUY->WATCH), "
-        f"reasons={_block_tusk.get('buy_ineligible_reasons')}"
+        f"reasons={_block_masked_case.get('buy_ineligible_reasons')}"
     )
-    assert _block_tusk.get("buy_eligible") is False, (
-        "#1 CRITICAL: the TUSK degenerate-base shape must NOT be buy_eligible "
+    assert _block_masked_case.get("buy_eligible") is False, (
+        "#1 CRITICAL: the synthetic current-loss degenerate-base shape must NOT be buy_eligible "
         "(trailing-avg normalized_fcf>0 masking current cash burn)"
     )
-    assert any("normalization_masks_current_loss" in str(x) for x in _block_tusk.get("data_quality", [])), (
+    assert any("normalization_masks_current_loss" in str(x) for x in _block_masked_case.get("data_quality", [])), (
         "#1: normalization_masks_current_loss must surface in data_quality"
     )
     # NEGATIVE CONTROL: a clean grower (producer flag False) must stay buy_eligible, the gate must
@@ -1805,7 +1633,7 @@ def _selftest():
     assert _block_clean.get("buy_eligible") is True, (
         "#1: clean grower stays buy_eligible (the #1 gate is downgrade-only, never trigger-happy)"
     )
-    print("  #1 normalization_masks_current_loss: TUSK shape gated BUY->WATCH; clean grower untouched  OK")
+    print("  #1 normalization_masks_current_loss: synthetic current-loss shape gated BUY->WATCH; clean grower untouched  OK")
 
     # POSITIVE CONTROL (#1 + #9): a clean grower with a REAL numeric MoS>=30 must stay buy_eligible.
     # The two new v0.3.1 gates (#1 normalization_masks_current_loss, #9 not_assessable_no_intrinsic_band)
@@ -1814,17 +1642,19 @@ def _selftest():
     _dd_cheap = dict(_dd_clean_base)
     _dd_cheap["derived"] = dict(_dd_clean_base["derived"])
     _dd_cheap["ticker"] = "TEST_CHEAP_GROWER"
-    # FCF=18M -> conservative band eq_low = 18M/0.12 + 10M net cash = 160M vs 120M mc -> MoS ~33%
-    # (deliberately inside [30%,100%] so it clears the MoS>=30 bar WITHOUT tripping the >100% G1 guard).
-    _dd_cheap["derived"]["latest_fcf"] = 18_000_000
+    # Post-interest FCF=20M -> equity_low=20M/0.12=166.67M, with no net-cash addback.
+    # Against 120M market cap this gives MoS=38.89%, within the original positive-control band.
+    _dd_cheap["derived"]["latest_ocf"] = 25_000_000
+    _dd_cheap["derived"]["latest_fcf"] = 20_000_000
     _dd_cheap["financials"] = dict(_dd_clean_base["financials"])
-    _dd_cheap["financials"]["ocf"] = [{"end": "2024-12-31", "val": 23_000_000}]
-    _dd_cheap["financials"]["capex"] = [{"end": "2024-12-31", "val": 5_000_000}]
-    _block_cheap = compute_valuation(_dd_cheap, 120_000_000, cfg)
+    _dd_cheap["financials"].update(source25_annual_cashflows(ocf=25_000_000))
+    _block_cheap = compute_valuation(source26_debt_fixture(_dd_cheap), 120_000_000, cfg)
     assert _block_cheap.get("mos_basis") == "fcf_cap", (
         f"#1/#9 positive control: cheap grower must route fcf_cap, got {_block_cheap.get('mos_basis')!r}"
     )
     _mos_cheap = _block_cheap.get("margin_of_safety_pct")
+    assert _block_cheap["intrinsic_value_band"]["equity_low"] == round(20_000_000 / 0.12)
+    assert _mos_cheap == 0.3889
     assert _mos_cheap is not None and _mos_cheap >= 0.30, (
         f"#1/#9 positive control: cheap grower must have a REAL numeric MoS>=30%, got {_mos_cheap}"
     )
@@ -1840,10 +1670,17 @@ def _selftest():
     )
     print("  #1/#9 positive control: clean grower with real MoS>=30 stays buy_eligible=True  OK")
 
-    # --- v0.3.1 #9: a null MoS can NEVER be buy_eligible -> not_assessable_no_intrinsic_band ---
-    # Build a name with no FCF base (empty ocf) on a non-asset-heavy SIC so it routes fcf_cap with a
-    # NULL intrinsic band -> margin_of_safety_pct=None. buy_eligible MUST be False with the explicit
-    # not_assessable_no_intrinsic_band reason (not True-by-absence-of-data, the DAVA/TV/QNC footgun).
+    # Preserve the original 18M FCF economics under the current post-interest equity basis.
+    # Its 10M net cash is not added back: equity=150M and MoS=25%, below the 30% threshold.
+    _case_18m = source25_equity_basis_scenarios()[0]
+    _block_18m = compute_valuation(_case_18m["data"], _case_18m["market_cap"], cfg)
+    assert _block_18m["intrinsic_value_band"]["equity_low"] == 150_000_000
+    assert _block_18m["margin_of_safety_pct"] == 0.25
+    assert _block_18m["margin_of_safety_pct"] < 0.30
+    assert _block_18m["buy_eligible"] is True  # Eligibility guards do not encode the final MoS threshold.
+    print("  Original 18M FCF: equity=150M, MoS=25%, no net-cash addback  OK")
+
+    # Absent intrinsic value must remain explicitly ineligible.
     _dd_no_band = dict(_dd_clean_base)
     _dd_no_band["derived"] = dict(_dd_clean_base["derived"])
     _dd_no_band["ticker"] = "TEST_NO_BAND"
@@ -1852,7 +1689,7 @@ def _selftest():
     _dd_no_band["financials"] = dict(_dd_clean_base["financials"])
     _dd_no_band["financials"]["ocf"] = []          # no OCF base -> no normalized FCF -> null band
     _dd_no_band["financials"]["capex"] = []
-    _block_no_band = compute_valuation(_dd_no_band, 120_000_000, cfg)
+    _block_no_band = compute_valuation(source26_debt_fixture(_dd_no_band), 120_000_000, cfg)
     assert _block_no_band.get("mos_basis") == "fcf_cap", (
         f"#9: no-OCF fixture must route fcf_cap (non-asset-heavy SIC), "
         f"got {_block_no_band.get('mos_basis')!r}"
@@ -1875,29 +1712,26 @@ def _selftest():
     )
     print("  #9 null-MoS: no intrinsic band -> not_assessable_no_intrinsic_band, buy_eligible=False  OK")
 
-    # --- v0.3.2 #8: lessor_asset_heavy forces NAV routing at debt/assets<0.62 (GBX/RAIL hole) ---
-    # GBX-shape lessor: leasing signal present, but debt/assets=0.41 (below the 0.62 firewall) and
-    # non-financial SIC. Without #8 it would route fcf_cap (mis-valued on trough FCF). The producer
-    # derived.lessor_asset_heavy=True MUST force fcf_cap_model_unsuitable=True -> nav/abstain.
+    # Synthetic lessors below the debt firewall must route on their leasing evidence.
     _dd_lessor = dict(_dd_clean_base)
     _dd_lessor["derived"] = dict(_dd_clean_base["derived"])
-    _dd_lessor["ticker"] = "TEST_LESSOR_GBX"
+    _dd_lessor["ticker"] = "SYNLESSORHIGH"
     _dd_lessor["derived"]["sic"] = "3743"               # railroad equipment, non-financial prefix
     _dd_lessor["derived"]["lessor_asset_heavy"] = True
     _dd_lessor["derived"]["lessor_asset_heavy_detail"] = "lessor_sic:3743;ppe_fleet_ratio=0.70>0.55+rental_rev"
-    # debt/assets = 410M/1000M = 0.41 < 0.62 (the firewall would NOT route this without #8).
-    _dd_lessor["derived"]["latest_total_debt"] = 410_000_000
+    # debt/assets = 420M/1000M = 0.42 < 0.62 (the firewall would NOT route this without #8).
+    _dd_lessor["derived"]["latest_total_debt"] = _legacy["valuation_overrides"]["lessor_high_debt"]
     _dd_lessor["financials"] = dict(_dd_clean_base["financials"])
     _dd_lessor["financials"]["assets"] = [{"end": "2024-12-31", "val": 1_000_000_000}]
     _dd_lessor["financials"]["equity"] = [{"end": "2024-12-31", "val": 400_000_000}]
-    _block_lessor = compute_valuation(_dd_lessor, 300_000_000, cfg)
+    _block_lessor = compute_valuation(source26_debt_fixture(_dd_lessor), 300_000_000, cfg)
     # Sanity: debt/assets really is below the 0.62 firewall, so the routing is ATTRIBUTABLE to #8.
-    assert (410_000_000 / 1_000_000_000) < 0.62, "#8 fixture: debt/assets must be <0.62 to prove the hole"
+    assert (_legacy["valuation_overrides"]["lessor_high_debt"] / _legacy["valuation_overrides"]["lessor_assets"]) < 0.62, "#8 fixture: debt/assets must be <0.62 to prove the hole"
     assert _block_lessor.get("lessor_asset_heavy") is True, (
         f"#8: lessor_asset_heavy must propagate to the block, got {_block_lessor.get('lessor_asset_heavy')}"
     )
     assert _block_lessor.get("fcf_cap_model_unsuitable") is True, (
-        f"#8 CRITICAL: a lessor (debt/assets=0.41<0.62) must force fcf_cap_model_unsuitable=True "
+        f"#8 CRITICAL: a lessor (debt/assets=0.42<0.62) must force fcf_cap_model_unsuitable=True "
         f"(route to lease-fleet NAV), got {_block_lessor.get('fcf_cap_model_unsuitable')}"
     )
     assert _block_lessor.get("mos_basis") in ("nav", "abstain"), (
@@ -1915,57 +1749,55 @@ def _selftest():
     _dd_not_lessor["ticker"] = "TEST_NOT_LESSOR"
     _dd_not_lessor["derived"]["lessor_asset_heavy"] = False
     _dd_not_lessor["derived"]["lessor_asset_heavy_detail"] = None
-    _block_not_lessor = compute_valuation(_dd_not_lessor, 300_000_000, cfg)
+    _block_not_lessor = compute_valuation(source26_debt_fixture(_dd_not_lessor), 300_000_000, cfg)
     assert _block_not_lessor.get("fcf_cap_model_unsuitable") is False, (
-        f"#8 control: a NON-lessor at debt/assets=0.41 must STAY fcf_cap (firewall not tripped), "
+        f"#8 control: a NON-lessor at debt/assets=0.42 must STAY fcf_cap (firewall not tripped), "
         f"got {_block_not_lessor.get('fcf_cap_model_unsuitable')}"
     )
     assert _block_not_lessor.get("mos_basis") == "fcf_cap", (
-        f"#8 control: non-lessor at 0.41 debt/assets must route fcf_cap, "
+        f"#8 control: non-lessor at 0.42 debt/assets must route fcf_cap, "
         f"got {_block_not_lessor.get('mos_basis')!r}"
     )
     assert _block_not_lessor.get("lessor_asset_heavy") is False, (
         "#8 control: lessor_asset_heavy must be False on the non-lessor block"
     )
-    print("  #8 lessor_asset_heavy: GBX-shape (debt/assets=0.41) forces NAV routing; "
-          "non-lessor at 0.41 stays fcf_cap  OK")
+    print("  #8 lessor_asset_heavy: synthetic (debt/assets=0.42) forces NAV routing; "
+          "non-lessor at 0.42 stays fcf_cap  OK")
 
-    # #8 second contract data point (RAIL, debt/assets=0.35): the spec names BOTH GBX (0.41) and
-    # RAIL (0.35) as asset-heavy lessors sitting below the 0.62 firewall. Assert the lower 0.35
-    # value explicitly so the consumer is proven across the whole sub-firewall band, not just 0.41.
-    _dd_rail = dict(_dd_clean_base)
-    _dd_rail["derived"] = dict(_dd_clean_base["derived"])
-    _dd_rail["ticker"] = "TEST_LESSOR_RAIL"
-    _dd_rail["derived"]["sic"] = "7359"                  # equipment rental/leasing, non-financial prefix
-    _dd_rail["derived"]["lessor_asset_heavy"] = True
-    _dd_rail["derived"]["lessor_asset_heavy_detail"] = "lessor_sic:7359;operating_lease_income_concept+rental_rev"
-    # debt/assets = 350M/1000M = 0.35 < 0.62 (firewall would NOT route this without #8).
-    _dd_rail["derived"]["latest_total_debt"] = 350_000_000
-    _dd_rail["financials"] = dict(_dd_clean_base["financials"])
-    _dd_rail["financials"]["assets"] = [{"end": "2024-12-31", "val": 1_000_000_000}]
-    _dd_rail["financials"]["equity"] = [{"end": "2024-12-31", "val": 450_000_000}]
-    _block_rail = compute_valuation(_dd_rail, 300_000_000, cfg)
-    assert (350_000_000 / 1_000_000_000) == 0.35, "#8 RAIL fixture: debt/assets must be exactly 0.35"
-    assert _block_rail.get("lessor_asset_heavy") is True, (
-        f"#8 RAIL: lessor_asset_heavy must propagate, got {_block_rail.get('lessor_asset_heavy')}"
+    # The lower synthetic debt ratio supplies a separate NAV-routing case.
+    _dd_lower_lessor = dict(_dd_clean_base)
+    _dd_lower_lessor["derived"] = dict(_dd_clean_base["derived"])
+    _dd_lower_lessor["ticker"] = "SYNLESSORLOW"
+    _dd_lower_lessor["derived"]["sic"] = "7359"                  # equipment rental/leasing, non-financial prefix
+    _dd_lower_lessor["derived"]["lessor_asset_heavy"] = True
+    _dd_lower_lessor["derived"]["lessor_asset_heavy_detail"] = "lessor_sic:7359;operating_lease_income_concept+rental_rev"
+    # debt/assets = 340M/1000M = 0.34 < 0.62 (firewall would NOT route this without #8).
+    _dd_lower_lessor["derived"]["latest_total_debt"] = _legacy["valuation_overrides"]["lessor_low_debt"]
+    _dd_lower_lessor["financials"] = dict(_dd_clean_base["financials"])
+    _dd_lower_lessor["financials"]["assets"] = [{"end": "2024-12-31", "val": 1_000_000_000}]
+    _dd_lower_lessor["financials"]["equity"] = [{"end": "2024-12-31", "val": 450_000_000}]
+    _block_lower_lessor = compute_valuation(source26_debt_fixture(_dd_lower_lessor), 300_000_000, cfg)
+    assert (_legacy["valuation_overrides"]["lessor_low_debt"] / _legacy["valuation_overrides"]["lessor_assets"]) == 0.34, "#8 synthetic lower-ratio fixture: debt/assets must be exactly 0.34"
+    assert _block_lower_lessor.get("lessor_asset_heavy") is True, (
+        f"#8 synthetic lower-ratio: lessor_asset_heavy must propagate, got {_block_lower_lessor.get('lessor_asset_heavy')}"
     )
-    assert _block_rail.get("fcf_cap_model_unsuitable") is True, (
-        f"#8 RAIL CRITICAL: a lessor at debt/assets=0.35<0.62 must force fcf_cap_model_unsuitable=True, "
-        f"got {_block_rail.get('fcf_cap_model_unsuitable')}"
+    assert _block_lower_lessor.get("fcf_cap_model_unsuitable") is True, (
+        f"#8 synthetic lower-ratio CRITICAL: a lessor at debt/assets=0.34<0.62 must force fcf_cap_model_unsuitable=True, "
+        f"got {_block_lower_lessor.get('fcf_cap_model_unsuitable')}"
     )
-    assert _block_rail.get("mos_basis") == "nav", (
-        f"#8 RAIL: a lessor with equity present must route mos_basis='nav' (not fcf_cap/abstain), "
-        f"got {_block_rail.get('mos_basis')!r}"
+    assert _block_lower_lessor.get("mos_basis") == "nav", (
+        f"#8 synthetic lower-ratio: a lessor with equity present must route mos_basis='nav' (not fcf_cap/abstain), "
+        f"got {_block_lower_lessor.get('mos_basis')!r}"
     )
-    assert _block_rail.get("margin_of_safety_pct") is None, (
-        f"#8 RAIL: FCF margin_of_safety_pct must be null when routed to NAV, "
-        f"got {_block_rail.get('margin_of_safety_pct')}"
+    assert _block_lower_lessor.get("margin_of_safety_pct") is None, (
+        f"#8 synthetic lower-ratio: FCF margin_of_safety_pct must be null when routed to NAV, "
+        f"got {_block_lower_lessor.get('margin_of_safety_pct')}"
     )
     assert any("lessor_asset_heavy_fcf_unsuitable_route_nav" in str(x)
-               for x in _block_rail.get("data_quality", [])), (
-        f"#8 RAIL: routing reason must surface in data_quality, got {_block_rail.get('data_quality')}"
+               for x in _block_lower_lessor.get("data_quality", [])), (
+        f"#8 synthetic lower-ratio: routing reason must surface in data_quality, got {_block_lower_lessor.get('data_quality')}"
     )
-    # Normal-name control restated at 0.35: the clean (non-lessor) fixture is unchanged, proving
+    # Normal-name control restated at 0.34: the clean (non-lessor) fixture is unchanged, proving
     # the NAV routing is attributable to lessor_asset_heavy, never to the sub-firewall ratio itself.
     assert _block_clean.get("lessor_asset_heavy") is False, (
         f"#8: a normal name must have lessor_asset_heavy=False, got {_block_clean.get('lessor_asset_heavy')}"
@@ -1976,7 +1808,7 @@ def _selftest():
     assert not any("lessor_asset_heavy" in str(x) for x in _block_clean.get("data_quality", [])), (
         "#8: a normal name must NOT emit any lessor_asset_heavy data_quality line"
     )
-    print("  #8 RAIL-shape (debt/assets=0.35) forces mos_basis=nav; normal name stays fcf_cap unchanged  OK")
+    print("  #8 synthetic lower-ratio (debt/assets=0.34) forces mos_basis=nav; normal name stays fcf_cap unchanged  OK")
 
     # --- v0.3.2 #11: foreign_filer_unvaluable is surfaced as an explicit abstain label ---
     # A 20-F filer whose financials stayed empty after the producer's IFRS cascade emits
@@ -1992,7 +1824,7 @@ def _selftest():
         "foreign filer (form=20-F) returned EMPTY revenue/net-income/OCF even after the "
         "us-gaap+ifrs-full concept cascade — un-valuable from EDGAR (graceful abstain)"
     )
-    _block_ffu = compute_valuation(_dd_ffu, 120_000_000, cfg)
+    _block_ffu = compute_valuation(source26_debt_fixture(_dd_ffu), 120_000_000, cfg)
     assert _block_ffu.get("foreign_filer_unvaluable") is True, (
         f"#11: foreign_filer_unvaluable must propagate to the block, "
         f"got {_block_ffu.get('foreign_filer_unvaluable')}"

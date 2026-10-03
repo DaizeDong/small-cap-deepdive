@@ -17,13 +17,14 @@ Anti-overfit discipline (self-evolve truth-isolation):
 Network-free; seed=42; reproducible.
 """
 from __future__ import annotations
-import json, os, random, math
+import json, os, sys, random, math
 from datetime import date
 from collections import defaultdict
 
 random.seed(42)
 HERE = os.path.dirname(os.path.abspath(__file__))
-FEAT = os.path.join(HERE, "distress_features.json")
+sys.path.insert(0, HERE)
+from distress_features_extract import features_path, load_features
 
 
 def latest(series):
@@ -106,9 +107,10 @@ def topq_test(pool, scorekey, label, q=0.2):
 
 
 def main():
-    if not os.path.exists(FEAT):
-        print("features file not ready:", FEAT); return
-    data = json.load(open(FEAT))
+    destination = features_path()
+    if not destination.exists():
+        print("features file not ready:", destination); return
+    data = load_features()
     rows = []
     for r in data:
         tr, st, ep = r.get("total_return"), r.get("status"), r.get("entry")

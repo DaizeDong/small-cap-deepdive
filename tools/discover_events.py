@@ -1,29 +1,29 @@
 """
 discover_events.py — Event-driven candidate discovery (Phase 5)
 
-Two discovery modes, each structurally high-precision (form-type enumeration replaces
-keyword over-recall; no theme-fit gate is needed):
+Two discovery modes retrieve event leads for independent verification:
 
   --spinoffs
       Enumerate recent Form 10-12B / 10-12B/A filings from EDGAR EFTS.
-      These are spinoff / carve-out registrations.  Forced index-fund selling
-      is the mis-pricing catalyst: passive holders of the parent must sell the
-      spun-off child if it is not eligible for their index mandate.
+      These registrations can identify spinoff or carve-out candidates, but the form
+      alone does not establish a separation event. A forced-selling thesis also
+      requires evidence about the distribution and applicable index mandates.
 
   --insider-clusters
       Enumerate recent cluster open-market insider buys from openinsider.com
-      /latest-cluster-buys.  Multiple insiders buying at market price within a
-      short window is the strongest management-conviction signal available without
-      reading every Form 4.
+      /latest-cluster-buys. The feed supplies candidate purchase clusters for
+      subsequent source and transaction verification.
 
-Output: reports/smallcap/candidates_event_<mode>_<date>.json
+Output: _common.reports_dir()/candidates_event_<mode>_<date>.json in the configured
+versioned PRIVATE companion. The resolver includes SMALLCAP_RUN when set and
+fails if private initialization is missing.
 Records are shaped identically to candidates_<slug>.json so they flow directly
 into: cheap_pass (kill-flags) -> deepdive_data -> deepdive-fanout.
 
-No theme-fit gate: form-type enumeration is structurally precise.  A Form 10-12B
-is definitionally a spinoff registration; a cluster-buy table row is definitionally
-an open-market purchase cluster.  Keyword over-recall (the problem that makes the
-two-stage precision gate mandatory for theme discovery) does not apply here.
+Event discovery does not use the keyword theme-fit gate. Form types and cluster-feed
+rows are discovery hints, not proof of the event thesis. Independent T1 event
+verification remains mandatory before treating a candidate as a confirmed spinoff
+or a verified open-market purchase cluster.
 
 Design: reference/event-driven.md
 """
@@ -35,12 +35,15 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from html.parser import HTMLParser
 from pathlib import Path
 
 # Import shared spine: UA, REPORTS, http_get, today, slug, CFG
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import UA, REPORTS, http_get, today, slug as _slug, CFG
+from _event_insider import parse_cluster_page
+from _deepdive_concepts import _get_sec_tickers
+from filter_by_sic import (StageRows, stage_work, rows_completion,
+                           parse_fts_page, write_stage_receipt, prepare_stage_output)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -147,23 +150,31 @@ def discover_spinoffs(
     - Deduplication by CIK: keep earliest-filed record per company (original filing);
       for ticker, prefer the variant that has one (amendments often add the ticker).
     """
+    if days < 1:
+        raise ValueError("days must be positive")
     now = datetime.now(timezone.utc)
     if enddt is None:
         enddt = now.strftime("%Y-%m-%d")
     if startdt is None:
         startdt = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    if datetime.strptime(startdt, "%Y-%m-%d") > datetime.strptime(enddt, "%Y-%m-%d"):
+        raise ValueError("startdt must not exceed enddt")
 
     url = f"{EFTS}?forms=10-12B&dateRange=custom&startdt={startdt}&enddt={enddt}"
     try:
         r = http_get(url, timeout=30)
         r.raise_for_status()
         d = r.json()
+        hits, total, relation = parse_fts_page(d)
     except Exception as e:
         print(f"  [error] EDGAR EFTS 10-12B: {e}", file=sys.stderr)
-        return []
+        return StageRows(stage="event_spinoffs", work=[stage_work(
+            "sec_fts_10_12b", f"{startdt}:{enddt}", 0, "unavailable", "request_or_schema_failed")])
 
-    hits = d.get("hits", {}).get("hits", [])
-    total = d.get("hits", {}).get("total", {}).get("value", 0)
+    work = [stage_work("sec_fts_10_12b", f"{startdt}:{enddt}", 0)]
+    if total > len(hits) or relation != "eq":
+        work.append(stage_work("sec_fts_10_12b", f"{startdt}:{enddt}", 1,
+                               "unavailable", "unfetched_pages"))
     print(f"  [spinoffs] EDGAR returned {total} hits ({len(hits)} in page)", file=sys.stderr)
     # MINOR: warn if EFTS response was truncated (more hits than returned)
     if total > len(hits):
@@ -187,6 +198,8 @@ def discover_spinoffs(
             # MINOR: pass source dict so fallback CIK extraction works on malformed names
             name, ticker, cik = _parse_display_name(dn, source=s)
             if not cik:
+                work.append(stage_work("sec_fts_10_12b", f"{startdt}:{enddt}", 0,
+                                       "partial", "unparsed_identity"))
                 continue
             existing = by_cik.get(cik)
             if existing is None:
@@ -229,63 +242,15 @@ def discover_spinoffs(
             "band": b,
         })
 
-    return candidates
+    if enrich_mktcap:
+        work.extend(stage_work("market_data", c["cik"], status="unavailable",
+                               reason="missing_market_cap") for c in candidates if c["mktcap"] is None)
+    return StageRows(candidates, stage="event_spinoffs", work=work)
 
 
 # ---------------------------------------------------------------------------
 # Mode 2, Insider cluster buys via openinsider
 # ---------------------------------------------------------------------------
-
-class _ClusterTableParser(HTMLParser):
-    """Reusable HTML table parser (same pattern as deepdive_data.insider_trades).
-
-    Collects <td>/<th> text per <tr>, building a flat list of rows.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._in_cell = False
-        self._cur_row: list[str] = []
-        self._cur_cell: list[str] = []
-        self.rows: list[list[str]] = []
-
-    def handle_starttag(self, tag: str, attrs: list) -> None:
-        if tag == "tr":
-            self._cur_row = []
-        elif tag in ("td", "th"):
-            self._in_cell = True
-            self._cur_cell = []
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in ("td", "th"):
-            self._in_cell = False
-            self._cur_row.append("".join(self._cur_cell).strip())
-        elif tag == "tr" and self._cur_row:
-            self.rows.append(self._cur_row)
-            self._cur_row = []
-
-    def handle_data(self, data: str) -> None:
-        if self._in_cell:
-            self._cur_cell.append(data)
-
-
-def _parse_dollar(s: str) -> float:
-    """Parse openinsider Value cell like '+$1,234,567' to float."""
-    cleaned = re.sub(r"[^0-9.]", "", s)
-    try:
-        return float(cleaned) if cleaned else 0.0
-    except ValueError:
-        return 0.0
-
-
-def _parse_int(s: str) -> int:
-    """Parse quantity like '+125,360' to int."""
-    cleaned = re.sub(r"[^0-9]", "", s)
-    try:
-        return int(cleaned) if cleaned else 0
-    except ValueError:
-        return 0
-
 
 def discover_insider_clusters(
     min_insiders: int = 2,
@@ -302,119 +267,42 @@ def discover_insider_clusters(
       6:Ins  7:Trade Type  8:Price  9:Qty  10:Owned  11:%Own  12:Value
       13:1d  14:1w  15:1m  16:6m
 
-    The header row is detected dynamically to guard against layout changes;
-    hardcoded fallback indices are used if no header is found.
+    A recognized header is required; unknown layouts remain unavailable.
 
     Returns a list of candidate dicts, one per company.
     """
+    if min_insiders < 1:
+        raise ValueError("min_insiders must be positive")
     try:
         r = http_get(OPENINSIDER_CLUSTER, timeout=30)
         r.raise_for_status()
         html = r.text
     except Exception as e:
         print(f"  [error] openinsider cluster-buys fetch: {e}", file=sys.stderr)
-        return []
+        return StageRows(stage="event_insider_clusters", work=[stage_work(
+            "openinsider_cluster", status="unavailable", reason="request_failed")])
 
-    parser = _ClusterTableParser()
-    parser.feed(html)
-
-    # --- Detect column indices from header row ---
-    # Header row has Ticker, Company Name, Ins, Trade Type, Value
-    _FB_FILING = 1
-    _FB_TRADE = 2
-    _FB_TICKER = 3
-    _FB_NAME = 4
-    _FB_INS = 6
-    _FB_TYPE = 7
-    _FB_VALUE = 12
-
-    filing_col = _FB_FILING
-    trade_col = _FB_TRADE
-    ticker_col = _FB_TICKER
-    name_col = _FB_NAME
-    ins_col = _FB_INS
-    type_col = _FB_TYPE
-    value_col = _FB_VALUE
-    header_found = False
-
-    for row in parser.rows:
-        if len(row) < 10:
-            continue
-        row_low = [c.lower().replace("\xa0", " ").strip() for c in row]
-        # Identify header row by presence of "ticker" and "value"
-        if "ticker" in row_low and "value" in row_low:
-            for i, cell in enumerate(row_low):
-                if cell == "filing date" or cell == "filing\xa0date":
-                    filing_col = i
-                elif cell == "trade date" or cell == "trade\xa0date":
-                    trade_col = i
-                elif cell == "ticker":
-                    ticker_col = i
-                elif cell in ("company name", "company\xa0name"):
-                    name_col = i
-                elif cell == "ins":
-                    ins_col = i
-                elif cell in ("trade type", "trade\xa0type"):
-                    type_col = i
-                elif cell == "value":
-                    value_col = i
-            header_found = True
-            break
-
-    if not header_found:
-        import logging
-        logging.warning(
-            "openinsider cluster-buys: header not found; using hardcoded column indices. "
-            "Table layout may have changed."
-        )
-
-    # --- Parse data rows ---
-    # Dedup by ticker: keep most recent filing date row per company
-    by_ticker: dict[str, dict] = {}
-    max_col = max(filing_col, trade_col, ticker_col, name_col, ins_col, type_col, value_col)
-
-    for row in parser.rows:
-        if len(row) <= max_col:
-            continue
-        trade_type = row[type_col].strip()
-        # Must be open-market Purchase
-        code_m = re.match(r"^([A-Z])", trade_type)
-        if not code_m or code_m.group(1) != "P":
-            continue
-        ticker = row[ticker_col].strip()
-        name = row[name_col].strip()
-        if not ticker or not name:
-            continue
-        try:
-            n_insiders = int(row[ins_col].strip())
-        except (ValueError, IndexError):
-            n_insiders = 0
-        if n_insiders < min_insiders:
-            continue
-        value = _parse_dollar(row[value_col])
-        filing_date = row[filing_col].strip()[:10]  # keep YYYY-MM-DD only
-        trade_date = row[trade_col].strip()[:10]
-
-        existing = by_ticker.get(ticker)
-        if existing is None or filing_date > existing["filing_date"]:
-            by_ticker[ticker] = {
-                "ticker": ticker, "name": name,
-                "n_insiders": n_insiders,
-                "value": value,
-                "filing_date": filing_date,
-                "trade_date": trade_date,
-            }
-
-    print(
-        f"  [insider-clusters] parsed {len(parser.rows)} HTML rows → "
-        f"{len(by_ticker)} unique companies (min_insiders={min_insiders})",
-        file=sys.stderr,
-    )
+    parsed = parse_cluster_page(html, observed_date=today(),
+                                response_url=getattr(r, "url", None), min_insiders=min_insiders)
+    work = [stage_work("openinsider_cluster", "latest_cluster_buys", 0,
+                       status=parsed["status"],
+                       reason=parsed["reasons"][0] if parsed["reasons"] else "")]
+    work.extend(stage_work("openinsider_cluster", status="partial", reason=reason)
+                for reason in parsed["reasons"][1:])
+    by_ticker = {item["ticker"]: item for item in parsed["records"]}
+    # Bind issuer identity before the candidate artifact and its admission evidence
+    # are frozen. Failed mapping work remains upstream evidence, even on usable rows.
+    tickers = _get_sec_tickers() if by_ticker else {}
+    upstream = [rows_completion(tickers, "sec_tickers")] if by_ticker else []
 
     # --- Build candidate records ---
     candidates: list[dict] = []
     for item in sorted(by_ticker.values(), key=lambda x: x["filing_date"], reverse=True):
         ticker = item["ticker"]
+        cik = tickers.get(ticker.upper(), {}).get("cik", "")
+        work.append(stage_work("sec_ticker_identity", ticker,
+                               status="complete" if cik else "unavailable",
+                               reason="" if cik else "unresolved_event_identity"))
         mktcap = None
         if enrich_mktcap:
             mktcap = _yf_mktcap(ticker)
@@ -426,7 +314,7 @@ def discover_insider_clusters(
         )
         candidates.append({
             "ticker": ticker,
-            "cik": "",  # not provided by openinsider; resolved downstream by deepdive_data
+            "cik": cik,
             "name": item["name"],
             "theme": "event:insider_cluster",
             "theme_slug": "event_insider_cluster",
@@ -441,7 +329,13 @@ def discover_insider_clusters(
             "band": b,
         })
 
-    return candidates
+    if enrich_mktcap:
+        work.extend(stage_work("market_data", c["ticker"], status="unavailable",
+                               reason="missing_market_cap") for c in candidates if c["mktcap"] is None)
+    result = StageRows(candidates, stage="event_insider_clusters", work=work, upstream=upstream)
+    result.completion["request"] = {"scope": "returned_latest_cluster_buys_page", "min_insiders": min_insiders}
+    result.completion["page_evidence"] = parsed["proof"]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -450,10 +344,11 @@ def discover_insider_clusters(
 
 def _write(candidates: list[dict], mode: str) -> Path:
     date = today()
-    out = REPORTS / f"candidates_event_{mode}_{date}.json"
+    out = prepare_stage_output(REPORTS / f"candidates_event_{mode}_{date}.json")
     out.write_text(
         json.dumps(candidates, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    write_stage_receipt(out, rows_completion(candidates))
     return out
 
 
@@ -461,7 +356,7 @@ def _write(candidates: list[dict], mode: str) -> Path:
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> None:
+def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
             "discover_events.py — Event-driven small-cap candidate discovery (Phase 5).\n"
@@ -525,6 +420,15 @@ def main() -> None:
         help="Skip yfinance market-cap enrichment (faster; band will be null).",
     )
     args = ap.parse_args()
+    if args.days < 1 or args.min_insiders < 1:
+        ap.error("--days and --min-insiders must be positive")
+    try:
+        start = datetime.strptime(args.startdt, "%Y-%m-%d") if args.startdt else None
+        end = datetime.strptime(args.enddt, "%Y-%m-%d") if args.enddt else datetime.now(timezone.utc).replace(tzinfo=None)
+        if start is not None and start > end:
+            raise ValueError("startdt must not exceed enddt")
+    except ValueError as exc:
+        ap.error(f"invalid date window: {exc}")
 
     enrich = not args.no_mktcap
 
@@ -547,7 +451,7 @@ def main() -> None:
 
     if not candidates:
         print(
-            f"  [warn] zero candidates returned — check network / source availability.",
+            f"  Zero candidates; stage status: {rows_completion(candidates)['status']}.",
             file=sys.stderr,
         )
     else:
@@ -590,10 +494,13 @@ def main() -> None:
     print()
     print("Next steps (SKILL.md 'events' entry mode):")
     print(f"  1. Kill-flag scan:   python tools/cheap_pass.py --universe {out}")
-    print(f"  2. Data pull:        python tools/deepdive_data.py --candidates {out}")
+    print(f"  2. Data pull:        python tools/deepdive_data.py --candidates {out.parent / 'candidates_event_admitted.json'}")
     print(f"  3. Rank:             python tools/rank.py --slug {mode}")
     print("  (No theme-fit gate: form-type enumeration replaces keyword precision gate.)")
+    status = rows_completion(candidates)["status"]
+    print(f"Stage status: {status}")
+    return 0 if status == "complete" else 2
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

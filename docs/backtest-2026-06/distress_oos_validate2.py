@@ -1,17 +1,9 @@
-"""distress_oos_validate2.py — corrected, cluster-robust OOS validation of the PIT distress
-score as a blowup predictor. Supersedes distress_oos_validate.py after adversarial review.
+"""Historical within-year distress-rank calculation with ticker-cluster resampling.
 
-Corrections honored (codex adversarial review, 2026-06-24):
-  * NO outcome-based |return|<=5 cap (it was a forward-return filter that asymmetrically
-    drops big winners). Priceability = status ok AND entry_price>=0.10 only (non-outcome).
-  * Cluster-robust inference: ticker-cluster bootstrap CI on the lift (411 name-years come
-    from ~93 unique tickers / 20 cells / 5 years; Fisher's row-independence is anti-conservative).
-  * Report a CORE-4 distress rank (neg_ocf, neg_margin, accum_deficit, low_altman) alongside the
-    8-flag composite — high_lev is directionally wrong; "8-flag robust composite" is overstated.
-  * Honest framing: NOT "pre-registered"; an a-priori mechanism-grounded spec (Altman/distress
-    theory) validated OOS, reported WITH its forking-path exposure.
-
-Network-free; seed=42; reproducible. Reuses feature engineering from distress_oos_validate.py.
+loyo_lift is a retained function name: it ranks each year independently and does
+not fit a model or perform leave-one-year-out logistic refitting. Bootstrap
+selection counts resampled occurrences. Previously published intervals need a
+fresh run on the preserved private dataset; this code change does not validate them.
 """
 from __future__ import annotations
 import json, os, sys, math, random
@@ -26,7 +18,7 @@ CORE4 = ["neg_ocf", "neg_margin", "accum_deficit", "low_altman"]
 
 
 def load(cap_returns=False):
-    data = json.load(open(os.path.join(HERE, "distress_features.json")))
+    data = H.load_features()
     rows, excluded_no_entry, extreme = [], 0, 0
     for r in data:
         tr, st, ep = r.get("total_return"), r.get("status"), r.get("entry")
@@ -52,7 +44,11 @@ def load(cap_returns=False):
 
 
 def loyo_lift(rows, scorekey, q=0.2):
-    """per-year top-q by score, pooled; returns (a,b,c,d, lift, recall)."""
+    """Within-year top-q by score, pooled over occurrences; no fitted model."""
+    if not rows:
+        raise ValueError("Within-year rank requires at least one occurrence")
+    if isinstance(q, bool) or not isinstance(q, (int, float)) or not 0 < q <= 1:
+        raise ValueError("Selection fraction must be in (0, 1]")
     flags = []
     byyr = defaultdict(list)
     for r in rows:
@@ -60,9 +56,8 @@ def loyo_lift(rows, scorekey, q=0.2):
     for y, g in byyr.items():
         g = sorted(g, key=lambda r: r[scorekey], reverse=True)
         k = max(1, int(round(len(g) * q)))
-        top = set(id(r) for r in g[:k])
-        for r in g:
-            flags.append((1 if id(r) in top else 0, r["blow"]))
+        for position, r in enumerate(g):
+            flags.append((1 if position < k else 0, r["blow"]))
     a = sum(1 for t, b in flags if t and b); b = sum(1 for t, bl in flags if t and not bl)
     c = sum(1 for t, bl in flags if not t and bl); d = sum(1 for t, bl in flags if not t and not bl)
     base = (a + c) / (a + b + c + d); prec = a / (a + b) if (a + b) else 0
@@ -71,6 +66,8 @@ def loyo_lift(rows, scorekey, q=0.2):
 
 
 def ticker_bootstrap(rows, scorekey, B=5000, q=0.2):
+    if not rows or type(B) is not int or B < 1:
+        raise ValueError("Bootstrap requires rows and a positive integer replicate count")
     by_tkr = defaultdict(list)
     for r in rows:
         by_tkr[r["ticker"]].append(r)
@@ -85,6 +82,8 @@ def ticker_bootstrap(rows, scorekey, B=5000, q=0.2):
             lifts.append(lift)
     lifts.sort()
     n = len(lifts)
+    if not n:
+        raise ValueError("No informative bootstrap replicates")
     pct = lambda p: lifts[min(n - 1, int(p * n))]
     p_le1 = sum(1 for x in lifts if x <= 1.0) / n
     return pct(0.025), pct(0.5), pct(0.975), p_le1, n

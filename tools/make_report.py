@@ -19,15 +19,24 @@ Two things make it machine-trustworthy:
 The agent then fills the prose sections (§0–§8) of the scaffold. The front-matter block
 and banner are pre-filled from hard data and must not be removed.
 
-Usage:
-    python tools/make_report.py --json reports/smallcap/deepdive_SIGA_2026-06-19.json
-    python tools/make_report.py --json <deepdive_json> --out reports/smallcap/report_SIGA.md
+Private path setup:
+    Initialize a versioned PRIVATE companion with SMALL_CAP_DEEPDIVE_CONFIG_DIR.
+    Set REPORTS_ROOT to the absolute path returned by _common.reports_dir():
+        python -c "import sys; sys.path.insert(0, 'tools'); from _common import reports_dir; print(reports_dir())"
+    The resolver includes SMALLCAP_RUN when set and fails if initialization is missing.
+
+Usage (REPORTS_ROOT is the resolved absolute private path):
+    python tools/make_report.py --json "${REPORTS_ROOT}/deepdive_SYNTA_2000-01-01.json"
+    python tools/make_report.py --json "${REPORTS_ROOT}/deepdive_SYNTA_2000-01-01.json" --out "${REPORTS_ROOT}/report_SYNTA.md"
     python tools/make_report.py --selftest
+Output defaults to _common.reports_dir()/report_<ticker>.md; explicit --out also passes
+the private-output path check.
 """
 from __future__ import annotations
 import argparse
 import glob
 import json
+import math
 import re
 from pathlib import Path
 from urllib.parse import quote
@@ -74,32 +83,82 @@ def _fmt_pct_ratio(v, nd: int = 1) -> str:
         return str(v)
 
 
-def _killflag_count(deep: dict) -> int:
-    """Mechanical kill-flag count: prefer explicit killflag_count, else sum the tenk booleans
-    PLUS a concentration 'kill' (P3 concentration_flag is BUY-blocking) PLUS the OOS-validated
-    CORE-4 distress kill (derived.distress_kill, score>=3 — the one predictive de-risk signal;
-    routes a distressed name to AVOID regardless of cheapness)."""
-    kfc = deep.get("killflag_count")
-    if kfc is not None:
-        try:
-            return int(kfc)
-        except (TypeError, ValueError):
-            pass
-    tk = deep.get("tenk", {}) or {}
-    der = deep.get("derived", {}) or {}
-    kf = sum([1 if tk.get("has_going_concern") else 0,
-              1 if tk.get("has_material_weakness") else 0,
-              1 if tk.get("has_death_spiral") else 0])
-    if der.get("concentration_flag") == "kill":
-        kf += 1
-    # de-risk: CORE-4 distress (score>=3) is a kill-flag. OOS-validated blowup predictor
-    # (at the shipped score>=3 cutoff: precision 35.4% vs 13.3% base = lift 2.65x, recall 62%;
-    # the separate per-year top-quintile cutoff: lift 2.56x, recall 51%, cluster CI [1.73,3.00]).
-    # See docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md; never mix a lift and a recall
-    # across the two cutoffs.
-    if der.get("distress_kill"):
-        kf += 1
-    return kf
+_FILING_FLAGS = ('has_going_concern', 'has_material_weakness', 'has_death_spiral')
+
+
+def _filing_flag(tenk: dict, name: str) -> bool | None:
+    """A missing, failed or untyped assessment cannot establish absence of a risk."""
+    value = tenk.get(name)
+    if tenk.get('available') is True and not tenk.get('error') and type(value) is bool:
+        return value
+    return None
+
+
+def _risk_evidence_issues(deep: dict) -> list[str]:
+    tenk, derived = deep.get('tenk') or {}, deep.get('derived') or {}
+    issues = [name for name in _FILING_FLAGS if _filing_flag(tenk, name) is None]
+    if 'concentration_flag' not in derived or derived['concentration_flag'] not in (None, 'watch', 'kill'):
+        issues.append('concentration_flag')
+    for name in ('fundamental_decline_flag', 'distress_kill'):
+        if type(derived.get(name)) is not bool:
+            issues.append(name)
+    if 'killflag_count' in deep:
+        count = deep['killflag_count']
+        if type(count) is not int or count < 0:
+            issues.append('killflag_count')
+    return issues
+
+
+def _killflag_count(deep: dict) -> int | None:
+    """Retain the largest supported count; an incomplete zero remains unknown."""
+    tenk, derived = deep.get('tenk') or {}, deep.get('derived') or {}
+    observed = sum(_filing_flag(tenk, name) is True for name in _FILING_FLAGS)
+    observed += derived.get('concentration_flag') == 'kill'
+    observed += derived.get('distress_kill') is True
+    explicit = deep.get('killflag_count')
+    if type(explicit) is int and explicit >= 0:
+        observed = max(observed, explicit)
+    return observed if observed or not _risk_evidence_issues(deep) else None
+
+
+def _display_risk_count(deep: dict) -> str:
+    count = _killflag_count(deep)
+    return TBD if count is None else str(count)
+
+
+def _display_filing_flag(tenk: dict, name: str) -> str:
+    flag = _filing_flag(tenk, name)
+    return 'Unknown (not verified)' if flag is None else str(flag)
+
+
+def _assessment_items(value) -> list[str]:
+    """Retain meaningful reported warnings even when other list members are invalid."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item.strip()]
+
+
+def _assessment_complete(value) -> bool:
+    return isinstance(value, list) and len(_assessment_items(value)) == len(value)
+
+
+def _selected_mos(val: dict):
+    basis = val.get('mos_basis')
+    field = {'nav': 'nav_margin_of_safety_pct', 'fcf_cap': 'margin_of_safety_pct'}.get(basis) if isinstance(basis, str) else None
+    return val.get(field) if field else None
+
+
+def _finite_number(value) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _finite_mos(value) -> bool:
+    return _finite_number(value) and _finite_number(value * 100)
 
 
 def collect_trust_flags(deep: dict, val: dict) -> list[str]:
@@ -115,9 +174,28 @@ def collect_trust_flags(deep: dict, val: dict) -> list[str]:
             flags.append(label)
 
     der = deep.get("derived", {}) or {}
-    for f in (val.get("data_quality") or []):
+    for missing in _risk_evidence_issues(deep):
+        _add(f'unverified: {missing}')
+    if not val:
+        _add('unverified: valuation assessment unavailable')
+    else:
+        if not _assessment_complete(val.get('data_quality')):
+            _add('unverified: valuation data-quality assessment')
+        if type(val.get('buy_eligible')) is not bool or not _assessment_complete(val.get('buy_ineligible_reasons')):
+            _add('unverified: BUY eligibility assessment')
+        if not _finite_mos(_selected_mos(val)):
+            _add('unverified: selected valuation margin of safety')
+    tenk = deep.get('tenk') or {}
+    for name in _FILING_FLAGS:
+        if _filing_flag(tenk, name) is True:
+            _add(f'kill_flag: {name}')
+    if der.get('distress_kill') is True:
+        _add('kill_flag: distress_kill')
+    if _killflag_count(deep):
+        _add(f'killflag_count: {_killflag_count(deep)}')
+    for f in _assessment_items(val.get("data_quality")):
         _add(f"data_quality: {f}")
-    for r in (val.get("buy_ineligible_reasons") or []):
+    for r in _assessment_items(val.get("buy_ineligible_reasons")):
         _add(f"buy_ineligible: {r}")
     # P3 concentration kill/watch, surface verbatim with its detail.
     cflag = der.get("concentration_flag")
@@ -141,13 +219,8 @@ def build_rating_block(deep: dict, val: dict) -> str:
 
     mos_basis = val.get("mos_basis") or "abstain"
     # MoS shown is the one that matches the basis (fcf MoS for fcf_cap, nav MoS for nav).
-    if mos_basis == "nav":
-        mos_pct = val.get("nav_margin_of_safety_pct")
-    elif mos_basis == "fcf_cap":
-        mos_pct = val.get("margin_of_safety_pct")
-    else:
-        mos_pct = None
-    # nav_margin_of_safety_pct is reported on a 0..1 ratio in some valuations; pass through verbatim.
+    mos_pct = _selected_mos(val)
+    # The rating contract converts the valuation ratio to a percentage below.
 
     buy_eligible = val.get("buy_eligible")
     be_str = "true" if buy_eligible is True else ("false" if buy_eligible is False else TBD)
@@ -161,22 +234,19 @@ def build_rating_block(deep: dict, val: dict) -> str:
         f"mos_basis: {mos_basis}",
         f"mos_pct: {_mos_field(mos_pct)}",
         f"buy_eligible: {be_str}",
-        f"killflag_count: {_killflag_count(deep)}",
+        f"killflag_count: {_display_risk_count(deep)}",
         f"concentration_flag: {der.get('concentration_flag') if der.get('concentration_flag') else 'null'}",
-        f"fundamental_decline_flag: {'true' if der.get('fundamental_decline_flag') else 'false'}",
+        f"fundamental_decline_flag: {'true' if der.get('fundamental_decline_flag') is True else 'false' if der.get('fundamental_decline_flag') is False else TBD}",
         "```",
     ]
     return "\n".join(lines)
 
 
 def _mos_field(v) -> str:
-    """v0.3.1 #13 — render the rating-block mos_pct as a PERCENT (x100), not the raw fraction.
-    valuation emits margin_of_safety_pct / nav_margin_of_safety_pct as decimal fractions
-    (round((band_low-mktcap)/mktcap, 4), e.g. 0.30), but the rating contract — and every consumer
-    of it (finalize_run / rank / the BUY trigger's MoS>=30 clause, the data_false_positive cohort) —
-    speaks in percent. Emitting the raw fraction made BZH's 0.30 read as '0.3' and would have failed
-    the >=30 gate by 100x. Multiply by 100 so the field is percent-consistent end to end."""
-    if v is None:
+    """Render a finite decimal margin-of-safety fraction as a percent value.
+    The rating-block contract and its consumers use percentage units.
+    """
+    if not _finite_mos(v):
         return "null"
     try:
         return f"{float(v) * 100:.1f}"
@@ -232,8 +302,8 @@ _DIVERGENCE_GLOSS = {
     "unpriced_improvement": "fundamentals improving while price flat/down — the diffusion "
                             "thesis (a real change the market has not priced). DIAGNOSTIC "
                             "context for an analyst; it does NOT originate or up-weight a BUY.",
-    "melting_ice_cube_priced": "fundamentals declining while price up/elevated — a value trap "
-                               "the market is already pricing (SIGA-like).",
+    "melting_ice_cube_priced": "fundamentals declining while price remains elevated; "
+                               "diagnostic context only.",
     "aligned": "fundamentals and price moving together — no divergence.",
     "unclear": "insufficient/ambiguous data to label divergence.",
 }
@@ -314,17 +384,23 @@ def _render_ownership(own: dict | None) -> str:
     out = ["### Ownership / positioning (P17)"]
     filings = own.get("recent_13d_13g") or []
     count = own.get("recent_13d_13g_count")
-    if count is None:
-        count = len(filings)
+    completion = own.get("recent_13d_13g_completion") or {}
+    complete = (completion.get("status") == "complete"
+                and type(count) is int and count == len(filings))
+    window = completion.get("lookback_days", 540)
+    if not complete:
+        out.append(f"- recent 13D/13G count (subject CIK, last {window} days): "
+                   f"null (unavailable; {completion.get('reason') or 'coverage unverified'})")
     if filings:
-        out.append(f"- recent 13D/13G filings (subject CIK, last ~12mo): {count}")
+        label = str(count) if complete else f"{len(filings)} observed; total unavailable"
+        out.append(f"- observed recent 13D/13G filings: {label}")
         for f in filings[:8]:
             out.append(f"  - {f.get('file_date', '?')}  {f.get('form', '?')}  "
                        f"— {f.get('filer') or 'unknown filer'}")
         if len(filings) > 8:
             out.append(f"  - …and {len(filings) - 8} more")
-    else:
-        out.append("- recent 13D/13G filings (subject CIK, last ~12mo): none found")
+    elif complete:
+        out.append(f"- recent 13D/13G filings (subject CIK, last {window} days): none found")
     si = own.get("short_interest_pct")
     out.append(f"- short_interest_pct: {_fmt(si, '%') if si is not None else 'null (unavailable)'}"
                f"   short_trend: {own.get('short_trend') or 'null'}")
@@ -342,8 +418,8 @@ def build_trust_banner(flags: list[str]) -> str:
                 "concentration/decline kill-flags. MoS inputs are clean.")
     body = "\n".join(f"> - {f}" for f in flags)
     return (head + "\n>\n"
-            "> The following were raised by the data layer and MUST be weighed at the "
-            "decision point (every v0.2.0 BUY was a data artifact):\n>\n" + body)
+            "> The following risks or incomplete checks must be resolved at the "
+            "decision point:\n>\n" + body)
 
 
 def render_report(deep: dict, val: dict, date: str | None = None) -> str:
@@ -362,11 +438,11 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
     signals_section = build_signals_section(deep.get("signals"))
 
     rev = der.get("latest_revenue")
-    rev_M = round(rev / 1e6, 1) if rev else None
+    rev_M = round(rev / 1e6, 1) if rev is not None else None
     ni = der.get("latest_net_income")
-    ni_M = round(ni / 1e6, 1) if ni else None
+    ni_M = round(ni / 1e6, 1) if ni is not None else None
     ocf = der.get("latest_ocf")
-    ocf_M = round(ocf / 1e6, 1) if ocf else None
+    ocf_M = round(ocf / 1e6, 1) if ocf is not None else None
 
     parts = [
         f"# {ticker} Deep Dive — {date} (timestamp-locked)",
@@ -379,8 +455,8 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
         "",
         "## 0. One-line thesis + base-rate anchor",
         "<One sentence stating the core thesis.>",
-        "Reference class: <e.g. \"pre-revenue micro-cap with AI exposure\"> — base rates: "
-        "~X% zero/wipeout within 5 years, ~Y% mediocre, ~Z% acquisition/upside.",
+        "Reference class: <specific population>. Base rate: unknown until supported by a cited "
+        "population, outcome and time window; label any assumed prior explicitly.",
         "",
         "## 1. Scorecard",
         "",
@@ -398,7 +474,7 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
         "| 7. Risk / counterargument |  |  |  |",
         "| **Weighted total** | **/35** |  |  |",
         "",
-        f"Kill-flag count: {_killflag_count(deep)} (from mechanical-checks layer)",
+        f"Kill-flag count: {_display_risk_count(deep)} (observed count; see unverified checks above)",
         "",
         "## 2. Bull case (falsifiable)",
         "- Claim: <specific claim>",
@@ -414,9 +490,9 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
         "<Two or three sentences. Assume you are already wrong — what happened?>",
         "",
         "## 5. Kill-flag review",
-        f"- has_going_concern: {bool(tk.get('has_going_concern'))} — <one line>",
-        f"- has_material_weakness: {bool(tk.get('has_material_weakness'))} — <one line>",
-        f"- has_death_spiral: {bool(tk.get('has_death_spiral'))} — <one line>",
+        f"- has_going_concern: {_display_filing_flag(tk, 'has_going_concern')} — <one line>",
+        f"- has_material_weakness: {_display_filing_flag(tk, 'has_material_weakness')} — <one line>",
+        f"- has_death_spiral: {_display_filing_flag(tk, 'has_death_spiral')} — <one line>",
         f"- customer_concentration_flag: {der.get('concentration_flag') or 'null'} — "
         f"{der.get('concentration_detail') or '<one line on largest customer/program %>'}",
         "",
@@ -424,16 +500,14 @@ def render_report(deep: dict, val: dict, date: str | None = None) -> str:
         f"Current EV/Sales: {_fmt(val.get('ev_sales'), 'x')}   "
         f"EV/EBITDA: {_fmt(val.get('ev_ebitda'), 'x')}   Peer median EV/Sales: __x",
         f"EBIT source: {val.get('ebit_source') or 'N/A'}",
-        f"Reverse DCF implied growth (5-yr): {_fmt(val.get('reverse_dcf_implied_growth'), '%')}   "
+        f"Reverse DCF implied growth (Gordon perpetuity): {_fmt_pct_ratio(val.get('reverse_dcf_implied_growth'))}   "
         f"Actual trailing growth: {_fmt(der.get('revenue_growth_pct'), '%')}",
         "Assessment: <credible / stretched / heroic>",
         f"MoS basis: {val.get('mos_basis') or 'abstain'}   "
-        # v0.3.1 #13: margin_of_safety_pct / nav_margin_of_safety_pct are DECIMAL FRACTIONS from
-        # valuation (0.30 = 30%), so render via _fmt_pct_ratio (x100 + '%'), NOT _fmt(...,'%'),
-        # which appended '%' to the raw fraction and printed BZH's 0.30 as '0.3%'.
+        # Valuation margins are fractions; render percentage units with an explicit sign.
         f"MoS: {_fmt_pct_ratio(val.get('margin_of_safety_pct'))}   "
         f"[NAV MoS: {_fmt_pct_ratio(val.get('nav_margin_of_safety_pct'))}]   "
-        f"data_quality flags: {', '.join(val.get('data_quality') or []) or 'none'}",
+        f"data_quality flags: {(', '.join(_assessment_items(val.get('data_quality'))) or 'none') if _assessment_complete(val.get('data_quality')) else 'Unknown (not verified)'}",
         "Catalyst: <one sentence with dated trigger, or \"none\">",
         "BUY trigger fires: <YES — state basis | NO — state which condition fails>",
         "",
@@ -518,65 +592,11 @@ def main() -> None:
 # ---------------------------------------------------------------------------
 
 def _selftest() -> None:
-    # SIGA-like synthetic: BUY-ineligible by concentration kill + decline + data_quality flags.
-    deep = {
-        "ticker": "TST",
-        "derived": {
-            "latest_revenue": 1.2e8, "latest_net_income": 1.0e7, "latest_ocf": 2.0e7,
-            "revenue_growth_pct": -31.8,
-            "concentration_flag": "kill",
-            "concentration_detail": "single program 90% of revenue (BARDA)",
-            "fundamental_decline_flag": True, "contamination_ratio": 0.68,
-            "rev_slope_sign": -1, "latest_below_avg": True,
-        },
-        "tenk": {"has_going_concern": False, "has_material_weakness": False,
-                 "has_death_spiral": False},
-        # FIREWALL: top-level "signals" namespace (sibling of "derived"), as produced by
-        # signals.py. melting-ice-cube + an activist 13D, diagnostic-only T2 context.
-        "signals": {
-            "price_divergence": {
-                "price_return_6m": 0.34, "price_return_12m": 0.41,
-                "price_source": "yfinance",
-                "fundamental_trajectory": {
-                    "rev_slope_sign": -1, "contamination_ratio": 0.68,
-                    "fundamental_decline_flag": True,
-                    "read_from": "deepdive_derived (NOT recomputed)",
-                },
-                "divergence_label": "melting_ice_cube_priced",
-                "note": "fundamentals down, price elevated",
-            },
-            "ownership": {
-                "recent_13d_13g": [
-                    {"form": "SC 13D", "file_date": "2026-05-01", "filer": "ACTIVIST FUND LP"},
-                    {"form": "SC 13G", "file_date": "2026-02-14", "filer": "INDEX HOLDER INC"},
-                ],
-                "recent_13d_13g_count": 2,
-                "short_interest_pct": None, "short_trend": None,
-                "staleness_note": "FINRA short interest is bi-monthly and not pulled here — "
-                                  "treat as UNAVAILABLE/STALE.",
-            },
-            "signals_meta": {
-                "diagnostic_only": True, "never_affects_buy": True,
-                "sources": ["yfinance (price returns)", "EDGAR EFTS (13D/13G)"],
-                "notes": "Quarantined T2 side-channel (design §5 Q2).",
-            },
-        },
-    }
-    val = {
-        # v0.3.1 #13: margin_of_safety_pct is a DECIMAL FRACTION as valuation emits it (0.76 = 76%),
-        # NOT a percent-form number. The fixture must mirror the real contract so the renderer's x100
-        # conversion is actually exercised (the old 76.0 fixture masked the BZH 0.3->0.3% bug).
-        "ticker": "TST", "mos_basis": "fcf_cap", "margin_of_safety_pct": 0.76,
-        "nav_margin_of_safety_pct": None, "ev_sales": 1.1, "ev_ebitda": 4.2,
-        "ebit_source": "OperatingIncomeLoss",
-        "reverse_dcf_implied_growth": -12.0,
-        "data_quality": ["capex_unavailable_fcf_uses_ocf_proxy",
-                         "rdcf_implied_growth_very_negative:market_pricing_in_decline"],
-        "buy_eligible": False,
-        "buy_ineligible_reasons": ["concentration_flag=kill", "fundamental_decline_flag"],
-    }
+    from make_fixtures import source34_scenarios
+    _case = source34_scenarios()["report"]
+    deep, val = _case["deep"], _case["valuation"]
 
-    md = render_report(deep, val, date="2026-06-20")
+    md = render_report(deep, val, date=_case["date"])
 
     # 1. Trust banner present and surfaces flags verbatim (G4).
     assert "DATA-QUALITY TRUST BANNER" in md, "trust banner must be present"
@@ -586,7 +606,7 @@ def _selftest() -> None:
     assert "fundamental_decline" in md, "decline flag must be in banner"
 
     # 2. Fenced rating contract present and parseable by the shared parser.
-    assert md.lstrip().splitlines()[0].startswith("# TST Deep Dive"), "title first"
+    assert md.lstrip().splitlines()[0].startswith(f"# {deep['ticker']} Deep Dive"), "title first"
     assert "```rating" in md, "fenced rating block must be present"
     parsed = parse_rating_block(md)
     assert parsed["mos_basis"] == "fcf_cap", f"mos_basis parse: {parsed}"
@@ -598,12 +618,10 @@ def _selftest() -> None:
     assert parsed["rating"] in (None, TBD), f"rating should be TBD pre-fill: {parsed}"
 
     # 3. Clean company -> banner says clean, no spurious flags, killflag_count 0.
-    deep_clean = {"ticker": "CLN", "derived": {"concentration_flag": None,
-                  "fundamental_decline_flag": False}, "tenk": {}}
-    # v0.3.1 #13: BZH-shape, a 0.30 decimal fraction MUST render as 30%, never 0.3%.
-    val_clean = {"ticker": "CLN", "mos_basis": "fcf_cap", "margin_of_safety_pct": 0.30,
-                 "buy_eligible": True, "data_quality": [], "buy_ineligible_reasons": []}
-    md_clean = render_report(deep_clean, val_clean, date="2026-06-20")
+    from make_fixtures import report_evidence_scenarios
+    clean = report_evidence_scenarios()
+    deep_clean, val_clean = clean['deep'], clean['valuation']
+    md_clean = render_report(deep_clean, val_clean, date=clean['date'])
     assert "MoS inputs are clean" in md_clean, "clean banner must say clean"
     parsed_clean = parse_rating_block(md_clean)
     assert parsed_clean["buy_eligible"] is True, "clean buy_eligible true"
@@ -619,7 +637,7 @@ def _selftest() -> None:
     assert parsed["mos_pct"] == 76.0, (
         f"#13: a 0.76 fraction must render mos_pct=76.0 in the rating block, got {parsed['mos_pct']}"
     )
-    # (b) prose MoS line: percent with a '%' sign, NOT the raw fraction (the BZH 0.3% bug).
+    # The prose margin uses percentage units with an explicit percent sign.
     assert "MoS: 30.0%" in md_clean, (
         "#13: prose MoS line must read '30.0%' for a 0.30 fraction (NOT '0.3%')"
     )
@@ -671,11 +689,14 @@ def _selftest() -> None:
     # 5b. Signal content renders from the top-level signals namespace.
     assert "melting_ice_cube_priced" in md, "P16 divergence_label must render"
     assert "price_return_6m" in md and "price_return_12m" in md, "P16 returns must render"
-    # decimal-fraction returns (0.34) must display as percent (34.0%), not 0.3%.
-    assert "34.0%" in md and "41.0%" in md, "P16 returns must be rendered as percent (x100)"
+    # Check percentage units against the generated inputs, independently of the formatter.
+    for field in ("price_return_6m", "price_return_12m"):
+        expected = f"{deep['signals']['price_divergence'][field] * 100:.1f}%"
+        assert expected in md, "P16 returns must be rendered as percent (x100)"
     assert _fmt_pct_ratio(0.34) == "34.0%" and _fmt_pct_ratio(None) == "N/A", "pct-ratio fmt"
     assert "fundamental_trajectory" in md, "P16 read trajectory must render"
-    assert "ACTIVIST FUND LP" in md and "SC 13D" in md, "P17 13D/13G must render"
+    for filing in deep["signals"]["ownership"]["recent_13d_13g"]:
+        assert filing["filer"] in md and filing["form"] in md, "P17 13D/13G must render"
     assert "staleness" in md.lower(), "P17 short-interest staleness must be labeled"
     # 5c. FIREWALL placement: the signals section is rendered strictly BELOW the rating contract
     # and trust banner, so a PM cannot mistake it for a driver of the decision block.

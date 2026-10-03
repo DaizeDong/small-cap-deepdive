@@ -8,8 +8,8 @@
 
 ## Why This Exists
 
-Three real runs of this skill produced 40 deep-dives and **0 BUY verdicts**. We cannot know
-whether that conservatism is:
+A verdict stream with few BUY decisions can reflect either sound selectivity or a
+miscalibrated rubric. Forward outcome tracking is needed to distinguish them:
 
 **(A) Correct**, the market is efficient for small-caps; real mis-pricings are genuinely rare
 and the rubric correctly identifies them; or
@@ -25,14 +25,13 @@ The Brier score + calibration table is the instrument. Without a populated verdi
 running blind on its own judgment quality.
 
 **Where the verdict log lives.** It is real-run output, so it is written **outside this repo**, never
-into it. `tools/datadir.py:resolve_data_dir("small-cap-deepdive")` resolves the private store in
+into it. `guards/tools/datadir.py:resolve_data_dir("small-cap-deepdive")` resolves the private store in
 order: `$SMALL_CAP_DEEPDIVE_DATA_DIR` → `~/.small-cap-deepdive-config/data/` →
 `~/.small-cap-deepdive-data/` → nothing, which raises `DataDirNotInitialized` with setup
 instructions. The two files are `<private data dir>/metrics/verdicts.jsonl` and
-`<private data dir>/metrics/scorecard.md`. There is deliberately **no in-repo fallback**: a
-git-tracked `metrics/verdicts.jsonl` is how hundreds of real positions (ticker, entry date, entry
-price) once accumulated in a public repo, and a fallback into the repo is not a convenience, it is
-the leak. The repo's own `metrics/` holds only the schema files `verdicts.jsonl.example` and
+`<private data dir>/metrics/scorecard.md`. There is deliberately **no in-repo fallback**.
+Real observations belong in the versioned PRIVATE companion. The repo's own metrics directory
+holds only the generated synthetic examples `verdicts.jsonl.example` and
 `scorecard.md.example`, which are the shape you are expected to produce. Every bare `metrics/...`
 path below is shorthand for the private path above.
 
@@ -53,7 +52,7 @@ Append-only. One JSON object per line. Fields:
 | `mos_basis` | `string` | `fcf_cap` / `nav` / `abstain` |
 | `kill_flags` | `array[string]` | Active kill flags at verdict time (empty list = none) |
 | `catalyst` | `string\|null` | T1-evidenced catalyst string or null |
-| `confidence` | `number\|null` (0 to 1) | Model confidence at verdict time. Mapped to `implied_prob` by rating direction (see Rating → Implied Probability). `null` → fixed `RATING_PROB` convention is used. |
+| `confidence` | finite `number\|null` (0 to 100) | Model confidence at verdict time. Untagged input preserves the supplied units: [0, 1] is a fraction and (1, 100] is a percentage; 1 means 100%. JSON input tagged `confidence_unit: percent` is normalized to a fraction before recording. Finalizer output always carries that tag because report confidence is an integer percentage. `null` uses the fixed `RATING_PROB` convention. |
 | `implied_prob` | `number` (0 to 1) | Model probability the thesis resolves favorably (stock beats benchmark over horizon). Derived from `confidence` mapped by rating direction; falls back to `RATING_PROB` when `confidence` is null. |
 | `horizon_months` | `integer` | Default 12. Forward tracking period in months. |
 | `entry_price` | `number\|null` | Stock **dividend-adjusted** closing price on/near verdict_date (yfinance `auto_adjust=True`). Total-return basis, dividends + splits back-adjusted. |
@@ -61,11 +60,15 @@ Append-only. One JSON object per line. Fields:
 | `benchmark` | `string` | Default `IWM` (Russell 2000). The correct small-cap universe benchmark. |
 | `benchmark_entry_price` | `number\|null` | Benchmark dividend-adjusted closing price on/near verdict_date |
 | `scored` | `boolean` | False until horizon has elapsed and prices are fetched. Always False for `data_false_positive` rows (never price-scored). |
-| `stock_return_pct` | `number\|null` | Stock dividend-adjusted total return over horizon (absolute, %). Feeds the de-risk-native metrics. Null until scored. |
+| `stock_return_pct` | `number\|null` | Stock dividend-adjusted total return over horizon (absolute, %), rounded to two decimals for display. Null until scored. |
 | `realized_excess_pct` | `number\|null` | Stock total return minus benchmark total return over horizon; null until scored. **Dividend-adjusted total return on both legs.** |
+| `stock_return_pct_unrounded` | `number` | Newly scored stock return before display rounding; used for drawdown thresholds. |
+| `realized_excess_pct_unrounded` | `number` | Newly scored excess return before display rounding; used for sign comparisons. |
+| `favorable` | `boolean` | Newly scored strict excess > 0 outcome, retained alongside precise return evidence. Exact zero is unfavorable. |
 | `brier` | `number\|null` | `(implied_prob - favorable)^2`; null until scored |
-| `adjudication` | `string\|null` | `data_false_positive` for the backfilled validation BUY cohort (kept OUT of the price-Brier; adjudicated by balance-sheet cross-check). `null` for ordinary forward-tracked verdicts. |
-| `fp_cause` | `string\|null` | For `data_false_positive` rows: the validated structural pathology (debt truncation, wrong-entity, OCF-proxy, concentration, etc.). `null` otherwise. |
+| `adjudication` | `string\|null` | Claimed review disposition. Only `data_verified_clean` or `data_false_positive` with a valid verdict-bound receipt counts as reviewed. Legacy labels alone remain pending. Every FP label stays outside price scoring. |
+| `adjudication_evidence` | `object\|null` | Versioned review receipt described below; absent for unreviewed records. |
+| `fp_cause` | `string\|null` | Reviewer annotation of a claimed data defect; text alone does not establish completed review. |
 | `notes` | `string\|null` | Free-text annotation |
 
 **Append-only discipline:** lines are never deleted. Scores are rewritten in place when
@@ -73,28 +76,82 @@ Append-only. One JSON object per line. Fields:
 
 ---
 
+
+### Review receipt protocol
+
+A completed review uses `schema_version: 1` and `protocol: smallcap-data-review-v1`.
+Its `disposition` must match the row's completed label. The `verdict` object repeats exactly
+the original `ticker`, `cik`, `verdict_date`, `rating` and `report_sha256`. A missing original
+report hash leaves the review pending; do not invent a hash while migrating historical rows.
+
+The receipt also requires a `review_date` no earlier than the verdict date, a nonempty
+`sources` list of `reference` and SHA-256 pairs, and a nonempty `checks` list. Each check
+names a `field`, a declared `source_sha256`, and a `result` of `matches` or `mismatch`.
+A clean disposition requires all checks to match and must cover `issuer_identity`,
+`total_debt`, `operating_cash_flow`, `capital_expenditures` and `verdict_inputs` (the remaining
+material inputs to the original verdict). An FP disposition requires a mismatch.
+The report itself cannot serve as its own independent source. Validation establishes
+structure and verdict identity. It does not authenticate source bytes or a reviewer's claims.
+
+Keep evidence and the receipt in the initialized private companion. After completing the
+review, attach its receipt to one existing verdict with
+`python tools/track_forward.py --adjudicate "${METRICS_ROOT}/review-receipt.json"`.
+This command preserves existing labels, refuses conflicting replacements, and uses the
+ledger's lock and snapshot checks. A new JSON record may carry the same
+`adjudication` / `adjudication_evidence` pair. New completed claims without valid receipts
+are rejected. Unrecognized workflow labels remain unfinished reviews.
+
+Historical labels are preserved as recorded claims. They are not automatically promoted,
+removed, or supplied with synthetic evidence. Synthetic examples and regression inputs are
+generated by `tools/make_fixtures.py`; they say nothing about historical review coverage.
+
+## Diagnostic signal snapshot
+
+Finalization captures the selected deepdive JSON bytes once and retains its descriptor with
+the diagnostic signals. Recording accepts this snapshot as a standalone record: it checks
+the claimed ticker, CIK and verdict date against the verdict, checks the signal payload
+digest, and preserves the diagnostic firewall. It does not reopen the referenced artifact
+or independently prove that the source descriptor or provider claim is authentic.
+
+Every normalized version-1 snapshot carries `source_verification: retained_unverified`.
+Legacy snapshots without that field receive the same label. A claim of verified source
+bytes is rejected; syntactically valid edits to the source filename, byte count or SHA256
+remain unverified metadata. Signals never change the rating, implied probability or score.
+This label does not certify the truth of the signal payload; its digest detects changes
+relative to the included digest only.
+
+The finalizer's `report_sha256` is calculated from the same raw report bytes used to parse
+the analyst decision. It identifies that captured snapshot; it does not claim the file
+stayed unchanged after capture.
+
 ## Rating → Implied Probability Convention
 
 **Primary (P12a): confidence-as-probability mapped by rating DIRECTION.** When a verdict carries
-a model `confidence` (0..1), `implied_prob` is derived from it by the rating's directional sign
+a valid model `confidence`, `implied_prob` is derived from its normalized fraction by the rating's directional sign
 (`tools/track_forward.py::_implied_prob_from_confidence`):
 
 ```
 d = +1 (买入) | 0 (观察) | -1 (避开)
-implied_prob = 0.5 + d * (confidence - 0.5)     # clamped to (0.001, 0.999)
+fraction = confidence / 100 if confidence > 1 else confidence
+implied_prob = 0.5 + d * (fraction - 0.5)       # clamped to [0.001, 0.999]
 ```
 
 | Rating | direction `d` | example confidence | `implied_prob` |
 |---|---|---|---|
 | `买入` | +1 | 0.70 | **0.70** |
 | `买入` | +1 | 0.90 | **0.90** |
-| `观察` |  0 | any  | **0.50** (neutral by construction) |
+| `观察` |  0 | any valid confidence | **0.50** (neutral by construction) |
 | `避开` | -1 | 0.70 | **0.30** |
 | `避开` | -1 | 0.90 | **0.10** |
 
 This replaces the old fixed three-point map as the live path: a high-conviction BUY and a
 low-conviction BUY no longer share one probability, so the calibration table can finally
-distinguish them. Confidence given as a percentage (e.g. `70`) is normalized to `0.70`.
+distinguish them. Inputs must be finite numbers from 0 to 100: values in [0, 1] are fractions,
+and values in (1, 100] are percentages (e.g. `70` maps to `0.70`). A value of `1` means 100%
+confidence. Booleans, nonfinite values, invalid text and out-of-range numbers are rejected before
+quote retrieval or ledger writes, including when an invalid row appears later in a JSON batch.
+Omitted values, JSON null, and the CLI omission strings `null`, `none` or an empty string use
+the fallback. The stored confidence retains its supplied units.
 
 **Fallback (no confidence): fixed `RATING_PROB` convention** (`tools/track_forward.py::RATING_PROB`):
 
@@ -113,6 +170,11 @@ distinguish them. Confidence given as a percentage (e.g. `70`) is normalized to 
 
 **Overriding:** pass `--confidence` to `--record` (or a `confidence` field in JSON ingestion) to
 drive the directional mapping. With no confidence, the fixed `RATING_PROB` defaults apply.
+
+At scoring time, a stored `implied_prob` must be a finite numeric value in [0, 1]. Missing/null
+probabilities remain unscored with `score_unavailable_reason="missing_implied_prob"`; other
+invalid probabilities use `invalid_implied_prob`. Neither case fetches return snapshots or
+substitutes a probability. This validation does not rescore or migrate already-scored history.
 
 ---
 
@@ -137,54 +199,44 @@ and skips them with a warning. Using `--record` for tickers already in `verdicts
 not update the existing row, it would just warn and skip. `--backfill` correctly fills the
 existing row without creating a duplicate.
 
-**Expected outcome after backfill:** verdict_date=2026-06-18 is historical data, yfinance can
-fetch these closes. Some thin/delisted tickers may legitimately fail; `--backfill` logs which
-ones failed and why. A partial backfill is still useful, even if 2 of 40 tickers fail, the
-other 38 can be scored when their horizons mature.
+A backfill can resolve an entry quote only when the provider supplies matching dated evidence.
+Thinly traded, delisted, malformed or unavailable records may remain unresolved. Report which
+rows were filled and which failed, including reasons. A partial backfill does not establish
+complete quote coverage or make an unresolved row eligible for scoring.
 
 ---
 
-## Validation BUY False-Positive Backfill (P12d)
+## Historical Adjudication Is Not a Backfill Input
 
-**The problem:** the live ledger held 40 `观察`/`避开` verdicts and **zero BUY**, so the BUY arm
-of calibration was permanently unobservable. Yet the 2026-06-19 validation campaign produced
-**19 BUY-eligible (MoS ≥ 30%) names, every one a false positive with an identified XBRL/model
-cause** (see `docs/2026-06-19-validation-report.md` and
-`reports/smallcap/2026-06-19_validation-v0.2.0/`). None were in the ledger. The calibration
-instrument was blind to the exact failure it was built to detect.
+The former `--backfill-validation-fp` route is retired and rejects before any ledger write.
+The public tool no longer contains historical verdict tuples. Historical reports remain
+unvalidated audit material; their labels cannot automatically become reviewed calibration
+observations or establish an integrity rate.
 
-**The fix:** backfill those 19 as a distinct adjudication class:
+Preserve original observations, analyst interventions and their provenance in the versioned
+private companion. Any future adjudication must have a separate, documented review protocol
+and traceable evidence. The explicit receipt command above transports a completed review;
+it neither imports history automatically nor independently approves a review. A repair,
+fixture or preserved report is not a substitute for that review.
 
-```bash
-python tools/track_forward.py --backfill-validation-fp
-```
-
-Each row is logged with `rating=买入`, `adjudication="data_false_positive"`, and an `fp_cause`
-string. The cohort (ticker, MoS%, cause) is encoded deterministically in
-`tools/track_forward.py::VALIDATION_FP`. The command is **idempotent**, re-running skips rows
-already present.
-
-**Why a separate class, and why OUT of the price-Brier:** these were adjudicated **today** by a
-balance-sheet cross-check, not by a 12-month forward price. They have null entry prices and are
-never `--score`d. Counting them in the price-Brier would conflate a data-integrity failure with a
-return-prediction error. Instead they feed exactly one metric, **BUY data-integrity**, which is
-`clean_BUYs / all_BUYs = 0 / 19 = 0.0%`. That single number is the most decision-relevant output
-the loop can produce right now: *every BUY this engine has ever fired was a data artifact.*
-
-This converts the validation campaign from a one-off doc into a permanent calibration asset and
-gives the BUY arm 19 observations instead of zero.
-
----
 
 ## Brier Score Methodology
 
 **Favorable outcome definition:** stock total return **> benchmark total return** over the horizon.
 
-**Total-return basis (P12b):** both legs use yfinance `auto_adjust=True` closes, which back-adjust
-for **both splits AND cash dividends**. `(horizon_close - entry_close) / entry_close` is therefore
-the dividend-adjusted total return, not price-only. This removes the prior systematic bias that
-mislabeled every high-dividend WATCH name (MLPs/utilities, UAN, ARTNA, MSEX, YORW) as an
-underperformer. No per-verdict dividend annotation is required anymore.
+Scoring keeps unrounded return percentages and the favorable outcome. Display rounding never
+changes the outcome used by Brier, individual rows, hit rates, or calibration frequencies. Risk
+metrics use the same precise return comparisons for sign and drawdown thresholds.
+
+Legacy rows remain untouched. A two-decimal legacy return represents a rounding interval; if
+that interval contains the decision threshold, the outcome is unknown. In particular, rounded
+zero does not establish either a loss or an exact tie. Scorecards show outcome coverage and
+exclude unknown results from outcome rates. Calibration means use that same observed subset.
+Stored Brier averages retain all eligible stored scores and state that separate population.
+Risk metrics likewise report observed and missing comparisons. No private ledger migration or
+outcome reconstruction from a historical Brier score is performed.
+
+**Total-return basis (P12b):** Both legs use yfinance `auto_adjust=True` closes, which adjust for splits and cash dividends. Compute the return from the adjusted horizon and entry closes on the same basis. This avoids comparing a price-only stock return with a dividend-adjusted benchmark; missing quote evidence remains unavailable.
 
 **Per-verdict Brier score:**
 
@@ -199,8 +251,9 @@ Properties:
 - Brier = 1.0: perfectly wrong predictions
 
 **Average Brier** across N verdicts: simple arithmetic mean over the **price-scorable** population
-only, `scored == True AND adjudication != "data_false_positive"`. The backfilled validation BUY
-false-positives (next section) are deliberately excluded; they have no forward price horizon.
+only. A verdict must be scored and have neither an FP label nor an unsupported adjudication
+claim. Requiring evidence for review metrics never admits legacy FP labels to price scoring.
+Unlabeled forward records remain eligible for price scoring once their price evidence matures.
 
 **Skill score** (optional future extension): `1 - (Brier / 0.25)`, positive = better than
 uninformative, negative = worse than uninformative.
@@ -209,14 +262,14 @@ uninformative, negative = worse than uninformative.
 
 ## De-Risk-Native Metrics (P12c)
 
-Brier-vs-IWM measures stock-picking. This skill is a **de-risk scanner**: its job is blowup
-AVOIDANCE, not beating IWM by a hair. Three metrics measure that directly, reported in the
-scorecard alongside (and ahead of) the price-Brier:
+Brier-vs-IWM measures relative price outcomes. The scorecard also reports review coverage
+and outcomes among WATCH/AVOID names. These describe different populations and should
+not all be interpreted as evidence that losses were avoided:
 
 | Metric | Definition | Why |
 |---|---|---|
-| **BUY data-integrity** | `clean_BUYs / all_BUYs` = fraction of BUY verdicts NOT adjudicated `data_false_positive` | The only one **measurable today**. With the 19 validation FPs and zero clean BUYs, it is 0.0%, the honest, decision-relevant headline. |
-| **Blowup-avoidance** | fraction of scored `观察`/`避开` names whose horizon total return stayed **above −40%** | A scanner that keeps you out of −40% craters is doing its job even if it never beats IWM. |
+| **BUY data-integrity** | `receipt_backed_clean_BUYs / receipt_backed_reviewed_BUYs` | Report review coverage and pending BUYs separately. With no valid review receipts the rate is N/A, even if legacy rows carry clean or FP labels. |
+| **Above-threshold outcome rate** | fraction of scored `观察`/`避开` names whose horizon total return stayed **above −40%** | Describes returns in the flagged cohort. A high value means fewer flagged names crossed the loss threshold; it does not prove the scanner correctly avoided craters. |
 | **Downside-capture** | fraction of scored `避开` names that **underperformed the benchmark AND** drew down past −40% | Tests whether AVOID genuinely flags losers (vs. crying wolf). |
 
 The blowup threshold (`BLOWUP_DRAWDOWN_THRESHOLD = -0.40`) is encoded in `track_forward.py`. All
@@ -289,35 +342,30 @@ realized_excess_pct = stock_total_return - IWM_total_return
 1. **After each deep-dive run:** run `python tools/track_forward.py --record <verdicts_json>` to
    log all verdicts (pass `--confidence` for the directional probability mapping). ~1 minute.
 
-2. **Once, to seed the BUY arm:** run `python tools/track_forward.py --backfill-validation-fp`
-   to inject the 19 validation BUY false-positives (P12d). Idempotent.
+2. **Review coverage:** keep unreviewed verdicts pending. Do not seed the BUY arm with
+   historical labels; the retired backfill command cannot establish a reviewed observation.
 
-3. **Monthly:** run `python tools/track_forward.py --score` to price-score any verdicts whose
-   horizon has elapsed. In the first year this produces 0 price-scored verdicts (all recent),
-   but the BUY-data-integrity metric is already meaningful from the backfilled cohort.
+3. **Monthly:** run `python tools/track_forward.py --score` to price-score eligible verdicts
+   whose individual horizons have elapsed. Report observed, pending and unavailable outcomes.
+   Review coverage remains a separate measure.
 
-4. **After ~20 verdicts mature:** run `--scorecard` and examine the calibration table + de-risk
-   metrics. Only then is price-Brier-based rubric tuning justified.
+4. **When outcomes are available:** run `--scorecard` and examine sample composition,
+   uncertainty, missing coverage and de-risk metrics. A fixed number of matured verdicts
+   alone does not justify rubric tuning or establish predictive performance.
 
 ---
 
 ## Honest Note: Until Verdicts Mature, Calibration is Unknown
 
-The first forward-tracked verdicts from runs in 2026-06 will mature in 2027-06. Until then, for the
-**price-Brier** axis:
+Each verdict matures according to its recorded date and horizon. A fresh ledger has no
+realized calibration. An unscored cohort must report calibration as unknown; a partially
+scored cohort must disclose both the observed subset and the missing coverage. Do not assign
+a maturity date, price-Brier score or tuning justification from a historical run narrative.
 
-- The scorecard will show "0 price-scored, N pending"
-- **No price-calibration-based rubric tuning is justified**
-- The correct response to "why do we always get WATCH?" is "we don't know yet, check back in 12 months"
+BUY integrity and review coverage are separate quantities. If no verdict has a supported
+adjudication, the integrity rate is unavailable. Historical seeded labels do not prove a
+current rate or live performance; retain their provenance for private review.
 
-**But the BUY arm is no longer blind.** The de-risk-native **BUY data-integrity** metric (P12c/P12d)
-is meaningful **today**: the 19 backfilled validation BUYs give a hard, present-tense answer,
-0.0% of BUY verdicts survive a balance-sheet cross-check. That is actionable now, without waiting
-for price. It is the part of the loop most worth heeding before any clean BUY ever fires.
-
-This is not a failure of the system. It is the correct epistemically honest state. The value of
-Phase 6 is that it converts uncertainty from "permanent / unresolvable" to
-"time-bounded / resolvable by evidence", and, for data-integrity, "resolvable now."
 
 ---
 

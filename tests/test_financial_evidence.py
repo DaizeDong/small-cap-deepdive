@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from test_private_runs import state
-from make_fixtures import financial_scenarios
+from make_fixtures import financial_scenarios, source26_debt_fixture
 
 FIX = financial_scenarios()
 
@@ -90,6 +90,8 @@ def test_balance_sheet_does_not_double_adjust_post_interest_cash_flow(valuation_
     for amount in FIX['sensitivity'][field]:
         data = deepcopy(FIX['complete'])
         data['derived']['latest_total_debt' if field == 'debt' else 'latest_cash'] = amount
+        if field == 'debt':
+            source26_debt_fixture(data)
         result.append(value(valuation_module, data))
     assert result[0]['ev'] != result[1]['ev']
     assert result[0]['intrinsic_value_band'] == result[1]['intrinsic_value_band']

@@ -46,11 +46,14 @@ rate discipline above.
 
 **What it provides:** Parsed Form 4 insider transactions with buy/sell direction (P/S code), transaction type, and price. The static HTML tables are scrape-able without authentication.
 
-**How to use:** Fetch the company's insider transaction page by ticker or CIK. Parse the `P` (purchase) and `S` (sale) codes in the transaction table. Compute net buy/sell balance over the past 12 months.
+**Current implementation:** `deepdive_data.insider_trades` uses the configured
+OpenInsider source and a bounded filing window. It validates the returned table and identity;
+an unavailable or incomplete observation does not establish zero activity.
 
-**Fragility note:** `openinsider.com` is a third-party service scraping SEC data. Its availability is not guaranteed. Its terms of service are not explicitly open for automated access. In the public version of this skill, `edgartools Form 4` with custom direction parsing is the default; `openinsider` is an optional enhancement. Label it as such in reports: "(source: openinsider, public, fragility noted)".
-
-**Fallback:** If `openinsider` is unavailable, fetch Form 4 filings directly from EDGAR for the target CIK and parse the transaction code from the XML. The direction parsing was previously unreliable (`edgartools` bug), but a custom parser for the `transactionCode` field (`P`=purchase, `S`=sale) in the Form 4 XML is straightforward and reliable.
+**Availability:** OpenInsider is a third-party service. Fetch or parse failure returns
+unavailable evidence with a reason. The EDGAR Form 4 mode is an unsupported stub that returns
+`available: false`; there is no implemented automatic EDGAR fallback. Direct filing
+verification is separate analyst work and must retain its own source evidence.
 
 ### yfinance, Convenience Layer for Market Data
 
@@ -65,7 +68,7 @@ rate discipline above.
 
 #### P7, Second-Source Sanity Band (debt / revenue / shares cross-check)
 
-Until iteration 5, every financial datum in the decision path was SEC XBRL and every data-integrity guard (the C1a/C1b/C1c internal-consistency checks) operated on that *same* feed, so all of them were structurally blind to a corruption that looks internally reasonable but is externally wrong (HCI's plausible $246M revenue behind a failed SIC fetch → +118% pseudo-BUY; AL's sub-entity $331M revenue + 200-share tag; HRI's truncated $11M debt). P7 adds the FIRST external check.
+Internal consistency checks cannot establish agreement with an independent source. P7 compares eligible SEC-XBRL values with separately acquired fundamentals, retaining the source values and a mismatch reason when the comparison is usable.
 
 - **What it does.** On **survivors only** (at the deepdive level, after `cheap_pass`, to respect EDGAR/yfinance rate limits), `deepdive_data.py` fetches a SECOND, INDEPENDENT source for `total_debt` / `revenue` / `shares_outstanding` from yfinance (`Ticker(t).info` totalDebt / totalRevenue / sharesOutstanding, falling back to `.balance_sheet` / `.financials` / `.get_shares_full`, newest non-null) and compares it to the SEC-XBRL-derived `latest_total_debt` / `latest_revenue` / `latest_shares`.
 - **What it emits** (into the deepdive `derived` block, read by `valuation.py`, NOT the firewalled `signals` namespace):
@@ -77,7 +80,7 @@ Until iteration 5, every financial datum in the decision path was SEC XBRL and e
 
 ### Finnhub / FMP / Alpha Vantage, Optional Free APIs
 
-**Availability:** These services require API keys with rate limits. They are listed here for completeness; `config.json` has slots for these keys. The skill runs without them, EDGAR + yfinance is the baseline.
+**Availability:** These optional services require separately configured credentials and have rate limits. The current `config.json` schema does not declare provider-key slots, and the skill does not automatically load arbitrary credential files. Keep credentials in a verified PRIVATE companion and use the provider's supported interface. EDGAR and yfinance remain the baseline; this list does not establish an implemented or tested provider integration.
 
 | Service | Free tier | Useful for |
 |---|---|---|
@@ -153,7 +156,7 @@ the trailing price move and labels the divergence.
 - **`divergence_label` ∈ {`unpriced_improvement`, `melting_ice_cube_priced`, `aligned`, `unclear`}:**
   fundamentals improving (`rev_slope > 0`, no decline flag) AND price flat/down ⇒
   `unpriced_improvement` (THE diffusion thesis, a real change the market may not have priced);
-  fundamentals declining AND price up/elevated ⇒ `melting_ice_cube_priced` (SIGA-shaped: the
+  fundamentals declining AND price up/elevated ⇒ `melting_ice_cube_priced` (the
   decline is already in the tape, no edge); trajectory and tape agreeing ⇒ `aligned`; missing
   price or a flat/mixed configuration ⇒ `unclear`.
 - **Output:** `signals.price_divergence = {price_return_6m, price_return_12m, price_source,
@@ -216,9 +219,9 @@ This is the pattern for accessing qualitative research sources (X sentiment, Red
 - Relevant shards: `x-twitter.md`, `reddit.md`, `web-scraping.md`, `finance-markets.md`
 
 **How to use:**
-1. Identify the information need (e.g., "X sentiment on ticker $RAIL")
+1. Identify the information need (e.g., "X sentiment on the requested ticker")
 2. Read the relevant market-intel shard to find the appropriate tool or query pattern
-3. Use that tool directly in the current session (it is a session-level MCP tool, already available)
+3. Discover whether that tool is available in the current session and whether its private configuration is usable. Call it only when available; otherwise record the missing source and use an available documented alternative.
 
 **No back-edge rule (structural, mandatory):**
 - `market-intel` may not call `small-cap-deepdive` at any point
@@ -226,7 +229,7 @@ This is the pattern for accessing qualitative research sources (X sentiment, Red
 - This is not a skill-to-skill call; it is a routing lookup followed by a direct tool call
 - There is no call graph edge from `market-intel` back to `small-cap-deepdive`
 
-**Why this is structurally not recursive:** The market-intel catalog provides routing knowledge (which tool to use for which query), not runtime execution. The tools themselves (MCP servers) are session-level and available directly. Reading a catalog file to decide which tool to call is equivalent to reading documentation, it does not create a runtime dependency.
+**Why this is structurally not recursive:** The catalog supplies routing documentation, not runtime execution. Session tools and credentials must be discovered independently; reading the catalog does not install a service or prove that a source is available.
 
 **Graceful degradation (market-intel not installed):**
 If a `market-intel` skill install is not present:
@@ -247,11 +250,11 @@ When X/Twitter sentiment is needed for a ticker:
 
 This is a resale API that uses the provider's own account pool and proxy infrastructure. The user's personal X/Twitter account is never involved. This eliminates account suspension risk entirely.
 
-**Availability:** The `twitterapi.io` key lives in your `market-intel` install's private secrets directory (path per that skill's own config), and its hosted MCP is registered in your local Claude config. This repo neither stores nor duplicates it, and does not depend on a fixed location for it.
+**Availability:** Check the current session's tools and the optional market-intel companion configuration. A generic installation does not include a provisioned key or registered MCP. Keep any credentials in the PRIVATE companion; this repository neither stores nor assumes them.
 
 **Pricing:** Approximately $0.15 per 1,000 tweets retrieved. Suitable for targeted ticker searches (expect 50 to 500 tweets per ticker, cost < $0.10 per company).
 
-**Zero additional configuration required:** The key was provisioned and tested as part of the market-intel skill setup. This skill reuses it via read-only catalog; no key duplication, no additional `.env` files in this repo.
+**Configuration:** Reuse an existing private configuration only after verifying current availability. If the service or credentials are absent, label the source unavailable and follow the documented fallback. Do not copy credentials into this repository.
 
 **Why not route ③ (user's own X account via twikit/playwright):**
 Route ③ involves automated login to the user's personal X account. X's terms of service prohibit automated access. In practice, this approach results in account suspension within days to weeks of heavy use. It is permanently excluded from this skill.

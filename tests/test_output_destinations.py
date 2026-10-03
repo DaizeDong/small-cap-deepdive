@@ -33,19 +33,18 @@ def test_all_fetch_and_push_destinations_must_be_private(state, case, visibility
     assert not destination.parent.exists()
 
 
-def test_visibility_query_is_bound_to_origin_host(state, monkeypatch):
+def test_visibility_proof_uses_receipts_without_ambient_host_queries(state, monkeypatch):
     monkeypatch.setenv('GH_HOST', FIX['ambient_host'])
     metadata = subprocess.run
     checks = []
     def execute(argv, **kwargs):
         if argv[:3] == ['gh', 'repo', 'view']:
-            checks.append(argv[3].startswith('https://github.com/')
-                          or kwargs.get('env', {}).get('GH_HOST') == 'github.com')
+            checks.append(argv)
         return metadata(argv, **kwargs)
     monkeypatch.setattr(subprocess, 'run', execute)
     module = importlib.import_module('_output_paths')
     module.prove_output_path(Path(state['companion']))
-    assert checks and all(checks)
+    assert not checks
 
 
 def test_generic_output_refuses_existing_hardlinked_file(state, monkeypatch):

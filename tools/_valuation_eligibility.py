@@ -29,12 +29,13 @@ def compose_buy_eligibility(
     nav_mos,
     mos_basis: str,
     debt_evidence_uncertain: bool = False,
+    lumpy_ocf_normalization_suspect: bool = False,
 ) -> tuple[bool, list[str]]:
     """Compose buy_eligible — the single mechanical boolean the BUY trigger ANDs.
 
-    buy_eligible is True ONLY when every blocking guard is clear. The rubric/SKILL BUY
-    trigger additionally requires mos_basis=="fcf_cap" AND MoS>=30 AND zero Tier-3-load-
-    bearing; buy_eligible is the deterministic guard-composite half of that contract.
+    buy_eligible requires all blocking guards to clear and an assessable active basis.
+    The judgment rubric also requires active MoS >= 30%, complete evidence, and no
+    kill-flags or Tier-3-load-bearing evidence. NAV has additional model-fit conditions.
 
     Returns (buy_eligible, buy_ineligible_reasons).
     """
@@ -50,17 +51,17 @@ def compose_buy_eligibility(
         _buy_ineligible_reasons.append("fcf_sustainability_uncertain")
     if financial_sic_forced_unsuitable:
         _buy_ineligible_reasons.append("financial_sic_forced_unsuitable")
-    # A3: insurance_concepts_present gates buy_eligible (distinct from financial_sic_forced_
-    # unsuitable so the reason-string is accurate even on a non-financial SIC, e.g. BOC SIC-65).
+    # Insurance evidence has its own reason even when the SIC is non-financial.
     if insurance_concepts_present:
         _buy_ineligible_reasons.append("insurance_concepts_present")
-    # A4: low_revenue_loss_ratio_extreme (|NI|/rev>20x, STSS/MVIS/TIPT tail) gates buy_eligible
-    # with the accurate label, replacing the old wrong_entity_suspected co-fire on that tail. The
-    # non-extreme low_revenue_loss_ratio (>2x) stays a data_quality label ONLY (does NOT gate).
+    # The extreme loss-to-revenue condition gates eligibility with its own reason.
+    # The non-extreme condition remains a data-quality label.
     if der.get("low_revenue_loss_ratio_extreme"):
         _buy_ineligible_reasons.append("low_revenue_loss_ratio_extreme")
     if der.get("debt_truncation_suspected"):
         _buy_ineligible_reasons.append("debt_truncation_suspected")
+    if der.get("debt_stale"):
+        _buy_ineligible_reasons.append("debt_stale")
     if der.get("wrong_entity_suspected"):
         _buy_ineligible_reasons.append("wrong_entity_suspected")
     if concentration_flag == "kill":
@@ -75,16 +76,13 @@ def compose_buy_eligibility(
     # a DATA-INTEGRITY gate, not a between-filings signal; gating here is intended.
     if cross_source_mismatch:
         _buy_ineligible_reasons.append("cross_source_mismatch")
-    # v0.3.1 #1: normalization_masks_current_loss gates buy_eligible (downgrade BUY->WATCH). The
-    # trailing-avg normalized FCF is masking current cash burn / a divested-segment stub; the
-    # mechanical guards (cyclical vetoes) are silenced by the degenerate base, so this is the only
-    # path that catches the TUSK-shape phantom BUY.
+    # A trailing normalization that masks current cash burn requires review before BUY.
     if normalization_masks_current_loss:
         _buy_ineligible_reasons.append("normalization_masks_current_loss")
-    # v0.3.1 #9: a null MoS can NEVER be a tradeable BUY. When the active basis carries no numeric
-    # MoS (fcf_cap with no intrinsic band, or nav/abstain with no NAV MoS), buy_eligible MUST be
-    # False with an explicit reason, not left True-by-absence-of-data (the DAVA/TV/QNC footgun
-    # where buy_eligible=True co-existed with MoS=null, caught only by the downstream MoS>=30 clause).
+    if lumpy_ocf_normalization_suspect:
+        _buy_ineligible_reasons.append("lumpy_ocf_normalization_suspect")
+    # The active valuation basis must carry a numeric margin of safety. An absent
+    # intrinsic band cannot be made eligible by an otherwise empty reason list.
     _active_mos_for_eligibility = mos if mos_basis == "fcf_cap" else nav_mos
     if _active_mos_for_eligibility is None:
         _buy_ineligible_reasons.append("not_assessable_no_intrinsic_band")

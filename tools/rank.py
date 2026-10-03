@@ -18,6 +18,7 @@ This file naturally ranks only deep-band companies that completed a full deep-di
 from __future__ import annotations
 import argparse
 import glob
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -30,6 +31,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pandas as pd
 from _common import REPORTS, today
 from _output_paths import prove_output_path
+from filter_by_sic import (stage_completion, stage_work, read_stage_receipt,
+                           write_stage_receipt, prepare_stage_output, stage_receipt_path)
 
 RATING_MAP = {"买入": 3, "buy": 3, "观察": 2, "watch": 2, "hold": 2,
               "避开": 1, "avoid": 1, "sell": 1}
@@ -43,10 +46,12 @@ RATING_MAP = {"买入": 3, "buy": 3, "观察": 2, "watch": 2, "hold": 2,
 _DEEPDIVE_TICKER_RE = re.compile(r"^deepdive_[A-Za-z0-9.\-]+_\d{4}-\d{2}-\d{2}\.json$")
 
 
-def read_text_utf8(path) -> str:
+def read_text_utf8(path, *, payload=None) -> str:
     """Read a report as UTF-8. Windows' default codepage is GBK, so a naive open() of the
     utf-8-written report_*.md raises UnicodeDecodeError for any ad-hoc consumer (ergonomics
     G5). All report reads here go through this helper."""
+    if payload is not None:
+        return payload.decode("utf-8")
     from pathlib import Path as _P
     return _P(path).read_text(encoding="utf-8")
 
@@ -90,15 +95,144 @@ def extract_rating(md: str) -> dict:
     return out
 
 
-def load_hard_data(ticker: str, reports_dir=None) -> dict:
+def _report_files(base, slug=""):
+    scoped = list(base.glob(f"report_{slug}_*.md")) if slug else []
+    return sorted(scoped or base.glob("report_*.md"))
+
+
+def _report_ticker(path):
+    return Path(path).stem.removeprefix("report_")
+
+
+def _hard_data_file(ticker, base):
+    files = sorted(path for path in base.glob("deepdive_*.json")
+                   if path.name.startswith(f"deepdive_{ticker}_")
+                   and _DEEPDIVE_TICKER_RE.fullmatch(path.name))
+    return files[-1] if files else None
+
+
+def _candidate_files(base):
+    return sorted(path for path in base.glob("candidates_*.json")
+                  if "gate2_survivors" not in path.name
+                  and not path.name.endswith(".stage.json")) or sorted(base.glob("all_candidates.json"))
+
+
+def _run_artifact(base, name):
+    if (not isinstance(name, str) or not name or name in {".", ".."}
+            or "/" in name or "\\" in name or ":" in name):
+        raise ValueError("run artifact must be a same-directory basename")
+    return base / name
+
+
+def _collect_ranking_inputs(reports_dir, report_files=None):
+    """Capture the selected payloads and the exact bytes used by upstream validators."""
+    base = Path(reports_dir).absolute()
+    reports = _report_files(base) if report_files is None else sorted(Path(p).absolute()
+                                                                   for p in report_files)
+    payloads = {}
+
+    def capture(path):
+        path = Path(path).absolute()
+        if path.parent != base:
+            raise ValueError("ranking inputs must belong to the run directory")
+        payload = path.read_bytes()
+        if path.name in payloads and payloads[path.name] != payload:
+            raise ValueError(f"ranking input changed while reading: {path.name}")
+        payloads[path.name] = payload
+
+    def capture_pair(path):
+        capture(path)
+        receipt = stage_receipt_path(path)
+        if receipt.exists():
+            capture(receipt)
+
+    gate2_path = base / "gate2_results.json"
+    gate2_rows, gate2_completion = None, None
+    event_rows, event_completion = None, None
+    event_path = base / "candidates_event_admitted.json"
+    if event_path.exists() or stage_receipt_path(event_path).exists():
+        if gate2_path.exists() or stage_receipt_path(gate2_path).exists():
+            raise ValueError("A run cannot mix event admission and Gate2 results")
+        from _event_admission import read_event_admission, event_input_artifacts
+        _, event_completion = read_event_admission(base)
+        event_rows = event_completion["decisions"]
+        for member in event_input_artifacts(base, event_completion):
+            capture(member)
+        for binding in (event_completion, event_completion["input"], event_completion["cheap_input"]):
+            payload = payloads[binding["artifact"]]
+            if (len(payload) != binding["artifact_bytes"]
+                    or hashlib.sha256(payload).hexdigest() != binding["artifact_sha256"]):
+                raise ValueError("Captured event input differs from its parsed snapshot")
+        if json.loads(payloads[stage_receipt_path(event_path).name]) != event_completion:
+            raise ValueError("Captured event receipt differs from its parsed snapshot")
+        for key, binding in (("source_receipt_sha256", event_completion["input"]),
+                             ("cheap_receipt_sha256", event_completion["cheap_input"])):
+            payload = payloads[stage_receipt_path(base / binding["artifact"]).name]
+            if hashlib.sha256(payload).hexdigest() != event_completion[key]:
+                raise ValueError("Captured upstream receipt differs from its parsed snapshot")
+        candidates = [event_path]
+        source_name = event_completion["input"]["artifact"]
+        for path in _candidate_files(base):
+            if path.name not in {source_name, event_path.name}:
+                capture_pair(path)
+                if json.loads(payloads[path.name]):
+                    raise ValueError("Candidate artifact is outside the bound event cohort")
+    elif gate2_path.exists() or stage_receipt_path(gate2_path).exists():
+        capture_pair(gate2_path)
+        receipt_name = stage_receipt_path(gate2_path).name
+        if receipt_name not in payloads:
+            raise ValueError("Gate2 results require a bound stage receipt")
+        receipt = json.loads(payloads[receipt_name])
+        binding = receipt.get("input") if isinstance(receipt, dict) else None
+        if not isinstance(binding, dict):
+            raise ValueError("Gate2 receipt requires its candidate input binding")
+        candidates = [_run_artifact(base, binding.get("artifact"))]
+        capture_pair(candidates[0])
+        # The producer owns validation of every requested index, identity and decision.
+        from run_theme import read_gate2_results
+        gate2_rows, gate2_completion = read_gate2_results(base)
+        if gate2_completion.get("input") != binding:
+            raise ValueError("Gate2 input binding changed while reading")
+    else:
+        candidates = _candidate_files(base)
+        for path in candidates:
+            capture_pair(path)
+
+    hard_data = {}
+    for path in reports:
+        capture(path)
+        ticker = _report_ticker(path)
+        hard_data[ticker] = _hard_data_file(ticker, base)
+        if hard_data[ticker] is not None:
+            capture(hard_data[ticker])
+    # Upstream readers read their own files. Reject mutation around those reads.
+    for name in list(payloads):
+        capture(base / name)
+    bindings = [{"artifact": name, "artifact_bytes": len(payload),
+                 "artifact_sha256": hashlib.sha256(payload).hexdigest()}
+                for name, payload in sorted(payloads.items())]
+    return {"reports": reports, "hard_data": hard_data, "candidates": candidates,
+            "payloads": payloads, "input_artifacts": bindings,
+            "gate2_rows": gate2_rows, "gate2_completion": gate2_completion,
+            "event_rows": event_rows, "event_completion": event_completion}
+
+
+def ranking_input_artifacts(reports_dir, report_files=None):
+    """Return sorted byte bindings using the same input selectors as the ranking CLI."""
+    return _collect_ranking_inputs(reports_dir, report_files)["input_artifacts"]
+
+
+def load_hard_data(ticker: str, reports_dir=None, *, _inputs=None) -> dict:
     # reports_dir defaults to REPORTS, but MUST honor --input so finalize_run's
     # `rank.py --input <run>` finds the run's deepdive JSONs (previously it always
     # globbed REPORTS, so an --input run had no hard data -> missing 'killflags' column).
     base = Path(reports_dir if reports_dir is not None else REPORTS)
-    files = glob.glob(str(base / f"deepdive_{ticker}_*.json"))
-    if not files:
+    path = (_inputs["hard_data"].get(ticker) if _inputs is not None
+            else _hard_data_file(ticker, base))
+    if path is None:
         return {}
-    d = json.load(open(sorted(files)[-1], encoding="utf-8"))
+    payload = _inputs["payloads"][path.name] if _inputs is not None else path.read_bytes()
+    d = json.loads(payload)
     if isinstance(d, list):
         return {}
     der = d.get("derived", {})
@@ -116,9 +250,12 @@ def load_hard_data(ticker: str, reports_dir=None) -> dict:
         kf = sum([1 if (tk.get("has_going_concern")) else 0,
                   1 if tk.get("has_material_weakness") else 0,
                   1 if tk.get("has_death_spiral") else 0])
-    return {"revenue_M": round((der.get("latest_revenue") or 0) / 1e6, 1),
-            "net_income_M": round((der.get("latest_net_income") or 0) / 1e6, 1),
-            "ocf_M": round((der.get("latest_ocf") or 0) / 1e6, 1),
+    revenue = der.get("latest_revenue")
+    net_income = der.get("latest_net_income")
+    ocf = der.get("latest_ocf")
+    return {"revenue_M": round(revenue / 1e6, 1) if revenue is not None else None,
+            "net_income_M": round(net_income / 1e6, 1) if net_income is not None else None,
+            "ocf_M": round(ocf / 1e6, 1) if ocf is not None else None,
             "rev_growth": der.get("revenue_growth_pct"),
             "dilution": der.get("shares_growth_pct"),
             "insider": ins.get("net_signal"),
@@ -127,7 +264,7 @@ def load_hard_data(ticker: str, reports_dir=None) -> dict:
             "material_weakness": tk.get("has_material_weakness")}
 
 
-def compute_funnel_stats(reports_dir=None) -> dict:
+def compute_funnel_stats(reports_dir=None, *, _inputs=None) -> dict:
     """Compute the run's honest funnel from the files present in reports_dir.
 
     P-H: the old narration read "{report_count} 召回 → {deepdive_count} 小盘候选", which on the
@@ -154,22 +291,34 @@ def compute_funnel_stats(reports_dir=None) -> dict:
     deepdives = [f for f in glob.glob(str(base / "deepdive_*.json"))
                  if _DEEPDIVE_TICKER_RE.match(Path(f).name)]
 
+    if _inputs is None and (base / "candidates_event_admitted.json").exists():
+        _inputs = _collect_ranking_inputs(base, report_files=[])
     candidates = None
     deep_band = None
     # Prefer the theme candidates file (candidates_<slug>.json); fall back to all_candidates.json.
-    cand_files = [f for f in glob.glob(str(base / "candidates_*.json"))
-                  if "gate2_survivors" not in Path(f).name] \
-        or glob.glob(str(base / "all_candidates.json"))
-    rows: list = []
-    for cf in sorted(cand_files):
+    cand_files = _inputs["candidates"] if _inputs is not None else _candidate_files(base)
+    event_completion = _inputs.get("event_completion") if _inputs is not None else None
+    rows: list = list(_inputs["event_rows"]) if event_completion is not None else []
+    upstream, work = ([event_completion] if event_completion is not None else []), []
+    for cf in ([] if event_completion is not None else sorted(cand_files)):
         try:
-            d = json.load(open(cf, encoding="utf-8"))
-        except Exception:
+            payload = (_inputs["payloads"][Path(cf).name] if _inputs is not None
+                       else Path(cf).read_bytes())
+            d = json.loads(payload)
+            r = d if isinstance(d, list) else d.get("candidates") if isinstance(d, dict) else None
+            if not isinstance(r, list) or any(not isinstance(x, dict) for x in r):
+                raise ValueError("invalid candidate rows")
+            if any(not isinstance(row.get("ticker"), str)
+                   or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}", row["ticker"])
+                   for row in r):
+                raise ValueError("invalid candidate identity")
+        except (OSError, ValueError):
+            work.append(stage_work("candidate_artifact", Path(cf).name,
+                                   status="invalid", reason="invalid_candidate_payload"))
             continue
-        r = d if isinstance(d, list) else d.get("candidates", [])
-        if isinstance(r, list):
-            rows.extend(x for x in r if isinstance(x, dict))
-    if rows:
+        rows.extend(r)
+        upstream.append(read_stage_receipt(cf, len(r)))
+    if upstream:
         candidates = len(rows)
         deep_band = sum(1 for x in rows if x.get("band") == "deep")
 
@@ -178,7 +327,57 @@ def compute_funnel_stats(reports_dir=None) -> dict:
         "deep_band": deep_band,
         "deepdived": len(deepdives),
         "reports": len(reports),
+        "candidate_rows": rows,
+        "completion": stage_completion("ranking_candidates", len(rows), work=work,
+                                        upstream=upstream,
+                                        reasons=[] if cand_files else ["missing_candidate_artifact"]),
     }
+
+
+def _ranking_scope(stats, inputs):
+    """Keep each deep identity required unless its bound Gate2 judgment excludes it."""
+    if inputs.get("event_rows") is not None:
+        required = [row for row in inputs["event_rows"]
+                    if row["admission_decision"] in {"retained", "unresolved"}
+                    and row["band"] in {"deep", "unknown"}]
+        tickers = {row["ticker"].upper() if row["ticker"] else "CIK" + row["cik"]
+                   for row in required}
+        reasons = ["unresolved_candidate_band"] if any(
+            row["band"] == "unknown" for row in required) else []
+        return tickers, reasons
+    excluded = {row["input_index"] for row in (inputs["gate2_rows"] or [])
+                if row["judgment_status"] == "complete" and row["theme_fit"] == "misrecall"}
+    required = [row for index, row in enumerate(stats["candidate_rows"])
+                if row.get("band") == "deep" and index not in excluded]
+    tickers = [str(row.get("ticker") or "").upper() for row in required]
+    reasons = []
+    if any(row.get("band") not in ("deep", "watch") for row in stats["candidate_rows"]):
+        reasons.append("unresolved_candidate_band")
+    if any(not ticker for ticker in tickers):
+        reasons.append("missing_deep_candidate_identity")
+    all_tickers = [str(row.get("ticker") or "").upper() for row in stats["candidate_rows"]]
+    if len(set(all_tickers)) != len(all_tickers):
+        reasons.append("ambiguous_candidate_identity")
+    if any(all_tickers.count(ticker) > 1 for ticker in tickers):
+        reasons.append("ambiguous_deep_candidate_identity")
+    return set(tickers), reasons
+
+
+def _ranking_report_selection(stats, inputs):
+    required_tickers, reasons = _ranking_scope(stats, inputs)
+    scope_known = (inputs.get("event_rows") is not None or inputs["gate2_rows"] is not None
+                   or stats["completion"]["status"] == "complete")
+    reports = [path for path in inputs["reports"]
+               if not scope_known or _report_ticker(path).upper() in required_tickers]
+    return reports, required_tickers, reasons, scope_known
+
+
+def ranking_report_files(reports_dir, report_files=None):
+    """Select report observations exactly as rank does, for downstream receipt counts."""
+    inputs = _collect_ranking_inputs(reports_dir, report_files)
+    stats = compute_funnel_stats(reports_dir, _inputs=inputs)
+    reports, _, _, _ = _ranking_report_selection(stats, inputs)
+    return reports
 
 
 def funnel_line(stats: dict, survivors: int) -> str:
@@ -203,6 +402,14 @@ def rank_frame(df: pd.DataFrame) -> pd.DataFrame:
     """Apply the ranking rule: AVOID (rating_score<=1) OR kill-flag>=2 sinks to the bottom;
     survivors order by rating_score * confidence. Pure function — used by main() and selftest."""
     df = df.copy()
+    if len(df) == 0:
+        for col in ("ticker", "rating", "insider"):
+            df[col] = pd.Series(dtype="object")
+        for col in ("rating_score", "confidence", "killflags", "combined", "revenue_M",
+                    "net_income_M", "ocf_M", "rev_growth", "dilution"):
+            df[col] = pd.Series(dtype="float64")
+        df["sink"] = pd.Series(dtype="bool")
+        return df
     # Direct callers may have neither report nor sidecar risk counts.
     # The complete caller reconciles both sources before creating this frame.
     if "killflags" not in df.columns:
@@ -236,8 +443,13 @@ def _selftest() -> None:
     mixed = "```rating\nrating: 避开\nconfidence: 40\n```\n评级: 买入 置信度: 90%"
     assert extract_rating(mixed)["rating_score"] == 1, "fenced block overrides prose"
     assert extract_rating(mixed)["confidence"] == 40, "fenced confidence overrides prose"
-    # TBD/unset rating in a fenced block -> fall through (no rating), not a crash.
-    assert extract_rating("```rating\nrating: TBD\n```")["rating_score"] == 0, "fenced TBD -> unset"
+    # An unfinished fenced decision is invalid, including in the supported CLI.
+    try:
+        extract_rating("```rating\nrating: TBD\n```")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unfinished fenced decisions must be rejected")
     # rank_frame: sink (AVOID + kill-flag>=2) + ordering
     df = pd.DataFrame([
         {"ticker": "BUY0KF", "rating_score": 3, "confidence": 80, "killflags": 0},
@@ -322,6 +534,8 @@ def main():
         "--input", default="",
         help="Optional path to the reports directory (default: REPORTS from config).",
     )
+    ap.add_argument("--output", default="RANKING.md",
+                    help="New ranking basename in the run directory; existing outputs are preserved.")
     ap.add_argument("--selftest", action="store_true",
                     help="Run self-test (rating parsing + sink/ranking logic) and exit")
     args = ap.parse_args()
@@ -331,38 +545,55 @@ def main():
         return
 
     reports_dir = prove_output_path(Path(args.input) if args.input else REPORTS)
-    prove_output_path(reports_dir / "RANKING.md")
+    try:
+        output_path = prove_output_path(_run_artifact(reports_dir, args.output))
+        inputs = _collect_ranking_inputs(reports_dir, _report_files(reports_dir, args.slug))
+        stats = compute_funnel_stats(reports_dir, _inputs=inputs)
+        report_files, required_tickers, reasons, scope_known = _ranking_report_selection(stats, inputs)
+    except (OSError, ValueError) as exc:
+        ap.error(f"invalid ranking inputs: {exc}")
 
-    # Slug-scoped pattern: prefer report_<slug>_*.md; fall back to all report_*.md
-    if args.slug:
-        scoped = glob.glob(str(reports_dir / f"report_{args.slug}_*.md"))
-        report_files = scoped if scoped else glob.glob(str(reports_dir / "report_*.md"))
-    else:
-        report_files = glob.glob(str(reports_dir / "report_*.md"))
-
-    rows = []
-    for rp in sorted(report_files):
-        ticker = Path(rp).stem.replace("report_", "")
-        md = read_text_utf8(rp)
-        rec = {"ticker": ticker}
-        rec.update(extract_rating(md))
-        report_killflags = rec["killflags"]
-        rec.update(load_hard_data(ticker, reports_dir))
+    rows, work = [], []
+    for rp in report_files:
+        ticker = _report_ticker(rp)
+        try:
+            md = read_text_utf8(rp, payload=inputs["payloads"][rp.name])
+            rec = {"ticker": ticker}
+            rec.update(extract_rating(md))
+            report_killflags = rec["killflags"]
+            rec.update(load_hard_data(ticker, reports_dir, _inputs=inputs))
+        except (OSError, ValueError, OverflowError) as exc:
+            ap.error(f"invalid report {Path(rp).name}: {exc}")
         # Disagreement must not erase risk already identified by either source.
         rec["killflags"] = max(report_killflags, rec["killflags"])
         rows.append(rec)
+        work.append(stage_work("report_parse", Path(rp).name))
     df = pd.DataFrame(rows)
 
     # 排序:AVOID(rating_score=1)或 kill-flag>=2 沉底;其余按 评级分*置信度
     df = rank_frame(df)
 
-    # Compute the honest funnel from the selected reports_dir (P-H: narrowing chain, true labels).
-    stats = compute_funnel_stats(reports_dir)
+    ranked_tickers = {row["ticker"].upper() for row in rows}
+    if not rows and stats["candidates"] != 0 and (not scope_known or required_tickers):
+        reasons.append("empty_ranking_without_complete_empty_candidates")
+    if required_tickers - ranked_tickers:
+        reasons.append("unranked_deep_candidates")
+    if len(ranked_tickers) != len(rows):
+        reasons.append("duplicate_report_identity")
+    upstream = [stats["completion"]]
+    if inputs["gate2_completion"] is not None:
+        upstream.append(inputs["gate2_completion"])
+    if inputs.get("event_completion") is not None:
+        upstream.append(inputs["event_completion"])
+    completion = stage_completion("ranking", len(df), work=work,
+                                  upstream=upstream, reasons=reasons)
+    completion["input_artifacts"] = inputs["input_artifacts"]
 
     date = today()
     slug_label = f" [{args.slug}]" if args.slug else ""
     lines = [f"# 小盘深度调研排序{slug_label} — {date}", "",
              funnel_line(stats, len(df)), "",
+             f"> Stage status: {completion['status']} (observed ranking scope).", "",
              "## 排序", "",
              "| 排名 | 代码 | 评级 | 置信 | 营收 | 净利 | OCF | 增速 | 稀释 | 内部人 | kill-flag |",
              "|---|---|---|---|---|---|---|---|---|---|---|"]
@@ -386,11 +617,20 @@ def main():
               f"- **沉底(避开/kill-flag≥2):** {df['sink'].sum()} 家", "",
               "各家完整尽调见 `report_<ticker>.md`(含可证伪多空论点+pre-mortem+反方)。"]
 
-    out = prove_output_path(reports_dir / "RANKING.md")
-    out.write_text("\n".join(lines), encoding="utf-8")
+    try:
+        current_inputs = ranking_input_artifacts(reports_dir, _report_files(reports_dir, args.slug))
+        if current_inputs != inputs["input_artifacts"]:
+            raise ValueError("ranking inputs changed; use a stable run input set")
+    except (OSError, ValueError) as exc:
+        ap.error(f"cannot publish ranking from changed inputs: {exc}")
+    out = prepare_stage_output(output_path)
+    with out.open("x", encoding="utf-8") as stream:
+        stream.write("\n".join(lines))
+    write_stage_receipt(out, completion)
     print(df[["ticker", "rating", "confidence", "killflags", "sink", "combined"]].to_string())
     print(f"\n排序: {out}")
+    return 0 if completion["status"] == "complete" else 2
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

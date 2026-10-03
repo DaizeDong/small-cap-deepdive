@@ -1,12 +1,10 @@
-"""Canonical PRIVATE GitHub destination proof, with no import-time discovery."""
-import json
+"""Canonical PRIVATE destinations backed by the pinned shared proof API."""
+from functools import lru_cache
+import importlib.util
 import os
 from pathlib import Path
-import re
-import shlex
 import stat
-import subprocess
-from urllib.parse import urlsplit
+import sys
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -15,118 +13,42 @@ class OutputPathError(RuntimeError):
     """A destination could not be proved safe for private runtime data."""
 
 
-def _query(arguments):
+@lru_cache(maxsize=1)
+def _guard_module():
+    """Load only the pinned kit; missing or incompatible dependencies fail closed."""
+    path = SOURCE_ROOT / 'guards/tools/data_boundary.py'
+    if not path.is_file():
+        raise OutputPathError('Initialize pinned guards with git submodule update --init --recursive -- guards')
+    spec = importlib.util.spec_from_file_location('_smallcap_output_boundary', path)
+    if spec is None or spec.loader is None:
+        raise OutputPathError('Cannot load the pinned PRIVATE companion proof')
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     try:
-        result = subprocess.run(arguments, capture_output=True, text=True, encoding='utf-8', timeout=20,
-                                env=dict(os.environ, GIT_OPTIONAL_LOCKS='0'))
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise OutputPathError('PRIVATE destination verification requires working Git and gh commands') from exc
-    if result.returncode:
-        raise OutputPathError('PRIVATE destination verification failed: '+arguments[0])
-    return result.stdout.strip()
+        spec.loader.exec_module(module)
+        error_type = getattr(module, 'GitError', None)
+        if (not callable(getattr(module, 'prove_private_companion', None))
+                or not isinstance(error_type, type) or not issubclass(error_type, Exception)):
+            raise OutputPathError('Pinned guards lacks the supported PRIVATE companion proof API')
+    except BaseException:
+        sys.modules.pop(spec.name, None)
+        raise
+    return module
 
 
-def _repository(existing):
+def _nearest_repository(existing):
     for candidate in (existing, *existing.parents):
-        marker = candidate/'.git'
+        marker = candidate / '.git'
         if os.path.lexists(marker):
             if not marker.is_file() and not marker.is_dir():
                 raise OutputPathError('invalid Git worktree marker')
-            resolved = Path(_query(['git', '-C', str(candidate), 'rev-parse', '--show-toplevel'])).resolve()
-            if resolved != candidate:
-                raise OutputPathError('nearest Git marker does not identify its enclosing worktree')
-            return resolved
-        if (candidate/'HEAD').is_file() and (candidate/'objects').is_dir():
+            return candidate
+        if (candidate / 'HEAD').is_file() and (candidate / 'objects').is_dir():
             raise OutputPathError('output requires a worktree, not a bare repository')
-    raise OutputPathError('output requires a versioned PRIVATE companion with an origin remote')
+    raise OutputPathError('output requires a versioned PRIVATE companion')
 
 
-def _ssh_hostname(alias):
-    """Read ordinary user Host/HostName rules without invoking SSH or commands."""
-    try:
-        lines = (Path.home()/'.ssh/config').read_text(encoding='utf-8').splitlines()
-        active, hostname = True, None
-        for line in lines:
-            tokens = shlex.split(re.sub(r'^(\s*\w+)\s*=\s*', r'\1 ', line), comments=True)
-            if not tokens:
-                continue
-            keyword, values = tokens[0].lower(), tokens[1:]
-            if keyword in {'include', 'match'} or keyword.startswith('canonicalize') or keyword == 'canonicaldomains':
-                raise OutputPathError('SSH alias verification supports only ordinary Host/HostName rules')
-            if keyword == 'host':
-                if not values:
-                    raise OutputPathError('SSH Host rule has no patterns')
-                positive, negated = False, False
-                for pattern in values:
-                    expression = re.escape(pattern.removeprefix('!').lower()).replace(r'\*', '.*').replace(r'\?', '.')
-                    if re.fullmatch(expression, alias.lower()):
-                        if pattern.startswith('!'):
-                            negated = True
-                        else:
-                            positive = True
-                active = positive and not negated
-            elif keyword == 'hostname':
-                if len(values) != 1:
-                    raise OutputPathError('SSH HostName rule must contain one hostname')
-                if active and hostname is None:
-                    hostname = values[0].lower()
-        return hostname or ('github.com' if alias.lower() == 'github.com' else None)
-    except FileNotFoundError as exc:
-        if alias.lower() == 'github.com':
-            return 'github.com'
-        raise OutputPathError('cannot resolve SSH alias without SSH configuration') from exc
-    except (OSError, ValueError) as exc:
-        raise OutputPathError('cannot resolve SSH alias from ordinary user SSH configuration') from exc
-
-
-def _github_identity(remote):
-    is_ssh = True
-    if '://' in remote:
-        parsed = urlsplit(remote)
-        if parsed.scheme not in {'https', 'ssh'} or parsed.password or parsed.query or parsed.fragment:
-            raise OutputPathError('unsupported companion origin')
-        host, name = parsed.hostname, parsed.path.lstrip('/')
-        is_ssh = parsed.scheme == 'ssh'
-    else:
-        parsed = re.fullmatch(r'(?:[^@/:\s]+@)?([^/:\s]+):([^\s]+)', remote)
-        if parsed is None:
-            raise OutputPathError('companion origin must identify a GitHub repository')
-        host, name = parsed.groups()
-    host = host.lower() if host else None
-    if is_ssh and host:
-        host = _ssh_hostname(host)
-    if host != 'github.com':
-        raise OutputPathError('companion origin must use github.com for visibility verification')
-    name = name.removesuffix('.git')
-    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', name):
-        raise OutputPathError('invalid GitHub companion identity')
-    return name
-
-
-def _prove_private_remotes(repository):
-    """Check all effective fetch and push URLs against their explicit GitHub host."""
-    prefix = ['git', '-C', str(repository), 'remote']
-    remotes = _query(prefix).splitlines()
-    if 'origin' not in remotes:
-        raise OutputPathError('PRIVATE companion requires an origin remote')
-    identities = set()
-    for remote in remotes:
-        if not remote or remote.startswith('-'):
-            raise OutputPathError('invalid companion remote name')
-        for direction in ([], ['--push']):
-            urls = _query([*prefix, 'get-url', *direction, '--all', remote]).splitlines()
-            if not urls:
-                raise OutputPathError('companion remote has no verifiable destination')
-            identities.update(_github_identity(url) for url in urls)
-    for identity in sorted(identities):
-        answer = json.loads(_query(['gh', 'repo', 'view', 'https://github.com/' + identity,
-                                    '--json', 'visibility']))
-        if not isinstance(answer, dict) or answer.get('visibility') != 'PRIVATE':
-            raise OutputPathError('output companion is PUBLIC or its visibility is unknown')
-
-
-def prove_output_path(requested):
-    """Return the canonical target after proving its actual enclosing repository PRIVATE."""
+def _prove_output_path(requested):
     path = Path(requested).expanduser()
     parts = path.parts[1:] if path.is_absolute() else path.parts
     if any(part.lower() == '.git' or ':' in part or part.endswith((' ', '.')) for part in parts):
@@ -150,17 +72,33 @@ def prove_output_path(requested):
             existing = existing.parent
         elif not stat.S_ISDIR(info.st_mode):
             raise OutputPathError('runtime output requires an ordinary file or directory')
-        repository = _repository(existing)
+        nearest = _nearest_repository(existing)
+        boundary = _guard_module()
+        try:
+            proof = boundary.prove_private_companion(str(existing))
+        except boundary.GitError as exc:
+            raise OutputPathError('Cannot prove PRIVATE output destination: ' + str(exc)) from exc
+        repository = Path(proof.root).resolve()
+        if repository != nearest:
+            raise OutputPathError('nearest Git marker does not identify its enclosing worktree')
         if not path.is_relative_to(repository) or SOURCE_ROOT.is_relative_to(repository):
             raise OutputPathError('runtime output requires a separate PRIVATE worktree')
-        _prove_private_remotes(repository)
-        return path
+        return path, proof
     except (OSError, ValueError) as exc:
-        raise OutputPathError('cannot prove PRIVATE output destination: '+str(exc)) from exc
+        raise OutputPathError('cannot prove PRIVATE output destination: ' + str(exc)) from exc
+
+
+def prove_output_path(requested):
+    """Return the canonical target after proving its actual enclosing repository PRIVATE."""
+    return _prove_output_path(requested)[0]
 
 
 def prepare_output(requested):
-    """Prove before creating parents, then prove the actual final file destination again."""
-    path = prove_output_path(requested)
+    """Recheck path and publication identity after creating the destination's parents."""
+    path, before = _prove_output_path(requested)
     path.parent.mkdir(parents=True, exist_ok=True)
-    return prove_output_path(path)
+    final, after = _prove_output_path(path)
+    if final != path or (before.root, before.repositories, before.signature) != (
+            after.root, after.repositories, after.signature):
+        raise OutputPathError('PRIVATE output destination changed while preparing its parent')
+    return final

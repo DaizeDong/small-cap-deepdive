@@ -47,6 +47,9 @@ def test_sidecar_writes_generated_rows_in_verified_private_companion(module, sta
     path = module.write_sic_floor_sidecar(FIX['theme'], FIX['sic'], directory)
     assert json.loads(path.read_text(encoding='utf-8')) == FIX['sic']
     assert path.is_relative_to(Path(state['companion']))
+    receipt = module.read_stage_receipt(path, len(FIX['sic']))
+    assert receipt['status'] == 'partial'
+    assert receipt['reasons'] == ['missing_completion_evidence']
 
 
 def test_recall_union_normalizes_cik_and_retains_both_channels(module):

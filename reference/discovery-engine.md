@@ -9,16 +9,13 @@
 
 SEC full-text search (`efts.sec.gov`) returns every 10-K filing that mentions your keyword anywhere in the document. This sounds useful. In practice, precision is catastrophically low for short natural-language terms.
 
-**Measured result from real runs:**
-- Theme "AI agent" with natural keywords → 192 candidate tickers returned
-- After the two-stage precision gate → 13 true theme members (6.8% precision)
-- 94% of filings mentioned the keyword in unrelated contexts
+Short terms are ambiguous across sectors. For example, a materials term may also describe
+a treatment response, and a transport term may appear in a customer's logistics discussion.
+These are semantic ambiguities, not evidence of theme membership or population error rates.
 
-**Real case, refractory swept all of biotech:**
-The keyword `refractory` was used for a railcar insulation theme (refractory linings). In oncology, "refractory" means treatment-resistant cancer, every biotech and oncology company uses this word. The single-keyword FTS returned the entire biotech sector. Zero of these were railcar companies. **Gate 1 did not cut them:** a pharma SIC is in `sic_hard_exclude`, so Gate 1 tagged those names `review` and forwarded them anyway. Gate 2 is the step that cleared the field, and with Gate 2 skipped the entire biotech sector would have reached the deep-dive queue. This is the case that shows Gate 2 can never be skipped or merged into Gate 1: Gate 1 has no power to remove a keyword hit. Full step-by-step below, §Refractory Case: Full Reconstruction.
-
-**Real case, railcar swept commodity logistics:**
-`railcar` is used by grain, ethanol, potash, and other commodity shippers to describe their logistics. Build-A-Bear's annual report mentions railcar delivery. The term does not uniquely identify railcar manufacturers or lessors.
+Gate 1 tags SIC review context without dropping candidates. Gate 2 independently evaluates
+the core business through its bound host result. A completed keyword search does not replace
+that evaluation, and a cap or failed page limits the recall that can be claimed.
 
 **Lesson: keyword match is not theme membership.** A company that mentions your keyword once in a risk factor or logistics discussion is not a theme member.
 
@@ -35,53 +32,58 @@ These two gates run sequentially before any deepdive computation. They cannot be
 
 - `keep`, the SIC is not in `sic_hard_exclude`. Passes to Gate 2 normally.
 - `review`, the SIC **is** in `sic_hard_exclude`. The company is tagged `sic_tier="review"` and
-  **still passes to Gate 2**, because a hard-excluded SIC on a company that already matched the
-  theme keywords is a question for the LLM, not a verdict. TITN (SIC 5990, a farm-equipment dealer)
-  and SNFCA (SIC 6199, a real deathcare segment) are why.
+  **still passes to Gate 2**, because an SIC review hint on a company recalled by FTS or the
+  configured SIC floor requires business-level review. A mixed operating business can have an
+  SIC that is a poor description of the theme-relevant segment.
 - `drop` is reserved for future explicit-drop logic and **is never returned**. The
   `sic_tier != "drop"` filter in `run_theme.py` is therefore a no-op today. Do not read it as
   evidence that Gate 1 removes anything.
 
-**Caller contract:** `sic_classify` does not check theme-keyword membership itself, so `review` is
-safe to forward only because `run_theme.py` calls it on a post-FTS universe. A caller that skips the
-FTS pre-filter reopens the over-recall hole.
+**Caller contract:** `run_theme.py` applies SIC review after cheap-pass to the union of FTS
+matches and any configured SIC reverse-recall floor. SIC-only candidates need not match an FTS
+keyword. Neither recall source nor `sic_tier` proves theme membership: every survivor requires
+an explicit Gate 2 decision before deep-dive data or judgment.
 
 **Invocation:** `filter_by_sic.py` is a library module, not a pipeline step. The invocation rule and
 its self-test are stated once, in `SKILL.md` §Entry 1 step 1c.
 
 **SIC review blocks (hard-coded defaults):**
 
-| SIC Range | Description | Why excluded |
+| SIC Range | Description | Reason for review |
 |---|---|---|
 | 2833 to 2836 | Pharmaceutical preparations | Almost never industrial theme members |
 | 38xx | Medical instruments | Medical devices, not industrial |
 | 80xx | Health services | Hospitals, clinics |
-| 737x | Computer programming/software | Excluded for non-tech themes |
+| 737x | Computer programming/software | Check the actual business for non-tech themes |
 | 6xxx | Finance, insurance, real estate | No industrial revenue |
 | 5xxx | Retail trade | Distribution only |
 | 3944 | Games, toys, children's vehicles | Appears in railcar/industrial recall |
 
-**SIC missing → keep for LLM:** Companies with no SIC code on file are retained and passed to Gate 2. Do not auto-exclude them. Historical examples: NL Industries (NL, SIC 2810 chemicals) and VHI were initially misflagged, they are legitimate theme candidates with unusual SIC codes.
+**SIC missing -> keep for LLM:** Retain companies without a SIC code and pass them to Gate 2. A missing or unusual classification does not establish that the operating business falls outside the theme.
 
 **Important:** These blocks are defaults and should be reviewed for each theme. A software theme has no business sending 737x to the `review` tier. The config key is **`sic_hard_exclude`** (`string[]` of SIC prefixes); there is no key named `sic_exclusion_blocks`. It is global, with no per-theme override: to run a theme against a different list, point `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` at a second config dir whose `config.json` sets its own `sic_hard_exclude`. See `CONFIG.md`.
 
-### Gate 2, LLM Theme-Fit (`theme-fit-gate.js` / natural language subagent)
+### Gate 2, LLM Theme-Fit (`workflows/theme-fit-gate.js` through the Workflow host)
 
-**What it does:** Reads the actual business description from the most recent 10-K and classifies each company as:
+**What it does:** Reads the actual business description from the selected annual filing (10-K, 20-F or 40-F) and classifies each company as:
 - `pure_play`, primary revenue source is directly from the theme
 - `partial`, meaningful revenue exposure but not the core business
 - `misrecall`, keyword appeared in unrelated context; not a theme member
 
 **Only `pure_play` and `partial` pass to deepdive.**
 
-**What to read:** The "Business" section (Item 1) of the most recent 10-K, not just the filing header. The SIC code and ticker are insufficient, the business description is authoritative.
+**What to read:** The business section of the selected annual filing (Item 1 for a 10-K), not just the filing header. The SIC code and ticker are insufficient; the business description is authoritative.
 
-**Required output per company:**
+**Classification summary per company (human-readable, not an ingestion artifact):**
 ```
 TICKER: <ticker>
 classification: pure_play | partial | misrecall
 reason: <one sentence citing specific business activity>
 ```
+
+For ingestion, retain the complete structured host response bound to the original Gate 2
+request. This summary alone cannot establish a completed Gate 2 stage; use the request and
+result commands in `runbooks/theme-run.md`.
 
 ---
 
@@ -99,7 +101,7 @@ If all keywords for a theme return zero filing hits, `discover.py` must write a 
 
 **Rule 3: Never sample, process full results.**
 
-If a keyword returns 200 filings, process all 200 through the SIC gate and theme-fit gate. Sampling to save compute introduces survivorship bias and may drop true theme members that appear late in the result list. The `--full` flag is on by default; never override it to `--sample`.
+Process the complete observed, deduplicated recall set through cheap-pass, then send every survivor through SIC review and the theme-fit gate. Do not introduce sampling to save compute. The discovery CLI has no `--full` or `--sample` flags. Preserve the reported pagination limits, failed pages, and completion state: processing every observed row does not establish uncapped or complete historical coverage.
 
 **Rule 4: Use multiple keywords per theme.**
 
@@ -107,45 +109,20 @@ A theme about specialty chemicals should use 2 to 4 keywords covering different 
 
 **Rule 5: Use words companies actually put in their 10-K business description, not academic or analyst terminology.**
 
-Run-3 lessons from the crop-inputs theme audit:
+Build the keyword set from the products and services described in eligible filings. Use a product noun with a useful modifier, include distinct terms for related activities, and inspect ambiguous matches at Gate 2.
 
-- `crop inputs` was too academic → missed LXU (nitrogen fertilizer), IPI (potash), AVD (crop protection). These companies write `fertilizer`, `potash`, `crop protection`, `plant nutrition` in their Item 1. Use those words.
-- `facility services` was over-broad → swept unrelated building-services and outsourcing companies. Prefer the specific sub-sector term (e.g. `industrial cleaning`, `grounds maintenance`).
-- `engine` is over-broad → every manufacturer, automotive, and aerospace company mentions engines. Use `diesel engine`, `gas turbine`, or the specific model name.
-- `deathcare` / `funeral services` / `cremation` / `cemetery` are all used interchangeably by actual operators; use at least two of these to maximize recall without over-broadening.
-
-**Per-theme keyword heuristics (run-3 lessons):**
-
-| Theme | Good keywords | Bad keywords |
-|---|---|---|
-| Crop inputs / ag chemicals | `fertilizer`, `potash`, `crop protection`, `plant nutrition` | `crop inputs`, `agricultural inputs` |
-| Funeral / deathcare | `funeral`, `cremation`, `cemetery`, `deathcare` | `end-of-life services` |
-| Industrial filters | `filtration`, `industrial filter`, `filter media` | `filtration services` (too broad) |
-| Tanker shipping | `product tanker`, `crude tanker`, `chemical tanker` | `shipping` (entire maritime sector) |
-| Farm equipment dealers | `farm equipment`, `agricultural equipment dealer`, `Case IH`, `John Deere dealer` | `equipment`, `dealer` |
-
-The pattern: use the noun+modifier that appears in the company's own product or service description, not the analyst category label.
+Treat each keyword set as a recall hypothesis. Record its observed coverage and limits for the current run; historical examples do not establish that a query retrieves every relevant issuer.
 
 ---
 
-## Refractory Case: Full Reconstruction
+## Ambiguous Keywords and Gate Responsibilities
 
-For reference, the complete failure mode and fix:
+A keyword can describe a product, a customer, a risk or an unrelated technical concept.
+Treat the FTS result as a candidate observation. Gate 1 adds SIC context and forwards it;
+Gate 2 evaluates the business against the requested theme through a bound host result.
 
-1. Keyword `refractory` submitted to FTS
-2. FTS returns ~80 hits including biotech, oncology, pharma companies
-3. Gate 1 (SIC 2833-2836, 80xx in `sic_hard_exclude`): the field **does not shrink**. Those SICs
-   yield `sic_tier="review"`, and a `review` company still passes to Gate 2. What Gate 1 buys is a
-   label on ~50 of the 80 saying "this SIC has no business being in this theme, look hard."
-4. Gate 2 (LLM reads business descriptions): field drops to 3 to 5 true members. **This is the only
-   step that removes anything.**
-5. True members: companies manufacturing refractory ceramics, castables, or high-temperature industrial linings
-
-The case established Gate 2 as a mandatory invariant, not an optional enhancement: with Gate 2
-skipped, all ~80 names reach the deep-dive queue no matter how confidently Gate 1 tagged them, and
-Gate 1 alone can never prevent that.
-
----
+Keep the original search scope, caps and failed pages with the candidate set. The number
+that survives either gate does not prove population recall or a general false-positive rate.
 
 ## Coverage Caveat, Foreign Filers (20-F / 40-F)
 
@@ -160,17 +137,16 @@ Downstream fallback chain (implemented in Phase 4):
   material-weakness language is structurally similar in 20-F/40-F.
 - `deepdive_data.tenk_sections`: same fallback chain. Sets `filing_form` field so the
   caller knows which form type was actually read.
-- XBRL concept_series (`us-gaap/companyfacts`): already works for foreign filers with
-  SEC EDGAR registration. No change needed.
+- XBRL extraction uses `us-gaap` concepts and a partial `ifrs-full` fallback cascade.
+  Availability depends on the issuer's concepts, periods and units; SEC registration alone
+  does not establish usable financial coverage.
 
-**Known gap / untested:** XBRL concept differences between 10-K and 20-F filers are
-not systematically validated. Foreign filers may tag revenue under different us-gaap
-concepts or use IFRS concepts (not covered by us-gaap companyfacts). If a 20-F filer
-returns empty financials, this is the likely cause. Treat XBRL data for 20-F filers
-as best-effort and flag for manual review.
+**Known gap / untested:** Financial coverage across 20-F/40-F filers is not systematically
+validated. The concept cascade may still leave fields unavailable, and unsupported currencies
+are not converted into USD. Treat foreign-filer XBRL as best-effort, retain the missing-data
+reasons and flag material gaps for manual review.
 
-**Verification:** killflag_scan tested on STNG (Scorpio Tankers, Marshall Islands
-domicile, files 20-F), returns kf_scanned=True with filing_form="20-F" without crashing.
+**Verification contract:** A successful foreign-filer scan must report the actual selected form and usable disclosure evidence. The live validation lane must establish that behavior for its current inputs; a retained example is not a current acquisition receipt.
 
 **Theme-selection note:** Themes whose pure-plays are structurally foreign-domiciled
 (e.g. Marshall Islands tanker operators) now have partial coverage. Accept remaining
@@ -183,16 +159,18 @@ gaps explicitly or supplement with a manual list of known 20-F filers for the th
 The discovery flow for `theme <keyword>` is:
 
 ```
-discover.py (FTS, all keywords, merge by CIK)
+discover.py (FTS / configured SIC reverse-recall union, merge by CIK)
     ↓
-filter_by_sic.py (Gate 1: hard SIC exclusion)
+cheap_pass.py (mechanical de-risk; keep only non-rejected candidates)
     ↓
-theme-fit-gate.js / subagent (Gate 2: LLM business-description classification)
+run_theme.py calls sic_classify (Gate 1: SIC review hints, no theme-fit removal)
     ↓
-[pure_play + partial only] → cheap_pass.py → deepdive_data.py → deepdive-fanout
+explicit bound Gate 2 request → Workflow host → validated result ingestion
+    ↓
+[pure_play + partial only] → deepdive_data.py → bound deepdive-fanout
 ```
 
-Do not insert any deepdive computation between FTS and Gate 2 completion. Do not run `deepdive_data.py` on a ticker that has not passed both gates.
+Complete cheap-pass and SIC review before preparing Gate 2. Retain the bound Gate 2 result and survivor receipt; run `deepdive_data.py` only on the validated survivor artifact. See `runbooks/theme-run.md` for the request, host and ingestion commands.
 
 ---
 

@@ -46,111 +46,69 @@ Always run `cheap_pass` before any qualitative work. If the company fails a hard
 stop, do not spend judgment budget on a structurally disqualified candidate.
 
 ```bash
-python tools/cheap_pass.py --universe <any_universe_csv_containing_EGAN>
+python tools/cheap_pass.py --universe "<validated-universe.csv>"
 ```
 
-Or run the selftest to verify the tool works:
+The cheap_pass selftest includes live EDGAR acquisition and issuer-based checks.
+It requires network access and an initialized private configuration; it is not an offline
+synthetic check. Its output covers only the requests and assertions actually completed:
 
 ```bash
 python tools/cheap_pass.py --selftest
 ```
 
-Expected output, pass (no going-concern, no death spiral, no material weakness in latest 10-K):
-
-```
-[cheap_pass] EGAN (eGain Corp, CIK 1066194)
-  going_concern:     False
-  death_spiral:      False
-  material_weakness: False
-RESULT: PASS — proceed to deep-dive
-```
-
-Expected output, eliminated:
-
-```
-[cheap_pass] GATO
-  going_concern: True
-    "going concern" + "substantial doubt" found in 10-K 2025-03-15
-RESULT: ELIMINATED — do not deepdive
-```
+Read the returned source-completion status, filing identity and individual disclosure
+findings before interpreting admission. A clean observed filing and an unavailable filing are
+different outcomes. The presence of a kill flag must be traced to the current source evidence;
+an empty result or transport failure cannot establish that no flag exists.
 
 **If eliminated:** Report the kill-flag and stop. The hard-rule is not an invitation to
-argue, it is a floor. A company with an auditor going-concern opinion has a >50% base-rate
-probability of either restructuring, being acquired at distressed valuation, or delisting
-within 24 months.
+argue, it is a floor. The outcome base rate for companies with an auditor going-concern
+opinion is unknown here. Any empirical estimate requires a traceable study with a matching
+population, outcome definition and observation window; missing evidence does not relax the
+kill-flag exclusion policy.
 
 **Token magnitude:** Negligible, deterministic EDGAR filing fetch and parse, no LLM calls.
 Runtime: 30 to 90 seconds.
 
 ---
 
-## Step 2, Data Pull
+## Step 2, Standalone Data Pull
+
+Supply both the ticker and the verified CIK. This synthetic identity illustrates the CLI:
 
 ```bash
-python tools/deepdive_data.py --ticker EGAN
+python tools/deepdive_data.py --ticker SYNTA --cik 0000000123
 ```
 
-Output: `${REPORTS_ROOT}/deepdive_EGAN_<date>.json`
+Use the artifact path printed by the command. Standalone input has no bound upstream
+candidate receipt, so the artifact retains `unbound_single_input` and may exit 2 even when
+individual acquisitions succeed. It is a diagnostic data pull, not proof of a completed
+theme pipeline. Keep source failures and missing financial or filing inputs visible.
 
-Expected output:
-
-```
-深度尽调数据拉取: EGAN (CIK 1066194)
-  拉财务序列...
-  拉内部人交易...
-  拉 10-K 章节...
-
-=== EGAN 数据摘要 ===
-  营收: $xxx.xM (增速 x.x%)
-  净利: $x.xM | OCF: $x.xM
-  现金: $x.xM | runway: None 期
-  ...
-数据: ${REPORTS_ROOT}/deepdive_EGAN_<date>.json
-```
-
-**What it pulls:**
-
-| Data | Source | Notes |
-|---|---|---|
-| Revenue, OCF, cash | EDGAR XBRL | Partial XBRL common for micro-caps |
-| Insider trades | Form 4 via openinsider | Direction: P=purchase, S=sale |
-| Dilution history | Shares outstanding series from XBRL | |
-| 10-K text excerpt | edgartools (amendments=False) | risk_excerpt + kill-flag recheck |
-
-**Token magnitude:** Negligible, deterministic fetch, no LLM calls.
-Runtime: 2 to 8 minutes (EDGAR rate limit: ~150ms between requests).
+For a single company that already belongs to a validated Gate-2 survivor artifact, use
+`--candidates <survivors.json>` and the prepare/host/ingest sequence in
+[theme-run.md](theme-run.md). A one-row raw JSON array is not a Workflow request.
 
 ---
 
 ## Step 3, Judgment Pass
 
-In your Claude Code session, instruct the agent:
+Give the agent the verified issuer identity, selected artifact path and optional theme
+context. Require it to read `reference/cognitive-priors.md`, identify any applicable evidence,
+perform a disconfirmation search and report filing dates and missing sources.
 
-```
-Deep-dive report for EGAN (eGain Corp, CIK 1066194) using data from
-${REPORTS_ROOT}/deepdive_EGAN_<date>.json.
-Theme context (if any): "SaaS for regulated industries" [omit if no theme].
+Apply the seven-dimension scorecard and the rating rules to that bound evidence. The report
+must contain dimension scores, evidence tiers, kill-flag details, falsifiable counterarguments
+and unresolved gaps. Save the filled report in the configured PRIVATE companion.
 
-Required preamble before scoring:
-  a. Open reference/cognitive-priors.md. State the applicable base-rate priors
-     for a ~$150M revenue-positive SaaS company. Note which priors apply.
-  b. Run WebSearch: "eGain Corp EGAN fraud lawsuit SEC investigation short seller
-     bear thesis". Read and summarize what you find. If nothing material, say so explicitly.
-  c. Confirm data staleness: most recent 10-K and 10-Q period dates vs today.
-     Flag any data older than 180 days as stale.
-
-Then apply the 7-dimension scorecard from reference/judgment-rubric.md in full.
-Apply all Rating Hard-Rules from SKILL.md. No dimension may be skipped.
-
-Output: structured report with dimension scores (1–5), evidence tier per major claim,
-composite score, kill-flag detail, disconfirmation findings, and data gaps.
-```
-
-**Optional accelerator:** If the Workflow tool is available:
-
-```bash
-node workflows/deepdive-fanout.js '[{"ticker":"EGAN","cik":"1066194","name":"eGain Corp","theme":"SaaS for regulated industries","horizon":"12-18M","theme_slug":"saas","mktcap":150000000,"health_score":75,"killflag_count":0}]'
-```
+**Optional Workflow host:** use a bound survivor artifact to prepare
+`deepdive_request.json` with `--prepare-fanout` and an explicit `--verdict-date`.
+Pass that request to the configured host, save its full response, then validate it with
+`--fanout-request` and `--fanout-result`. See [theme-run.md](theme-run.md) for the exact
+commands. The workflow depends on host-provided functions; a direct Node invocation or
+raw candidate array does not implement the contract. Host execution remains unverified
+until an actual result and its ingestion receipt have been checked.
 
 **Token magnitude:** ~8k to 15k tokens per company.
 
@@ -160,68 +118,23 @@ Cost: <$0.02 per company at Sonnet pricing.
 
 ## Step 4, Reading the Output
 
-A well-formed single-company output follows the template from `reference/judgment-rubric.md`:
+Use the report structure in `reference/judgment-rubric.md`. Every filled report is private
+DATA. The public runbook describes the required fields without a completed company report.
 
-```
-# EGAN Deep Dive — 2026-06-18 (timestamp-locked)
+| Section | Required content |
+|---|---|
+| Identity and decision | Ticker, timestamp, rating, confidence and holding horizon |
+| Thesis and reference class | Falsifiable thesis; matching base-rate evidence or an explicit unknown |
+| Scorecard | Seven dimension scores with evidence tiers and concise cited reasons |
+| Bull and bear cases | Claims, disconfirming observations and conditions that would change each claim |
+| Pre-mortem | Plausible failure mechanism with stated assumptions |
+| Kill flags | Each flag, current source evidence and unresolved review items |
+| Valuation | Active basis, intrinsic band, margin-of-safety denominator and missing evidence |
+| Monitoring | Dated events and measurable conditions to revisit the thesis |
+| Coverage gaps | Unavailable sources, unsupported fields and incomplete observation windows |
 
-Rating: WATCH   Confidence: 68%   Holding period: 12-18M
-
-## 0. One-line thesis + base-rate anchor
-eGain Corp provides AI-powered customer engagement SaaS to regulated industries (banking,
-insurance, telecom); revenue is growing modestly but the company remains pre-GAAP-profit.
-Reference class: revenue-positive micro-cap SaaS with AI positioning — base rates: ~30-40%
-zero/wipeout within 5 years, ~40% mediocre, ~20-30% acquisition/upside.
-
-## 1. Scorecard
-
-| Dimension | Score (1–5) | Tier | Basis (one line) |
-|---|---|---|---|
-| 1. Financial quality | 3 | T1 | OCF positive 3 of last 4 quarters; modest growth |
-| 2. Business model / moat | 3 | T1 | Contract-based SaaS; switching costs exist but not deep |
-| 3. Growth / unit economics | 3 | T1 | Low-double-digit growth; no customer >20% concentration |
-| 4. Management | 3 | T1 | Form 4: net neutral last 12M; guidance accuracy moderate |
-| 5. Theme fit / timing | 4 | T1 | Core business IS AI-assisted customer service — real revenue, not PR |
-| 6. Valuation | 3 | T1 | EV/Sales ~2.5x; in-line with small-cap SaaS peers |
-| 7. Risk / counterargument | 3 | T2 | Competition from Salesforce/Zendesk is real; no short reports found |
-| **Weighted total** | **22/35** | | |
-
-Kill-flag count: 0
-
-## 2. Bull case (falsifiable)
-- Claim: eGain will reach consistent OCF-positive by Q3 2026.
-  Trigger to flip: if OCF does not reach >$0 by Q3 2026 earnings, financial quality thesis fails.
-
-## 3. Bear case (falsifiable) + disconfirmation search results
-- Claim: Salesforce enters the regulated-industry AI engagement space directly, eroding eGain's niche.
-  Trigger to flip: if Salesforce announces targeted regulated-industry feature set by Q2 2026, revisit.
-
-Disconfirmation search: no short reports, fraud allegations, or material litigation found as of 2026-06-18.
-
-## 4. Pre-mortem: most likely path to -80%
-The key contract with a top-5 banking customer is not renewed in Q1 2026; revenue drops 20%.
-The company draws on its credit facility; covenant triggers an accelerated repayment demand.
-A dilutive offering at -50% is announced. Existing holders sell, compounding the decline.
-
-## 5. Kill-flag review
-- has_going_concern: False
-- has_material_weakness: False
-- has_death_spiral: False
-- customer_concentration_flag: True — one customer ~15% of revenue per 10-K Item 7
-
-## 6. Valuation: implied assumptions
-Current EV/Sales: ~2.5x   Peer median: ~3.0x
-Reverse DCF implied growth (5-yr): ~12%   Actual trailing growth: ~14%
-Assessment: credible — slight discount to peers
-
-## 7. Monitor triggers
-- Next earnings: if gross margin < 65%, WATCH → AVOID
-- Form 4 cluster buying by insiders > $200k in next quarter → re-evaluate upward
-
-## 8. Known gaps and unverified items
-- EV/EBITDA not computable (XBRL depreciation not tagged); EV/Sales used as substitute
-- openinsider returned 12M data; older Form 4 history not verified
-```
+Do not infer that an absent flag means a source was successfully examined. Read the source
+completion and review evidence alongside the rating.
 
 ---
 
@@ -249,9 +162,11 @@ concurrent with secondary offerings is a hard cap, regardless of reported financ
 
 **"The company just reported great earnings but cheap_pass flagged going concern"**
 
-Read the actual going-concern disclosure. It may have been in a prior-period 10-K and
-subsequently cured. `cheap_pass` only reads the most recent 10-K (`amendments=False`).
-If the latest 10-K has no going-concern language, the flag will not appear.
+Read the selected annual filing and the parser's evidence, polarity and status. Annual
+retrieval tries 10-K, then 20-F, then 40-F, excluding amendments. A connected current
+affirmative assertion can set the flag; negation, remediation, historical or ambiguous
+language require their own interpretation. Missing filing text or unresolved evidence
+remains unknown and cannot establish a clear result. Check source completion before judgment.
 
 ---
 
@@ -259,8 +174,9 @@ If the latest 10-K has no going-concern language, the flag will not appear.
 
 **EDGAR 403:** Set `sec_user_agent` to `"AcmeCorp user1@example.com"` in `~/.small-cap-deepdive-config/config.json` (the private config dir, never the repo).
 
-**CIK not found:** Try `python tools/discover.py --theme <ticker>` to confirm the ticker maps
-to a known CIK. Micro-caps occasionally file under a parent CIK rather than the ticker symbol.
+**CIK unresolved:** Verify the ticker and CIK against a current issuer-identity source and
+retain the returned identity evidence. An unresolved or conflicting mapping remains unavailable.
 
-**openinsider timeout:** The tool falls back to direct EDGAR Form 4 fetch automatically (note:
-EDGAR Form 4 direction parsing is a roadmap item; the report will note data unavailability).
+**OpenInsider timeout:** The observation remains unavailable with a reason. Automatic
+EDGAR Form 4 parsing is not implemented; the EDGAR mode is an unavailable stub. Any direct
+filing verification is separate work and must retain its own evidence.

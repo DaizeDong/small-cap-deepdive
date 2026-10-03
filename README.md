@@ -25,12 +25,12 @@ Why that is true, and what it takes for a neglected name to also be mis-priced:
 What a top-ranked name does and does not entitle you to conclude:
 [`reference/cognitive-priors.md`](reference/cognitive-priors.md) §5.
 
-**Zero buys is a feature, not a bug.**
+**An empty result is limited to the observed screen.**
 
-If a theme produces no score-4+ candidates, the tool is telling you the small-cap universe
-for that theme does not contain clean industrial beneficiaries at this time. That is a correct
-and useful answer. A scanner that cannot say "nothing found" is not a scanner; it is a
-narrative generator.
+If no candidate reaches score 4 or higher, report that result with the retrieved population, missing
+work, coverage limits and rating policy. It does not establish that the theme has no clean
+beneficiaries or investment opportunities. Incomplete retrieval and model abstention must
+remain visible alongside the candidate count.
 
 The one-sentence version: **the tool's edge is mechanical discipline applied consistently
 across the full candidate set, not narrative synthesis on any individual company.** Every tool,
@@ -48,9 +48,15 @@ Given an investment theme or a single ticker, the skill enumerates the SEC-filin
 applies hard mechanical kill-flags, runs falsifiable deep-dive due diligence with forced
 disconfirmation, and ranks surviving candidates. What it does, step by step:
 
-0. **Open a run batch** (`new_run.py`): every run writes into `reports/smallcap/<date>_<label>/`
+0. **Open a run batch** (`new_run.py`): every run writes into the initialized PRIVATE companion's
+   `reports/smallcap/<date>_<label>/` directory
    with a `_run.json` manifest (skill git commit + valuation config snapshot) so runs stay
-   comparable across versions. `export SMALLCAP_RUN=$(python tools/new_run.py --label <theme>)`.
+   comparable across versions. Stop if allocation fails, then export the returned selector:
+
+   ```bash
+   SMALLCAP_RUN="$(python tools/new_run.py --label "Synthetic research")" || exit 1
+   export SMALLCAP_RUN
+   ```
 
 1. **Enumerates the SEC universe** for a theme using EDGAR full-text search (FTS), optionally
    UNIONed with a **SIC reverse-recall floor** (`discover.py --sic-reverse`, which calls into
@@ -59,7 +65,11 @@ disconfirmation, and ranks surviving candidates. What it does, step by step:
    Market cap is resolved with a fallback chain (SEC shares×price when yfinance is null); names that
    still can't be priced flow through as `band="unknown"` instead of being silently dropped.
 
-2. **Two-stage precision gate (mandatory).** Gate 1 (`filter_by_sic.sic_classify`, applied inline by
+2. **Mechanical de-risk** (`cheap_pass.py`): hard kill-flags from SEC filings, going-concern
+   auditor paragraphs, death-spiral convertibles, ICFR material weaknesses, magnitude-based
+   customer/government-program concentration. Eliminated companies do not proceed to judgment.
+
+3. **Two-stage precision gate (mandatory).** Gate 1 (`filter_by_sic.sic_classify`, applied inline by
    `run_theme.py`): a coarse SIC **review tier**, not an exclusion. A hard-excluded SIC tags the
    company `sic_tier="review"` and it still passes to Gate 2; Gate 1 never drops anything. Gate 2
    (LLM) reads each company's 10-K business description and classifies it `pure_play / partial /
@@ -68,10 +78,6 @@ disconfirmation, and ranks surviving candidates. What it does, step by step:
    oncology biotech sector, zero railcar companies, and Gate 1 forwarded every one of them because a
    pharma SIC only earns `review`. Recall is *measured* via `recall@gold` against hand-built
    true-member lists, not assumed.
-
-3. **Mechanical de-risk** (`cheap_pass.py`): hard kill-flags from SEC filings, going-concern
-   auditor paragraphs, death-spiral convertibles, ICFR material weaknesses, magnitude-based
-   customer/government-program concentration. Eliminated companies do not proceed to judgment.
 
 4. **Deep-dive data pull** (`deepdive_data.py`): XBRL financials (with EBIT concept cascade, debt
    and shares fallbacks), Form 4 insider trades, shelf/ATM status, dilution history, material event
@@ -97,7 +103,7 @@ disconfirmation, and ranks surviving candidates. What it does, step by step:
    track-forward loop, and `RANKING.md` with funnel counts, kill-flag eliminations, and coverage gaps.
 
 8. **Track-forward calibration** (`track_forward.py`): verdicts logged to
-   `<private data dir>/metrics/verdicts.jsonl` (resolved **outside** this repo by `tools/datadir.py`,
+   `<private data dir>/metrics/verdicts.jsonl` (resolved **outside** this repo by `guards/tools/datadir.py`,
    never into it; the repo carries only `metrics/verdicts.jsonl.example` as the schema),
    Brier-scored vs IWM at maturity, with de-risk-native metrics (blowup-avoidance / downside-capture).
 
@@ -113,28 +119,22 @@ disconfirmation, and ranks surviving candidates. What it does, step by step:
   net of transaction costs is baked into the design; that decision space is out of scope.
 - Trading signals, execution, or portfolio management.
 - Real-time data, all data is from SEC filings (1 to 4 day lag typical).
-- Large-cap or sell-side coverage, the tool is calibrated for micro/small-cap names with
+- Large-cap or sell-side coverage; the tool targets micro/small-cap names with
   no or minimal analyst coverage.
 - Automated buy recommendations, every output ends with "merits human diligence," not "buy."
 
-### Validated out-of-sample (2026-06)
+### Evidence and evaluation
 
-A 25-cell survivorship-safe point-in-time backtest (5 themes × 5 as-of dates 2020 to 2024, 12mo
-horizon) tested the skill's claims on held-out data. Honest result, write-up in
-[`docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md`](docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md):
+Real-run observations and research reports belong in the initialized, versioned PRIVATE
+companion. The public tool contains generic methodology and generated synthetic fixtures.
+See [evidence status](docs/evidence-status.md) for the limits of review, synthetic controls,
+current execution, and historical research.
 
-- **No durable alpha.** Cheapness (Margin-of-Safety) beats the market in-sample but it is a
-  2020 to 21 recovery-regime artifact and vanishes out-of-sample (holdout permutation p=0.72). The
-  tool **cannot pick market-beaters and does not claim to**, this is *why* it never issues a "buy."
-- **A real downside-avoidance edge** (its actual mission). The OOS-validated **CORE-4 distress
-  kill-flag** (operating-cash-flow loss, operating loss, accumulated deficit, Altman Z″ < 1.1)
-  routes distressed names to AVOID. Two cutoffs are measured on the same panel and each number
-  belongs to exactly one of them, so quote them together or not at all: at the **shipped
-  `distress_score >= 3` kill cutoff**, blowup precision is 35.4% against a 13.3% base
-  (**lift 2.65×**) at **recall 62%**; at the **per-year top-quintile cutoff**, lift is **2.56×** at
-  **recall 51%**, with a ticker-cluster bootstrap 95% CI on that top-quintile lift of
-  **[1.73, 3.00]** (P(lift≤1)=0). A 0-BUY scan is still valid; the value is in the landmines you
-  *don't* step on.
+CORE-4 is a policy sum of four binary distress flags, with range 0 to 4. A fixed score
+threshold, a per-year ranking, and a train/test logistic model are different evaluations.
+Predictive performance requires a dated eligible population, complete scope and provenance,
+and a freshly executed evaluation. A zero-BUY output does not establish market efficiency
+or the absence of investment opportunities.
 
 ---
 
@@ -252,8 +252,8 @@ Expected token budget: ~300k tokens, ~$0.30, 1 to 3 hours for a niche theme.
 For a rigorous report on a company you already know:
 
 ```
-/small-cap-deepdive ticker EGAN
-/small-cap-deepdive ticker EGAN --theme "SaaS for regulated industries"
+/small-cap-deepdive ticker <ticker>
+/small-cap-deepdive ticker <ticker> --theme "SaaS for regulated industries"
 ```
 
 Full step-by-step: **[runbooks/single-deepdive.md](runbooks/single-deepdive.md)**
@@ -265,10 +265,12 @@ Expected token budget: ~10k to 15k tokens per company, <$0.02.
 To re-sort or re-weight a prior run's outputs without re-running discovery:
 
 ```bash
-python tools/rank.py
-python tools/rank.py --slug railcar
-python tools/rank.py --input "<private-companion>/reports/smallcap/<run>"
+python tools/rank.py --output RANKING-rerun-01.md
+python tools/rank.py --slug railcar --output RANKING-railcar-rerun-01.md
+python tools/rank.py --input "<private-companion>/reports/smallcap/<run>" --output RANKING-rerun-02.md
 ```
+
+Choose a fresh output basename for each re-rank. Existing ranking artifacts are preserved.
 
 The default uses the configured PRIVATE companion and active run. Explicit inputs must
 also belong to a separate PRIVATE GitHub worktree. Git and `gh` verify the canonical
@@ -305,12 +307,12 @@ Expected token budget: ~300k tokens for a full event-mode run with deep-dives.
 ## How to invoke
 
 Use the slash command in any mode, e.g. `/small-cap-deepdive theme "railcar leasing"` or
-`/small-cap-deepdive ticker EGAN`. Or trigger it with natural language in any Claude Code
+`/small-cap-deepdive ticker <ticker>`. Or trigger it with natural language in any Claude Code
 session:
 
 ```
 Run small-cap-deepdive on the theme "railcar leasing"
-Deep-dive EGAN as a small-cap with small-cap-deepdive
+Deep-dive <ticker> as a small-cap with small-cap-deepdive
 Screen the small-cap SEC universe for "industrial water treatment"
 ```
 
@@ -392,18 +394,15 @@ news, competitor web presence) to the best available MCP tool. The market-intel 
 invoked as a skill at runtime, the catalog is read as documentation. Full anti-recursion
 design: `reference/data-sources.md §market-intel`.
 
-**openinsider fragility:** The default `insider_source` config uses `openinsider.com` for
-Form 4 direction parsing. This is a third-party service with no explicit automated-access
-terms. The tool automatically falls back to direct EDGAR Form 4 parsing when openinsider is
-unavailable. Reports label the source accordingly. To default to EDGAR Form 4 from the start,
-set `"insider_source": "edgar"`, but note that mode is a **roadmap stub, not yet implemented**
-(returns `available: false`); the tested default is `openinsider`. See
-`reference/data-sources.md` for the fallback behaviour.
+**Insider-source availability:** The default `insider_source` uses OpenInsider.
+A failed or incomplete observation remains unavailable with its reason. EDGAR Form 4 mode
+is an unsupported stub (`available: false`); there is no implemented automatic EDGAR fallback.
+See `reference/data-sources.md` for the current source contract.
 
-**workflow .js files are optional:** `workflows/theme-fit-gate.js` and
-`workflows/deepdive-fanout.js` accelerate fan-out steps when Claude Code's Workflow tool is
-available in the session. They are not required, the natural-language orchestration in
-`SKILL.md` is the primary path and works in any Claude Code session.
+**Workflow host requirement:** `workflows/theme-fit-gate.js` and
+`workflows/deepdive-fanout.js` consume bound requests through a configured Workflow host.
+Natural-language orchestration can prepare those requests, but each stage remains incomplete
+until its bound host result is ingested. The JavaScript files are not direct Node entry points.
 
 **X sentiment routing:** When X/Twitter sentiment is requested for a ticker, the skill routes
 to twitterapi.io (resale API) if the key is configured via the market-intel companion

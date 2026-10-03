@@ -46,7 +46,9 @@ All outputs land in the absolute PRIVATE `$REPORTS_ROOT` directory with a `_run.
 
 ## Recommended: One-Command Theme Run
 
-The easiest way to run the full mechanical pipeline (discover → cheap_pass → SIC filter):
+The mechanical pipeline runs FTS discovery → cheap-pass → SIC review. `run_theme.py`
+does not request `--sic-reverse`. For a configured SIC union, run Steps 1 to 3 separately
+and add `--sic-reverse` to the `discover.py` command in Step 1.
 
 ```bash
 python tools/run_theme.py --theme "railcar,railcar leasing" --slug railcar
@@ -90,29 +92,7 @@ Expected output:
 
 ---
 
-## Step 2, Gate 1: SIC Coarse Review
-
-Gate 1 is applied automatically by `run_theme.py` (via `filter_by_sic.sic_classify`).
-`filter_by_sic.py` is a library module, not a standalone pipeline step; its only CLI is
-`--selftest`.
-
-To verify the SIC logic:
-
-```bash
-python tools/filter_by_sic.py --selftest
-```
-
-**What it does:** tags each survivor with a `sic_tier`. **It drops nothing.** A SIC in
-`sic_hard_exclude` yields `sic_tier="review"`, and a `review` company still goes to Gate 2, the
-tier is a hint about how suspicious the SIC is, not a verdict. Everything else yields
-`sic_tier="keep"`. Companies with no SIC on file are kept. The third value, `drop`, is reserved and
-never returned, so Gate 2 is the only place a company leaves the funnel for theme-fit reasons.
-
-**Token magnitude:** Negligible, deterministic lookup against SEC company data.
-
----
-
-## Step 3, Mechanical De-Risk (cheap_pass)
+## Step 2, Mechanical De-Risk (cheap_pass)
 
 ```bash
 python tools/cheap_pass.py --universe "${REPORTS_ROOT}/universe_railcar_<date>.csv" \
@@ -136,9 +116,14 @@ Expected output:
 
 | Flag | Trigger | Action |
 |---|---|---|
-| `going_concern` | Both "going concern" + "substantial doubt" in most recent 10-K | Eliminate |
-| `death_spiral` | Variable-rate convertible in most recent filings | Eliminate |
-| `material_weakness` | ICFR material weakness in most recent annual filing | Eliminate if killflag_count >= 2 |
+| Going concern | Connected current affirmative substantial-doubt / going-concern assertion in the selected annual filing | Eliminate when the contextual flag is true |
+| Death spiral | Variable-rate convertible in most recent filings | Eliminate if killflag_count >= 2; a lone flag blocks BUY but remains for review |
+| Material weakness | Current unresolved ICFR material-weakness assertion | Eliminate if killflag_count >= 2 |
+
+Annual filing retrieval tries 10-K, then 20-F, then 40-F, excluding amendments. Bare
+phrase co-occurrence is insufficient: inspect the parser's negated, remediated, historical,
+conditional and ambiguous states. Missing sources or unresolved evidence remain unknown;
+verify filing identity and source completion before treating a screen as complete.
 
 **Do not deepdive eliminated candidates.** The kill-flag verdict stands.
 
@@ -146,96 +131,87 @@ Expected output:
 
 ---
 
-## Step 4, Gate 2: LLM Theme-Fit Classification
+## Step 3, Gate 1: SIC Coarse Review
 
-After `run_theme.py` writes `${REPORTS_ROOT}/candidates_<slug>.json`, run the theme-fit gate.
+After cheap-pass, Gate 1 is applied automatically by `run_theme.py` (via `filter_by_sic.sic_classify`).
+`filter_by_sic.py` is a library module, not a standalone pipeline step; its only CLI is
+`--selftest`.
 
-**Natural-language path (works in any Claude Code session):**
-
-In your Claude Code session, instruct the agent:
-
-```
-For each ticker in ${REPORTS_ROOT}/candidates_railcar.json, read the company's most recent 10-K
-business description from EDGAR and classify it as:
-  pure_play   — primary business is directly in the theme
-  partial     — theme exposure is real but not primary
-  misrecall   — incidental keyword match, no real theme exposure
-
-Use the prompt template in reference/discovery-engine.md §Gate 2.
-Write results to ${REPORTS_ROOT}/railcar_gate2.json (include ticker, cik, name, classification,
-one-sentence rationale). Drop all misrecalls before the next step.
-```
-
-**Optional accelerator:** If the Workflow tool is available in your session, run:
+To verify the SIC logic:
 
 ```bash
-node workflows/theme-fit-gate.js candidates_railcar.json
+python tools/filter_by_sic.py --selftest
 ```
 
-Expected output (either path):
+**What it does:** tags each survivor with a `sic_tier`. **It drops nothing.** A SIC in
+`sic_hard_exclude` yields `sic_tier="review"`, and a `review` company still goes to Gate 2, the
+tier is a hint about how suspicious the SIC is, not a verdict. Everything else yields
+`sic_tier="keep"`. Companies with no SIC on file are kept. The third value, `drop`, is reserved and
+never returned, so Gate 2 is the only place a company leaves the funnel for theme-fit reasons.
 
-```
-Gate 2 complete: 34 evaluated
-  pure_play:  8
-  partial:    14
-  misrecall:  12
-Retained for deep-dive: 22 tickers
-```
-
-**Token magnitude:** ~800 to 1 200 tokens per candidate (10-K business section read + classification).
-For 34 candidates expect ~30k to 40k tokens of input, ~4k output. Budget ~$0.05 at Sonnet pricing.
-
-**Why this gate is mandatory:** The canonical failure: keyword `refractory` for a railcar insulation
-theme swept the entire oncology biotech sector (zero railcar companies among them). See
-`reference/discovery-engine.md` for the documented case.
+**Token magnitude:** Negligible, deterministic lookup against SEC company data.
 
 ---
 
-## Step 5, Deep-Dive Data Pull
+## Step 4, Gate 2: Bound Theme-Fit Request
+
+Use the `gate2_request.json` emitted by `run_theme.py`. For an existing candidate artifact
+that has no request yet, prepare it once:
 
 ```bash
-python tools/deepdive_data.py --candidates "${REPORTS_ROOT}/candidates_railcar.json"
+python tools/run_theme.py --prepare-gate2 "${REPORTS_ROOT}/candidates_railcar.json"
 ```
 
-Or per-ticker:
+Pass the parsed request JSON as `args` to `workflows/theme-fit-gate.js` through the configured
+Workflow host. The host supplies `agent`, `parallel` and `phase` and uses the installed
+`llmcall` routing. This file is a host workflow, so a direct Node invocation is not a valid
+entry point. Preserve the host's complete result as `gate2_host_result.json` in the private run.
 
 ```bash
-python tools/deepdive_data.py --ticker RAIL
+python tools/run_theme.py --gate2-request "${REPORTS_ROOT}/gate2_request.json" --gate2-result "${REPORTS_ROOT}/gate2_host_result.json"
 ```
 
-Output: `${REPORTS_ROOT}/deepdive_<ticker>_<date>.json` (one file per ticker)
+Ingestion validates the request binding and every candidate identity, then writes
+`gate2_results.json`, `candidates_gate2_survivors.json` and their stage receipts. Retain
+those files together. A hand-written classification list cannot replace this contract.
+An unavailable host or incomplete result remains an unfinished stage; record that boundary.
 
-**What it pulls:** Revenue/OCF/EV series (XBRL), Form 4 insider trades (12-month net
-buy/sell), S-3 / ATM shelf status, dilution history, 8-K material events.
-
-**Token magnitude:** Negligible, deterministic EDGAR + yfinance fetch, no LLM calls.
-Runtime 5 to 20 minutes for 22 tickers (EDGAR rate discipline: ~150ms between requests).
-
----
-
-## Step 6, Deep-Dive Judgment (per candidate)
-
-In your Claude Code session:
-
-```
-For each pure_play/partial company in ${REPORTS_ROOT}/railcar_gate2.json, spawn one Agent.
-Each Agent must:
-1. Open reference/cognitive-priors.md and state the base-rate priors for this company class.
-2. Run a disconfirmation WebSearch: "<company name> fraud lawsuit SEC investigation short seller".
-3. Check data staleness: is the most recent filing period within 90 days?
-4. Apply the 7-dimension scorecard from reference/judgment-rubric.md.
-5. Apply all Rating Hard-Rules from SKILL.md.
-6. Write the full report to ${REPORTS_ROOT}/report_<TICKER>.md.
-```
-
-**Optional accelerator:** If the Workflow tool is available:
+## Step 5, Pull Data for the Validated Survivors
 
 ```bash
-node workflows/deepdive-fanout.js candidates_railcar.json
+python tools/deepdive_data.py --candidates "${REPORTS_ROOT}/candidates_gate2_survivors.json"
 ```
 
-**Token magnitude:** ~8k to 15k tokens per candidate (data read + rubric application +
-disconfirmation search). For 22 candidates: ~180k to 330k tokens total. Budget ~$0.20 to 0.35.
+Use the ingested survivor artifact, including its receipt. The original pre-Gate-2 candidate
+list cannot prove theme-fit completion. Keep every per-candidate outcome and the batch
+data-results artifact; inspect the reported completion status before claiming coverage.
+
+## Step 6, Bound Deep-Dive Judgment
+
+Prepare the request from the same survivor artifact, with an explicit decision date:
+
+```bash
+python tools/deepdive_data.py --prepare-fanout "${REPORTS_ROOT}/candidates_gate2_survivors.json" --verdict-date 2000-01-01
+```
+
+The date above is synthetic; supply the intended decision date for a real private run.
+Pass the resulting `deepdive_request.json` as `args` to `workflows/deepdive-fanout.js`
+through the configured Workflow host. The request binds candidate and data artifacts.
+The host's per-candidate valuation call is
+`python tools/deepdive_data.py --valuation-request <original_request_json> --input-index <original_index>`.
+Preserve the original index and the independent artifact at the request's bound `valuation_path`.
+The sealed data input stays unchanged; do not use `valuation.py --json` to merge a valuation into it.
+
+Save the complete host response as `deepdive_host_result.json`, then ingest it:
+
+```bash
+python tools/deepdive_data.py --fanout-request "${REPORTS_ROOT}/deepdive_request.json" --fanout-result "${REPORTS_ROOT}/deepdive_host_result.json"
+```
+
+Ingestion validates identities, valuation evidence and report fields before writing reports
+and `deepdive_fanout_results.json` with their receipts. New work must use fresh output paths.
+Do not replace a partial status with a hand-written success receipt. The documented
+request/response contract is statically checked; it does not establish a successful host run.
 
 ---
 
@@ -276,9 +252,9 @@ and filing length. Large themes (500+ raw candidates) scale linearly with Gate 2
   selling) dragging an otherwise solid profile.
 - **Score 1 to 2:** Hard-rule ceiling applied (dilution, weakness, weak fundamentals). Do not buy
   without understanding and explicitly accepting the specific flag.
-- **0-buy is a feature, not a bug.** If a theme produces zero score-4+ candidates, the tool is
-  telling you the theme's small-cap universe does not have clean industrial beneficiaries at this
-  time. That is correct and useful information.
+- **An empty result is coverage-limited.** Zero score-4+ candidates describes the observed
+  screen under its policy. Report retrieval gaps, missing work and abstentions. It does not
+  establish that the theme has no clean beneficiaries or investment opportunities.
 
 ---
 
