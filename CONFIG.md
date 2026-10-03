@@ -15,7 +15,8 @@ The pinned `guards/tools/datadir.py` resolver chooses the companion. Explicit
 `SMALL_CAP_DEEPDIVE_CONFIG_DIR` and `SMALL_CAP_DEEPDIVE_CONFIG` selectors take priority;
 the resolver also supports its documented sibling and home-directory conventions.
 `config.json` must exist in the resolved, versioned PRIVATE companion. The enclosing
-Git repository and its GitHub origin are verified before config or output is used.
+Git repository and every configured remote's effective GitHub fetch and push destinations
+are verified before config or output is used; the remote need not be named `origin`.
 Missing config, a missing resolver, PUBLIC visibility and unknown visibility fail
 with setup diagnostics. Initialize the pinned kit with
 `git submodule update --init --recursive -- guards`.
@@ -60,15 +61,16 @@ Only `sec_user_agent` is required at runtime; every other field has a default in
 | `cyclical_cv_threshold` | float | no | `0.25` | Cyclicality CV gate for normalization. |
 
 Optional API-key slots (`finnhub`, `fmp`, `alpha_vantage`) are documented in `reference/data-sources.md`
-and are **not** part of `config.example.json`; if you use them, keep keys in `secrets/*.env` (Mode B),
-never inline in `config.json`. The `twitterapi.io` credential is **reused from the `market-intel`
-companion config** (out-of-repo), see `reference/data-sources.md §market-intel`; do not duplicate it here.
+and are **not** part of `config.example.json`. Keep optional credentials in the verified PRIVATE
+companion and configure the provider through its supported interface; this skill does not
+automatically load arbitrary `.env` files. The `twitterapi.io` credential is **reused from the
+`market-intel` companion config**, see `reference/data-sources.md §market-intel`.
 
 ## Secrets / PII, Mode B (E6)
 
 Configuration and real runtime DATA belong in a versioned PRIVATE companion, outside the public tool source. Commit and push them there to retain history and recovery copies. Public-source ignore rules are only a backstop; they do not make a public directory private.
 
-The destination proof resolves the actual enclosing Git worktree and checks all effective fetch and push URLs for every configured remote. It queries GitHub using an explicit host, so an ambient `GH_HOST` cannot substitute another server. Missing origin, PUBLIC visibility and unknown visibility are errors. Existing `config.json` links, reparse points and hardlinks are refused before replacement.
+The destination proof resolves the actual enclosing Git worktree and checks all effective fetch and push URLs for every configured remote. It queries GitHub using an explicit host, so an ambient `GH_HOST` cannot substitute another server. No configured remotes, PUBLIC visibility and unknown visibility are errors. Existing `config.json` links, reparse points and hardlinks are refused before replacement.
 
 ## First-time setup (E3)
 

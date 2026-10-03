@@ -12,10 +12,10 @@ The HARNESS. One (theme, as-of) cell at a time:
        PIT shares-outstanding; yfinance marketCap is a CURRENT field and is never used).
     3. bucket each name in {buy_eligible / WATCH / AVOID / abstain} per the BUY contract:
        BUY = mos_basis in {fcf_cap, nav} AND MoS>=30 AND buy_eligible AND 0 kill-flags.
-    4. join the forward return T->T+horizon (PIECE 3, forward_return; a delisted name realizes to its
-       last close ~ -100%, which is the POINT a de-risk scanner is graded on AVOIDING).
-    5. per-bucket stats (mean/median excess-vs-IWM, win-rate) + blowup-avoidance (of the >40%-drawdown
-       names, what fraction the scanner put in AVOID/abstain) + a LOOK-AHEAD AUDIT line that ASSERTS
+    4. join forward return T->T+horizon (PIECE 3, forward_return), retaining stale last quotes as
+       labelled proxies with unknown terminal outcomes, not confirmed delisting or sale values.
+    5. per-bucket stats (mean/median excess-vs-IWM, win-rate) + endpoint-loss avoidance (of names with
+       returns at/below -40%, the fraction in AVOID/abstain) + a LOOK-AHEAD AUDIT line that ASSERTS
        the max filing_date observed across every pull in the cell is <= asof, and records the
        entry/exit/benchmark dates actually used.
     6. write the per-cell result to reports/smallcap/backtest/<asof>_<theme>.json.
@@ -37,6 +37,7 @@ import statistics
 import sys
 import time
 from datetime import datetime, timezone
+from numbers import Number
 from pathlib import Path
 
 # Add tools dir to path for sibling imports (mirrors backtest_returns.py / _pit_universe.py).
@@ -44,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # PIT machinery (PIECES 2 + 3) + the as-of-aware live layers.
 from _pit_universe import pit_universe                         # PIECE 2
+from filter_by_sic import rows_completion, stage_completion
 from backtest_returns import (                                 # PIECE 3
     forward_return_with_reason,
     benchmark_return,
@@ -63,9 +65,9 @@ BUCKET_AVOID = "AVOID"
 BUCKET_ABSTAIN = "abstain"
 BUCKETS = (BUCKET_BUY, BUCKET_WATCH, BUCKET_AVOID, BUCKET_ABSTAIN)
 
-# A name whose forward return is below this is a "blowup" for blowup-avoidance accounting. >40%
-# drawdown over the horizon (spec §Metrics "Blowup-avoidance"). Realized to last close for delisted
-# names, so a wiped-out name (~ -100%) is firmly inside this set.
+# A name whose endpoint forward return is at/below this threshold enters loss-avoidance accounting.
+# This is not maximum intra-period drawdown. Stale last quotes contribute labelled proxy losses;
+# their terminal outcomes remain unknown and are reported separately from fresh observations.
 BLOWUP_THRESHOLD = -0.40
 
 from _common import output_root, prepare_output
@@ -122,11 +124,18 @@ def bucket_name(deep: dict, val: dict) -> dict:
     buy_eligible = bool(val.get("buy_eligible"))
     kill = _killflag_count(deep)
     mos_pct = _mos_pct_for_basis(val)
+    reasons = list(val.get("buy_ineligible_reasons") or [])
+    if kill is None:
+        buy_eligible = False
+        reasons.append("risk_evidence_unavailable")
+    if deep.get("as_of") is not None:
+        buy_eligible = False
+        reasons.append("historical_eligibility_contract_incomplete")
 
     has_band = (mos_basis in ("fcf_cap", "nav"))
     mos_ok = (mos_pct is not None and mos_pct >= 30.0)
 
-    if mos_basis == "abstain":
+    if kill is None or deep.get("as_of") is not None or mos_basis == "abstain":
         bucket = BUCKET_ABSTAIN
     elif has_band and mos_ok and buy_eligible and kill == 0:
         bucket = BUCKET_BUY
@@ -147,12 +156,12 @@ def bucket_name(deep: dict, val: dict) -> dict:
         "mos_pct": round(mos_pct, 2) if mos_pct is not None else None,
         "buy_eligible": buy_eligible,
         "killflag_count": kill,
-        "buy_ineligible_reasons": val.get("buy_ineligible_reasons") or [],
+        "buy_ineligible_reasons": reasons,
     }
 
 
 # ---------------------------------------------------------------------------
-# Look-ahead audit, the validity guarantee (spec §Look-ahead controls).
+# Look-ahead audit of observed filing dates (spec §Look-ahead controls).
 # ---------------------------------------------------------------------------
 
 
@@ -183,7 +192,7 @@ def _filing_dates_from_deep(deep: dict) -> list[str]:
 
 def look_ahead_audit(rows: list[dict], asof: str, benchmark: dict,
                      *, expect_dates: bool = False) -> dict:
-    """Assert no look-ahead across the whole cell + record entry/exit/benchmark dates.
+    """Check observed filing dates and record entry/exit/benchmark dates.
 
     rows are per-name result dicts (each may carry filing_dates + the forward_return block). The
     AUDIT (spec: "Per-cell audit asserts max(filing_date) <= T"):
@@ -227,6 +236,10 @@ def look_ahead_audit(rows: list[dict], asof: str, benchmark: dict,
         "max_filing_date_le_asof": (max_fd is None or max_fd <= asof),
         "n_filing_dates_observed": n_observed,
         "non_vacuous": n_observed > 0,
+        "scope": "filing_dates_only",
+        "all_eligibility_inputs_proven": False if rows else None,
+        "historical_eligibility_unavailable_count": len(rows),
+        "eligibility_limit": "Dated sector, entity and complete universe contracts are unavailable.",
         "entry_date_range": [min(entry_dates), max(entry_dates)] if entry_dates else None,
         "exit_date_range": [min(exit_dates), max(exit_dates)] if exit_dates else None,
         "benchmark": benchmark.get("benchmark"),
@@ -242,69 +255,90 @@ def look_ahead_audit(rows: list[dict], asof: str, benchmark: dict,
 
 
 def _mean(xs: list[float]) -> float | None:
-    return round(statistics.fmean(xs), 6) if xs else None
+    return round(statistics.mean(xs), 6) if xs else None
 
 
 def _median(xs: list[float]) -> float | None:
-    return round(statistics.median(xs), 6) if xs else None
+    if not xs:
+        return None
+    ordered = sorted(xs)
+    middle = len(ordered) // 2
+    return _mean(ordered[middle:middle + 1] if len(ordered) % 2 else ordered[middle - 1:middle + 1])
+
+
+def _finite_return(value) -> bool:
+    if isinstance(value, bool) or not isinstance(value, Number):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _return_cohort(row: dict) -> str:
+    """Classify every row once; the old stale flag remains a supported input."""
+    if row.get("status", "ok") not in {"ok", None}:
+        return "pipeline_error"
+    result = row.get("forward_return") or {}
+    status = row.get("return_status", result.get("status", "ok"))
+    if status == "provider_error":
+        return "provider_error"
+    if str(status).startswith("invalid") or status == "penny_unreliable":
+        return "invalid"
+    if not str(row.get("ticker") or "").strip() or row.get("total_return") is None:
+        return "missing"
+    if status != "ok" or not _finite_return(row.get("total_return")):
+        return "invalid"
+    kind = row.get("return_kind", result.get("return_kind"))
+    legacy_proxy = row.get("realized_to_last_close", result.get("realized_to_last_close", False))
+    return "stale_proxy" if kind == "stale_quote_proxy" or legacy_proxy is True else "fresh"
+
+
+def return_coverage(rows: list[dict]) -> dict:
+    counts = {key: 0 for key in ("fresh", "stale_proxy", "missing", "provider_error", "invalid", "pipeline_error")}
+    for row in rows:
+        counts[_return_cohort(row)] += 1
+    return {"total": len(rows), **counts}
 
 
 def _is_unpriceable(r: dict) -> bool:
-    """A name with NO ticker or NO priceable forward return (bug C).
+    """Exclude unavailable/invalid returns; retain explicitly labelled quote proxies."""
+    return _return_cohort(r) not in {"fresh", "stale_proxy"}
 
-    Unpriceable = (a) ticker-less filer (a CIK-only shell that slipped through, or the no_ticker
-    return path), OR (b) a name whose forward return never resolved to a real price
-    (no_entry_price / no_exit_price / not_found). These are NOT tradable names with real forward
-    returns, so they are EXCLUDED from the graded per-bucket stats + blowup-avoidance entirely and
-    reported as unpriceable_count. (They are still bucketed + retained in `names` for audit; FIX 2
-    drops genuine ticker-less shells upstream, so this is the residual safety net.)
-    """
-    if not str(r.get("ticker") or "").strip():
-        return True
-    return r.get("total_return") is None
+
+def _return_statistics(rows: list[dict], bench_return: float | None) -> dict:
+    rets = [float(row["total_return"]) for row in rows]
+    excess = [value - float(bench_return) for value in rets] if _finite_return(bench_return) else []
+    return {
+        "n": len(rows), "mean_return": _mean(rets), "median_return": _median(rets),
+        "mean_excess_vs_iwm": _mean(excess), "median_excess_vs_iwm": _median(excess),
+        "win_rate": round(sum(value > 0 for value in rets) / len(rets), 4) if rets else None,
+    }
 
 
 def per_bucket_stats(rows: list[dict], bench_return: float | None) -> dict:
-    """Per-bucket mean/median forward return, EXCESS vs IWM, win-rate, n (spec §Metrics).
-
-    Only PRICEABLE names (a real ticker + a realized forward return) are graded: unpriceable names
-    (no ticker / no priceable return) are EXCLUDED so buckets reflect real tradable names with real
-    forward returns (bug C — returns null everywhere made buckets meaningless). The excluded count
-    is reported per bucket as `unpriceable_count`. n counts priceable members only. Excess =
-    total_return - bench_return (per name); win-rate = fraction with total_return>0.
-    """
+    """Combined estimates plus separate fresh/proxy cohorts and full population counts."""
     stats: dict = {}
     for b in BUCKETS:
         members = [r for r in rows if r.get("bucket") == b]
         priceable = [r for r in members if not _is_unpriceable(r)]
         unpriceable = len(members) - len(priceable)
-        rets = [float(r["total_return"]) for r in priceable]
-        excess = ([rr - bench_return for rr in rets] if bench_return is not None else [])
-        wins = sum(1 for rr in rets if rr > 0)
+        coverage = return_coverage(members)
         stats[b] = {
-            "n": len(priceable),
+            **_return_statistics(priceable, bench_return),
+            "n_population": len(members),
             "n_with_return": len(priceable),
-            "n_no_return": 0,
+            "n_no_return": unpriceable,
             "unpriceable_count": unpriceable,
-            "mean_return": _mean(rets),
-            "median_return": _median(rets),
-            "mean_excess_vs_iwm": _mean(excess) if excess else None,
-            "median_excess_vs_iwm": _median(excess) if excess else None,
-            "win_rate": round(wins / len(rets), 4) if rets else None,
+            "coverage": coverage,
+            "estimate_basis": "observed_and_last_quote_proxies" if coverage["stale_proxy"] else "observed_closes",
+            "cohorts": {kind: _return_statistics([r for r in priceable if _return_cohort(r) == kind], bench_return)
+                        for kind in ("fresh", "stale_proxy")},
         }
     return stats
 
 
-def blowup_avoidance(rows: list[dict]) -> dict:
-    """Of names that suffered a >40% drawdown over the horizon, what fraction did the scanner steer
-    into AVOID/abstain (spec §Metrics "Blowup-avoidance"; higher = the scanner earns its name).
-
-    Only PRICEABLE names (real ticker + realized forward return) are eligible — unpriceable names
-    (no ticker / no priceable return) cannot be measured blowups and are EXCLUDED, reported as
-    unpriceable_count (bug C). avoided = put in AVOID or abstain; fraction = avoided / blowups.
-    """
-    priceable = [r for r in rows if not _is_unpriceable(r)]
-    unpriceable = len(rows) - len(priceable)
+def _blowup_statistics(priceable: list[dict]) -> dict:
     blowups = [r for r in priceable if float(r["total_return"]) <= BLOWUP_THRESHOLD]
     avoided = [r for r in blowups if r.get("bucket") in (BUCKET_AVOID, BUCKET_ABSTAIN)]
     return {
@@ -312,9 +346,27 @@ def blowup_avoidance(rows: list[dict]) -> dict:
         "n_blowups": len(blowups),
         "n_blowups_in_avoid_or_abstain": len(avoided),
         "blowup_avoidance_fraction": (round(len(avoided) / len(blowups), 4) if blowups else None),
-        "unpriceable_count": unpriceable,
+        "n_with_return": len(priceable),
         "blowup_tickers": [r.get("ticker") for r in blowups],
         "blowup_buckets": {r.get("ticker"): r.get("bucket") for r in blowups},
+    }
+
+
+def blowup_avoidance(rows: list[dict]) -> dict:
+    """Endpoint losses at/below the threshold, with proxy contributions shown separately.
+
+    These endpoint returns do not measure maximum intra-period drawdown. A stale
+    quote can support a proxy loss observation but not a confirmed terminal loss.
+    """
+    priceable = [r for r in rows if not _is_unpriceable(r)]
+    coverage = return_coverage(rows)
+    return {
+        **_blowup_statistics(priceable),
+        "unpriceable_count": len(rows) - len(priceable),
+        "coverage": coverage,
+        "estimate_basis": "observed_and_last_quote_proxies" if coverage["stale_proxy"] else "observed_closes",
+        "cohorts": {kind: _blowup_statistics([r for r in priceable if _return_cohort(r) == kind])
+                    for kind in ("fresh", "stale_proxy")},
     }
 
 
@@ -353,9 +405,15 @@ def _process_name(entity: dict, asof: str, horizon: int,
 
     # 2. PIT entry market cap = price-as-of-T x PIT shares (NEVER yfinance marketCap).
     mc = mktcap_fn(ticker, asof, cik=cik) if ticker else {"mktcap": None, "reason": "no_ticker"}
-    market_cap = mc.get("mktcap")
+    market_cap = mc.get("mktcap") if mc.get("usable") is not False else None
     row["mktcap_asof"] = market_cap
     row["mktcap_source"] = mc.get("source")
+    row["market_cap_evidence"] = mc
+    row["mktcap_basis_status"] = mc.get("basis_status", "caller_supplied")
+    row["mktcap_usable"] = mc.get("usable", market_cap is not None)
+    row["mktcap_reason"] = mc.get("reason")
+    if mc.get("shares_filed"):
+        row["filing_dates"].append(mc["shares_filed"])
 
     # 3. Valuation. Needs a market cap; without one we can still bucket on the basis (abstain/nav).
     try:
@@ -371,17 +429,40 @@ def _process_name(entity: dict, asof: str, horizon: int,
     row.update({k: binfo[k] for k in
                 ("bucket", "mos_basis", "mos_pct", "buy_eligible",
                  "killflag_count", "buy_ineligible_reasons")})
+    if mc.get("usable") is False:
+        row["bucket"] = BUCKET_ABSTAIN
+        row["buy_eligible"] = False
+        row["buy_ineligible_reasons"] = [*row["buy_ineligible_reasons"], "unresolved_market_cap_basis"]
 
-    # 5. Forward return T->T+horizon (delisted -> realized-to-last-close ~ -100%).
+    # Dated SEC facts alone do not prove historical sector/entity eligibility.
+    # Retain all outcomes, but give this incomplete cohort no BUY/WATCH/AVOID opinion.
+    row["historical_eligibility"] = {
+        "schema_version": 1, "asof": asof, "status": "unavailable",
+        "reason": "historical_eligibility_contract_incomplete",
+        "producer": deep.get("historical_eligibility"),
+        "universe_identity": dict(entity),
+        "market_cap_usable": mc.get("usable") is True,
+        "required_inputs": ["dated_fundamentals", "dated_disclosures", "dated_sic",
+                            "dated_symbol_and_universe", "dated_insurance_classification",
+                            "dated_market_cap_and_adjustment_basis"],
+    }
+    row["bucket"] = BUCKET_ABSTAIN
+    row["buy_eligible"] = False
+    row["buy_ineligible_reasons"] = [*row["buy_ineligible_reasons"],
+                                    "historical_eligibility_contract_incomplete"]
+
+    # 5. Forward quote evidence, including explicit missing/error/proxy outcomes.
     if ticker:
         fr = forward_fn(ticker, asof, horizon)
         row["forward_return"] = fr
+        row["return_status"] = fr.get("status")
+        row["return_reason"] = fr.get("reason")
         if fr.get("status") == "ok":
             row["total_return"] = fr.get("total_return")
             row["realized_to_last_close"] = fr.get("realized_to_last_close")
-        else:
-            row["return_status"] = fr.get("status")
-            row["return_reason"] = fr.get("reason")
+            for field in ("return_kind", "terminal_status", "exit_quote_age_days"):
+                if field in fr:
+                    row[field] = fr[field]
     else:
         row["return_status"] = "no_ticker"
         row["return_reason"] = "no ticker to fetch a forward return (CIK-only filer)"
@@ -409,7 +490,10 @@ def run_cell(theme: str, asof: str, horizon: int = DEFAULT_HORIZON_MONTHS,
     forward_fn = forward_fn or forward_return_with_reason
     benchmark_fn = benchmark_fn or benchmark_return
 
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit < 0):
+        raise ValueError("limit must be a nonnegative integer or None")
     universe = universe_fn(theme, asof)
+    universe_completion = rows_completion(universe, "pit_universe")
     universe_full = len(universe)
     if limit is not None:
         universe = universe[:limit]
@@ -427,29 +511,50 @@ def run_cell(theme: str, asof: str, horizon: int = DEFAULT_HORIZON_MONTHS,
 
     bench = benchmark_fn(asof, horizon)
     bench_ret = bench.get("total_return") if bench.get("status") == "ok" else None
+    if not _finite_return(bench_ret):
+        bench_ret = None
 
     # RAISES on a look-ahead leak; also RAISES if a non-empty cell surfaced 0 filing dates (vacuous
     # audit, bug B). An empty universe legitimately has nothing to observe -> don't demand dates.
     audit = look_ahead_audit(rows, asof, bench, expect_dates=bool(rows))
     stats = per_bucket_stats(rows, bench_ret)
     blowups = blowup_avoidance(rows)
+    if rows:
+        blowups.update(blowup_avoidance_fraction=None, estimate_status="unavailable",
+                       reason="historical_eligibility_contract_incomplete",
+                       n_eligibility_assessed=0, n_eligibility_unassessed=len(rows))
+        for cohort in blowups["cohorts"].values():
+            cohort.update(blowup_avoidance_fraction=None, estimate_status="unavailable",
+                          reason="historical_eligibility_contract_incomplete")
 
     bucket_counts = {b: sum(1 for r in rows if r.get("bucket") == b) for b in BUCKETS}
     unpriceable_count = sum(1 for r in rows if _is_unpriceable(r))
+    completion = stage_completion("backtest", len(rows), upstream=[universe_completion],
+                                  reasons=(["universe_truncated"] if truncated else [])
+                                  + (["historical_eligibility_unavailable"] if rows else []))
     cell = {
         "theme": theme,
         "asof": asof,
         "horizon_months": horizon,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "universe_size": len(universe),
+        "universe_size_full": universe_full,
+        "universe_completion": universe_completion,
+        "completion": completion,
+        "limit": limit,
+        "truncated": truncated,
         "n_processed": len(rows),
         "unpriceable_count": unpriceable_count,
+        "return_coverage": return_coverage(rows),
         "bucket_counts": bucket_counts,
         "benchmark": {
             "ticker": bench.get("benchmark"),
             "status": bench.get("status"),
             "total_return": bench_ret,
             "reason": bench.get("reason"),
+            "return_kind": bench.get("return_kind"),
+            "exit_quote_age_days": bench.get("exit_quote_age_days"),
+            "terminal_status": bench.get("terminal_status", "unknown"),
         },
         "per_bucket_stats": stats,
         "blowup_avoidance": blowups,
@@ -478,7 +583,7 @@ def _write_cell(cell: dict) -> Path:
 def _selftest() -> None:
     """PIECE 4 unit assertions on a small synthetic cell. All collaborators injected — NO network.
 
-    Builds five stubbed names exercising every bucket + the blowup/look-ahead math:
+    Historical pipeline results abstain; separate policy rows exercise bucket arithmetic:
       BUYME  -> buy_eligible bucket, full-horizon WIN (+40%)         -> NOT a blowup
       WATCHR -> WATCH (MoS<30, no kill-flags), small WIN (+5%)       -> NOT a blowup
       TRAP   -> AVOID (MoS>=30 but buy_eligible False), BLOWUP (-70%)-> correctly avoided
@@ -486,6 +591,8 @@ def _selftest() -> None:
       FORGN  -> abstain (no band), BLOWUP (-60%)                     -> correctly avoided (abstain)
       LEAK   -> (audit-only) a name whose tenk.filing_date is AFTER asof -> the audit MUST raise.
     """
+    from make_fixtures import source23_scenarios
+    clean_risk_fields = source23_scenarios()["clean"]["derived"]
     asof = "2020-06-30"
     horizon = 12
 
@@ -500,7 +607,7 @@ def _selftest() -> None:
             "tenk": {"available": True, "filing_form": "10-K", "filing_date": filing_date,
                      "has_going_concern": going_concern, "has_material_weakness": False,
                      "has_death_spiral": False},
-            "derived": {"concentration_flag": ("kill" if conc_kill else None),
+            "derived": {**clean_risk_fields, "concentration_flag": ("kill" if conc_kill else None),
                         "asof_max_filing_date": (asof_max_filing_date
                                                  if asof_max_filing_date is not None
                                                  else filing_date)},
@@ -595,19 +702,26 @@ def _selftest() -> None:
         write=False,
     )
 
-    # ---- 1) bucketing put every name where the BUY contract says ----
-    by_t = {r["ticker"]: r for r in cell["names"]}
+    assert all(row["bucket"] == BUCKET_ABSTAIN for row in cell["names"])
+    assert cell["look_ahead_audit"]["all_eligibility_inputs_proven"] is False
+    assert cell["blowup_avoidance"]["blowup_avoidance_fraction"] is None
+
+    # Test policy arithmetic separately from unavailable historical eligibility.
+    def policy_rows(rows):
+        return [{**row, **bucket_name(DEEP[row["ticker"]], VAL[row["ticker"]])} for row in rows]
+    policy = policy_rows(cell["names"])
+    by_t = {r["ticker"]: r for r in policy}
     assert by_t["BUYME"]["bucket"] == BUCKET_BUY, f"BUYME -> buy_eligible, got {by_t['BUYME']['bucket']}"
     assert by_t["WATCHR"]["bucket"] == BUCKET_WATCH, f"WATCHR -> WATCH, got {by_t['WATCHR']['bucket']}"
     assert by_t["TRAP"]["bucket"] == BUCKET_AVOID, f"TRAP (cheap-but-blocked) -> AVOID, got {by_t['TRAP']['bucket']}"
     assert by_t["DYING"]["bucket"] == BUCKET_AVOID, f"DYING (kill-flag) -> AVOID, got {by_t['DYING']['bucket']}"
     assert by_t["FORGN"]["bucket"] == BUCKET_ABSTAIN, f"FORGN (no band) -> abstain, got {by_t['FORGN']['bucket']}"
     assert by_t["DYING"]["killflag_count"] == 1, "going-concern -> killflag_count 1"
-    assert cell["bucket_counts"] == {BUCKET_BUY: 1, BUCKET_WATCH: 1, BUCKET_AVOID: 2, BUCKET_ABSTAIN: 1}, (
+    assert cell["bucket_counts"] == {BUCKET_BUY: 0, BUCKET_WATCH: 0, BUCKET_AVOID: 0, BUCKET_ABSTAIN: 5}, (
         f"bucket counts: {cell['bucket_counts']}")
 
     # ---- 2) per-bucket stats: mean/median/excess-vs-IWM/win-rate math ----
-    st = cell["per_bucket_stats"]
+    st = per_bucket_stats(policy, 0.10)
     assert st[BUCKET_BUY]["n"] == 1 and abs(st[BUCKET_BUY]["mean_return"] - 0.40) < 1e-9
     # excess vs IWM(+10%): BUY +40% -> +30% excess; win-rate 1.0 (one winner).
     assert abs(st[BUCKET_BUY]["mean_excess_vs_iwm"] - 0.30) < 1e-9, f"BUY excess: {st[BUCKET_BUY]}"
@@ -621,7 +735,7 @@ def _selftest() -> None:
     assert abs(st[BUCKET_AVOID]["mean_excess_vs_iwm"] - (-0.945)) < 1e-9, f"AVOID excess: {st[BUCKET_AVOID]}"
 
     # ---- 3) blowup-avoidance: 3 blowups (TRAP/DYING/FORGN), ALL in AVOID/abstain -> fraction 1.0 ----
-    ba = cell["blowup_avoidance"]
+    ba = blowup_avoidance(policy)
     assert ba["n_blowups"] == 3, f"3 names below -40%: {ba}"
     assert ba["n_blowups_in_avoid_or_abstain"] == 3, "all blowups in AVOID/abstain"
     assert ba["blowup_avoidance_fraction"] == 1.0, f"blowup-avoidance fraction 1.0: {ba}"
@@ -676,7 +790,7 @@ def _selftest() -> None:
     )
     w = {r["ticker"]: r for r in cell2["names"]}["WATCHR"]
     assert w["total_return"] is None and w["return_status"] == "no_exit_price", "no-return name recorded w/ reason"
-    stW = cell2["per_bucket_stats"][BUCKET_WATCH]
+    stW = per_bucket_stats(policy_rows(cell2["names"]), 0.10)[BUCKET_WATCH]
     # WATCHR was the only WATCH name and is now unpriceable -> WATCH bucket is excluded from grading.
     assert stW["n"] == 0 and stW["n_with_return"] == 0, "unpriceable WATCH name excluded from graded n"
     assert stW["unpriceable_count"] == 1, f"unpriceable WATCH name counted: {stW}"
@@ -714,17 +828,17 @@ def _selftest() -> None:
     )
     shell = {r["cik"]: r for r in cell3["names"]}["999"]
     assert shell["return_status"] == "no_ticker", "ticker-less name flagged no_ticker (never priced)"
-    # The shell lands in abstain but must NOT be graded; the real FORGN abstain blowup still is.
+    # The unpriceable shell is excluded; all five observed historical returns remain.
     stAb = cell3["per_bucket_stats"][BUCKET_ABSTAIN]
     assert stAb["unpriceable_count"] == 1, f"ticker-less abstain name counted unpriceable: {stAb}"
-    assert stAb["n"] == 1, f"only the priceable abstain name (FORGN) graded: {stAb}"
+    assert stAb["n"] == 5, f"all five priceable historical outcomes retained: {stAb}"
     assert cell3["unpriceable_count"] == 1, "cell-level unpriceable_count counts the shell"
     # Blowup-avoidance still sees the 3 priceable blowups (shell has no return -> not a blowup).
     assert cell3["blowup_avoidance"]["n_blowups"] == 3, f"shell excluded from blowups: {cell3['blowup_avoidance']}"
     assert cell3["blowup_avoidance"]["unpriceable_count"] == 1, "blowup-avoidance reports unpriceable_count"
 
     print("backtest selftest PASS (bucketing BUY-contract; per-bucket mean/median/excess-vs-IWM/win-rate; "
-          "blowup-avoidance 3/3 in AVOID+abstain; look-ahead audit reads asof_max_filing_date, NON-vacuous, "
+          "policy-only blowup arithmetic; historical eligibility unavailable; observed filing dates NON-vacuous, "
           "raises on leak AND on vacuous cell; unpriceable no-ticker/no-return names EXCLUDED from grading "
           "+ counted unpriceable_count)")
 
@@ -734,7 +848,7 @@ def _selftest() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _cli() -> None:
+def _cli() -> int:
     ap = argparse.ArgumentParser(
         description="backtest.py (PIECE 4) — run one point-in-time (theme, as-of) backtest cell.")
     ap.add_argument("--selftest", action="store_true", help="Run the offline synthetic-cell selftest and exit.")
@@ -750,7 +864,7 @@ def _cli() -> None:
 
     if args.selftest:
         _selftest()
-        return
+        return 0
     if not (args.theme and args.asof):
         ap.error("use --selftest, or --theme <t> --asof YYYY-MM-DD [--horizon 12] [--limit N].")
 
@@ -760,13 +874,20 @@ def _cli() -> None:
     summary = {
         "theme": cell["theme"], "asof": cell["asof"], "horizon_months": cell["horizon_months"],
         "universe_size": cell["universe_size"], "bucket_counts": cell["bucket_counts"],
+        "universe_size_full": cell["universe_size_full"],
+        "n_processed": cell["n_processed"],
+        "completion": cell["completion"],
+        "universe_completion": cell["universe_completion"],
+        "limit": cell["limit"], "truncated": cell["truncated"],
         "benchmark": cell["benchmark"],
+        "return_coverage": cell["return_coverage"],
         "blowup_avoidance": cell["blowup_avoidance"],
         "look_ahead_audit": cell["look_ahead_audit"],
         "output_path": cell.get("output_path"),
     }
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+    return 0 if cell["completion"]["status"] == "complete" else 2
 
 
 if __name__ == "__main__":
-    _cli()
+    sys.exit(_cli())

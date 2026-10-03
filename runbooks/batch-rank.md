@@ -36,7 +36,8 @@ network. PUBLIC, unknown, unusable, or unversioned destinations are refused befo
 | Flag | Default | Description |
 |---|---|---|
 | `--slug <s>` | (none) | Filter to `report_<slug>_*.md` files; falls back to all `report_*.md` if none match |
-| `--input <dir>` | REPORTS from config | Path to the reports directory |
+| `--input <dir>` | REPORTS from config | Initialized absolute path to the reports directory in a verified PRIVATE companion |
+| `--output <name>` | `RANKING.md` | Fresh ranking basename within that run; the artifact and its receipt must not already exist |
 
 **AVOID/kill-flag sink logic:** Candidates rated AVOID or with kill-flag count ≥ 2 are
 automatically sunk to the bottom of the ranking, this cannot be overridden by other flags.
@@ -47,23 +48,13 @@ This is the primary guard against narrative-driven score inflation.
 ## Step 1, Basic Re-Rank (default weights, all reports)
 
 ```bash
-python tools/rank.py
+python tools/rank.py --output RANKING-rerun-01.md
 ```
 
-Output: `RANKING.md` inside the selected companion run directory.
-
-Expected output (Markdown table):
-
-```
-# 小盘深度调研排序 — 2026-06-18
-
-> 漏斗: 19 召回 → 19 小盘候选 → cheap pass 幸存 19 →
-> 19 家微盘逐一 deep dive。AVOID/kill-flag≥2 一律沉底。
-
-## 排序
-| 排名 | 代码 | 评级 | 置信 | 营收 | 净利 | OCF | 增速 | 稀释 | 内部人 | kill-flag |
-...
-```
+Output: `RANKING-rerun-01.md` inside the selected companion run directory, with its
+stage receipt. Choose a new basename for each re-rank. Omitting `--output` selects
+`RANKING.md` and is suitable only when that output and its receipt do not already exist.
+The table includes ratings, financial evidence, kill flags, and the funnel coverage summary.
 
 **Token magnitude:** Zero, deterministic sort + table generation.
 Runtime: <5 seconds.
@@ -73,7 +64,7 @@ Runtime: <5 seconds.
 ## Step 2, Re-Rank by Theme Slug
 
 ```bash
-python tools/rank.py --slug railcar
+python tools/rank.py --slug railcar --output RANKING-railcar-rerun-01.md
 ```
 
 Includes only `report_railcar_*.md` files (slug-scoped). If no slug-scoped files exist,
@@ -84,15 +75,17 @@ falls back gracefully to all `report_*.md`.
 ## Step 3, Re-Rank from a Custom Directory
 
 ```bash
-python tools/rank.py --input "<private-companion>/reports/smallcap/<run>"
+python tools/rank.py --input "${REPORTS_ROOT}" --output RANKING-rerun-02.md
 ```
 
-Replace the placeholders with your companion path and run name. Reads `report_*.md` from
-that directory and writes `<input_dir>/RANKING.md`. The actual destination repository must
-be PRIVATE, including when the supplied path contains a directory link.
+Initialize `REPORTS_ROOT` to the absolute PRIVATE run path as shown in `theme-run.md` before
+running this command. It reads `report_*.md` from that directory and writes the specified
+fresh ranking basename there. The actual destination repository must be PRIVATE, including
+when the supplied path contains a directory link.
 
 To finalize a run and rebuild its ranking, use `tools/finalize_run.py` with the same `--input`.
-Finalization proves the destination before repairing doubled output trees or writing verdicts.
+Finalization chooses a fresh `RANKING.md` or `RANKING.finalized-<index>.md` artifact/receipt pair.
+It proves the destination before repairing doubled output trees or writing verdicts.
 Repair preserves duplicates and skips nested repositories and directory links. If the ranking
 child fails, finalization exits nonzero and keeps the verdict file already written. `--no-rank`
 skips the ranking child.
@@ -107,8 +100,8 @@ table itself. The numbers are machine-verifiable truth computed from actual file
 - **High sink rate (>50%):** Many deep-dive subjects rated AVOID or have kill-flags. Zero or
   few shortlist survivors is a completely valid output, a theme's small-cap universe may
   simply be structurally distressed.
-- **Low candidate count:** The Gate 1/2 filters were aggressive. Check theme keywords and
-  SIC exclusion blocks if the funnel is unexpectedly empty.
+- **Low candidate count:** Check FTS and configured SIC recall coverage, cheap-pass rejection
+  reasons and explicit Gate 2 decisions. Gate 1 adds SIC review hints; it does not remove candidates.
 
 ---
 

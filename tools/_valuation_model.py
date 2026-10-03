@@ -9,8 +9,8 @@ remains explicit in the period evidence used by the valuation orchestrator:
   * cyclicality test (_coefficient_of_variation, _is_cyclical)
   * normalized-metric construction (_normalize, _build_ebitda_series, _build_fcf_series)
 
-Import direction: this module imports ONLY from _common (and stdlib). It never
-imports back from valuation.py — no circular import. valuation.py re-exports the
+Import direction: this module imports _common, the pure annual-evidence helper and
+stdlib. It never imports back from valuation.py. valuation.py re-exports the
 public symbols below so consumers importing them from valuation keep working.
 """
 from __future__ import annotations
@@ -20,6 +20,7 @@ import statistics
 # sys.path shim is established by the importing orchestrator (valuation.py) which
 # inserts tools/ onto sys.path before importing this module.
 from _common import CFG
+from _cash_flow_evidence import paired_annual_sum_evidence
 
 
 # ---------------------------------------------------------------------------
@@ -113,28 +114,10 @@ def _normalize(series: list[dict], n_years: int) -> float | None:
 
 
 def _build_ebitda_series(ebit_series: list[dict], da_series: list[dict]) -> tuple[list[dict], int]:
-    """Construct year-by-year EBITDA series from EBIT and D&A series (matched by end date).
-
-    Only includes year-ends where BOTH EBIT and D&A are present — partial sums distort
-    cyclicality CV and normalization.  Year-ends with only one component are skipped;
-    the count of skipped entries is returned so the caller can flag it.
-
-    Returns (ebitda_series, n_partial_skipped).
-    The result list is sorted by end date.
-    """
-    ebit_map = {v["end"]: v["val"] for v in ebit_series}
-    da_map = {v["end"]: v["val"] for v in da_series}
-    all_ends = sorted(set(ebit_map) | set(da_map))
-    result = []
-    n_partial = 0
-    for end in all_ends:
-        e = ebit_map.get(end)
-        d = da_map.get(end)
-        if e is not None and d is not None:
-            result.append({"end": end, "val": e + d})
-        else:
-            n_partial += 1  # skip partial, do not let half-sums distort CV
-    return result, n_partial
+    """Return qualified annual EBITDA pairs and the count of rejected periods."""
+    periods = paired_annual_sum_evidence(ebit_series, da_series)
+    result = [{"end": row["end"], "val": row["val"]} for row in periods if row["qualified"]]
+    return result, len(periods) - len(result)
 
 
 def _build_fcf_series(ocf_series: list[dict], capex_series: list[dict], fcf_is_proxy: bool) -> tuple[list[dict], bool]:

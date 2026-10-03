@@ -18,7 +18,10 @@ def test_report_and_sidecar_flags_survive_complete_rank_call(state, monkeypatch,
     if case['sidecar'] is not None:
         path = run / ('deepdive_' + case['ticker'] + '_' + case['asof'] + '.json')
         path.write_text(json.dumps(case['sidecar']), encoding='utf-8')
-    assert invoke('rank', ['--input', str(run)], monkeypatch) == 0
+    # Reports remain usable; absent upstream completion evidence is incomplete.
+    assert invoke('rank', ['--input', str(run)], monkeypatch) == 2
+    receipt = json.loads((run / 'RANKING.md.stage.json').read_text(encoding='utf-8'))
+    assert receipt['status'] == 'partial'
     lines = (run / 'RANKING.md').read_text(encoding='utf-8').splitlines()
     risk = next(line for line in lines if '| ' + case['ticker'] + ' |' in line)
     safe = next(line for line in lines if '| ' + case['safe_ticker'] + ' |' in line)
@@ -35,6 +38,5 @@ def test_malformed_rating_fence_cannot_replace_prior_ranking(state, monkeypatch,
     (run / ('report_' + case['ticker'] + '.md')).write_text(case['report'], encoding='utf-8')
     target = run / 'RANKING.md'
     target.write_text(case['safe_report'], encoding='utf-8')
-    with pytest.raises((ValueError, OverflowError)):
-        invoke('rank', ['--input', str(run)], monkeypatch)
+    assert invoke('rank', ['--input', str(run)], monkeypatch) == 2
     assert target.read_text(encoding='utf-8') == case['safe_report']

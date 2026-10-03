@@ -336,16 +336,18 @@ def band_for(mktcap: float | None, max_mcap: float | None = None,
 
 def _selftest() -> None:
     """P5 market-cap fallback + band-tagging unit assertions."""
+    from make_fixtures import source34_scenarios
+    _cap = source34_scenarios()["market_cap"]
     # resolve_mktcap: yfinance wins when present
-    mc, src = resolve_mktcap(1.5e9, 10.0, "320193", shares_fn=lambda c: 5e6)
+    mc, src = resolve_mktcap(1.5e9, 10.0, _cap["cik"], shares_fn=lambda c: 5e6)
     assert mc == 1.5e9 and src == "yfinance", f"yfinance branch: {mc},{src}"
     # resolve_mktcap: SEC shares x price fallback when yfinance null
-    mc, src = resolve_mktcap(None, 10.0, "320193", shares_fn=lambda c: 5e6)
+    mc, src = resolve_mktcap(None, 10.0, _cap["cik"], shares_fn=lambda c: 5e6)
     assert mc == 5e7 and src == "sec_shares_x_price", f"sec fallback: {mc},{src}"
     # resolve_mktcap: genuinely unresolvable -> (None, "unresolved"), NOT a crash/drop
-    mc, src = resolve_mktcap(None, None, "320193", shares_fn=lambda c: 5e6)
+    mc, src = resolve_mktcap(None, None, _cap["cik"], shares_fn=lambda c: 5e6)
     assert mc is None and src == "unresolved", f"no-price unresolved: {mc},{src}"
-    mc, src = resolve_mktcap(None, 10.0, "320193", shares_fn=lambda c: None)
+    mc, src = resolve_mktcap(None, 10.0, _cap["cik"], shares_fn=lambda c: None)
     assert mc is None and src == "unresolved", f"no-shares unresolved: {mc},{src}"
     mc, src = resolve_mktcap(0, 10.0, None, shares_fn=lambda c: None)
     assert mc is None and src == "unresolved", f"zero-yf no-cik unresolved: {mc},{src}"
@@ -361,19 +363,17 @@ def _selftest() -> None:
     # band_for: explicit thresholds honored
     assert band_for(1.0e9, max_mcap=5e8, watch_max=2e9) == "watch", "custom thresholds"
 
-    # P12, resolve-THEN-band ordering contract: a yfinance-NaN name (SJW/HI/MRC) whose SEC
-    # shares x price IS resolvable must produce a real in-scope band, so the size-exclusion
-    # downstream sees a concrete band and does NOT drop it. resolve_mktcap must run first and
-    # feed band_for; the result for an in-band reconstruction is 'deep' (NOT 'unknown').
-    _mc, _src = resolve_mktcap(None, 50.0, "766829", shares_fn=lambda c: 30_000_000)
-    assert _mc == 1.5e9 and _src == "sec_shares_x_price", (
-        f"P12: SJW-like yfinance-NaN must reconstruct via SEC shares x price, got {_mc},{_src}")
+    # Resolve a generated in-band company before applying size exclusion.
+    _mc, _src = resolve_mktcap(None, _cap["price"], _cap["cik"],
+                              shares_fn=lambda c: _cap["shares"])
+    assert _mc == _cap["value"] and _src == "sec_shares_x_price", (
+        f"P12: generated missing-cap case must reconstruct, got {_mc},{_src}")
     assert band_for(_mc, 2e9, 5e9) == "deep", (
-        "P12: a reconstructed in-band mktcap must band 'deep' (resolve-then-band), not 'unknown'")
-    # And an oversize reconstruction still bands 'large', size-exclusion bites AFTER resolution.
-    _mcb, _ = resolve_mktcap(None, 50.0, "111", shares_fn=lambda c: 200_000_000)
+        "P12: in-band reconstruction must remain in scope")
+    _mcb, _ = resolve_mktcap(None, _cap["large_price"], _cap["large_cik"],
+                           shares_fn=lambda c: _cap["large_shares"])
     assert band_for(_mcb, 2e9, 5e9) == "large", (
-        "P12: an oversize reconstructed mktcap bands 'large' only AFTER resolution (correct order)")
+        "P12: an oversize reconstruction is excluded after resolution")
 
     # Path-isolation math remains offline; generated regressions exercise PRIVATE proof.
     import tempfile

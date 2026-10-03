@@ -1,0 +1,621 @@
+{
+  "concentration": [
+    {
+      "name": "total_customer",
+      "text": "Our largest customer represented 80% of total revenue.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "later_segment",
+      "text": "Our largest customer represented 80% of total revenue. Sales represented 10% of our Retail segment revenue.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "earlier_segment",
+      "text": "Sales represented 10% of our Retail segment revenue. Our largest customer represented 80% of total revenue.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "later_segment_no_percentage",
+      "text": "Our largest customer represented 80% of total revenue. Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "later_segment_after_sales",
+      "text": "Our largest customer represented 80% of total sales. Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "true_segment",
+      "text": "Our largest customer represented 80% of our Retail segment revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "collapsed_segment",
+      "text": "Our largest customer represented 80% ofRetail Branch Division’s revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "decimal_prior_customer",
+      "text": "Our largest customer represented 5.5% of consolidated revenue. Approximately100% ofRetail Branch Division’s revenue came from domestic sales.",
+      "customer": 5.5,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "true_possessive",
+      "text": "Our largest customer represented 80% of AcmeCorp Retail’s revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "later_possessive",
+      "text": "Our largest customer represented 80% of total revenue. Sales represented 10% of AcmeCorp Retail’s revenue.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "program_later_segment",
+      "text": "Our sole program represented 70% of total revenue. Sales represented 10% of our Retail segment revenue.",
+      "customer": null,
+      "program": 70,
+      "flag": "kill"
+    },
+    {
+      "name": "program_earlier_segment",
+      "text": "Sales represented 10% of our Retail segment revenue. Our sole program represented 70% of total revenue.",
+      "customer": null,
+      "program": 70,
+      "flag": "kill"
+    },
+    {
+      "name": "diversified",
+      "text": "Our top 20 customers represented 83% of total revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "named_revenue_segment",
+      "text": "Our largest customer represented 80% of our Revenue Systems segment revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "named_sales_segment",
+      "text": "Our largest customer represented 80% of our Sales Systems segment revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "named_revenue_possessive",
+      "text": "Our largest customer represented 80% of Revenue Systems’ revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "acronym_segment",
+      "text": "Our largest customer represented 80% of our U.S. Retail segment revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "space_before_percent",
+      "text": "Our largest customer represented 80 % of total revenue. Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "plural_possessive",
+      "text": "Our largest customer represented 80% of AcmeCorp Services’ revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "customer_watch_boundary",
+      "text": "Our largest customer represented 40% of total revenue. Retail segment revenue was stable.",
+      "customer": 40,
+      "program": null,
+      "flag": "watch"
+    },
+    {
+      "name": "customer_kill_decimal",
+      "text": "Our largest customer represented 40.1% of total revenue. Retail segment revenue was stable.",
+      "customer": 40.1,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "program_watch_boundary",
+      "text": "Our sole program represented 60% of total revenue. Retail segment revenue was stable.",
+      "customer": null,
+      "program": 60,
+      "flag": "watch"
+    },
+    {
+      "name": "program_kill_decimal",
+      "text": "Our sole program represented 60.1% of total revenue. Retail segment revenue was stable.",
+      "customer": null,
+      "program": 60.1,
+      "flag": "kill"
+    },
+    {
+      "name": "both_classes",
+      "text": "Our largest customer represented 80% of total revenue. Our sole program represented 70% of total revenue. Sales represented 10% of our Retail segment revenue.",
+      "customer": 80,
+      "program": 70,
+      "flag": "kill"
+    },
+    {
+      "name": "comma_clause",
+      "text": "Our largest customer represented 80% of total revenue, while Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "multiline",
+      "text": "Our largest customer represented 80% of total revenue.\nRetail segment revenue was stable.\nSales represented 10% of our Retail segment revenue.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "collapsed_sentence_spacing",
+      "text": "Our largest customer represented 80% of total revenue.Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "branded_name_dot",
+      "text": "Our largest customer represented 80% of our Revenue.Systems segment revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "own_collapsed",
+      "text": "Our largest customer represented 80% of our revenue.Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "bare_collapsed",
+      "text": "Our largest customer represented 80% of revenue.Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "company_collapsed",
+      "text": "Our largest customer represented 80% of company revenue.Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "worldwide_suffix",
+      "text": "Our largest customer represented 80% of total revenue worldwide. Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "last_year_suffix",
+      "text": "Our largest customer represented 80% of total revenue last year. Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "program_worldwide_suffix",
+      "text": "Our sole program represented 70% of total revenue worldwide. Retail segment revenue was stable.",
+      "customer": null,
+      "program": 70,
+      "flag": "kill"
+    },
+    {
+      "name": "worldwide_collapsed",
+      "text": "Our largest customer represented 80% of total revenue worldwide.Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "last_year_comma",
+      "text": "Our largest customer represented 80% of total revenue last year, while Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "abbreviation_possessive",
+      "text": "Our largest customer represented 80% of U.S. Retail’s revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "decimal_segment_name",
+      "text": "Our largest customer represented 80% of our Retail2.0 segment revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "geographic_abbreviation",
+      "text": "Our largest customer represented 80% of our St. Louis region revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "spaced_acronym",
+      "text": "Our largest customer represented 80% of our U. S. Retail segment revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "corporate_possessive_abbreviation",
+      "text": "Our largest customer represented 80% of AcmeCorp Inc.’s revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "corporate_subsidiary_abbreviation",
+      "text": "Our largest customer represented 80% of our AcmeCorp Inc. subsidiary revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "capitalized_aggregate_collapsed",
+      "text": "Our largest customer represented 80% of total Revenue.Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "uppercase_aggregate_collapsed",
+      "text": "Our largest customer represented 80% of total REVENUE.Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "consolidated_capitalized_collapsed",
+      "text": "Our largest customer represented 80% of consolidated Revenue.Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "capitalized_sales_collapsed",
+      "text": "Our largest customer represented 80% of total Sales.Retail segment revenue was stable.",
+      "customer": 80,
+      "program": null,
+      "flag": "kill"
+    },
+    {
+      "name": "company_abbreviation",
+      "text": "Our largest customer represented 80% of AcmeCorp Co.’s revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "limited_abbreviation",
+      "text": "Our largest customer represented 80% of our AcmeCorp Ltd. subsidiary revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "corporate_pte",
+      "text": "Our largest customer represented 80% of AcmeCorp Pte. Ltd.’s revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "corporate_pty",
+      "text": "Our largest customer represented 80% of our AcmeCorp Pty. Ltd. subsidiary revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "corporate_inc_uppercase",
+      "text": "Our largest customer represented 80% of our AcmeCorp INC. subsidiary revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    },
+    {
+      "name": "mixed_case_acronym",
+      "text": "Our largest customer represented 80% of our AcmeCorp S.p.A. subsidiary revenue.",
+      "customer": null,
+      "program": null,
+      "flag": null
+    }
+  ],
+  "rounding": [
+    {
+      "name": "positive_epsilon",
+      "excess_pct": 0.001,
+      "favorable": true
+    },
+    {
+      "name": "negative_epsilon",
+      "excess_pct": -0.001,
+      "favorable": false
+    },
+    {
+      "name": "exact_zero",
+      "excess_pct": 0,
+      "favorable": false
+    },
+    {
+      "name": "positive",
+      "excess_pct": 12,
+      "favorable": true
+    },
+    {
+      "name": "negative",
+      "excess_pct": -8,
+      "favorable": false
+    },
+    {
+      "name": "positive_half_cent",
+      "excess_pct": 0.005,
+      "favorable": true
+    },
+    {
+      "name": "negative_half_cent",
+      "excess_pct": -0.005,
+      "favorable": false
+    }
+  ],
+  "outcomes": [
+    {
+      "name": "legacy_zero",
+      "row": {
+        "realized_excess_pct": 0
+      },
+      "expected": null
+    },
+    {
+      "name": "legacy_positive",
+      "row": {
+        "realized_excess_pct": 0.01
+      },
+      "expected": true
+    },
+    {
+      "name": "legacy_negative",
+      "row": {
+        "realized_excess_pct": -0.01
+      },
+      "expected": false
+    },
+    {
+      "name": "legacy_upper_interval_boundary",
+      "row": {
+        "realized_excess_pct": -0.005
+      },
+      "expected": null
+    },
+    {
+      "name": "legacy_lower_interval_boundary",
+      "row": {
+        "realized_excess_pct": 0.005
+      },
+      "expected": null
+    },
+    {
+      "name": "precision_overrides_rounding",
+      "row": {
+        "realized_excess_pct": 0,
+        "realized_excess_pct_unrounded": 0.001,
+        "favorable": true
+      },
+      "expected": true
+    },
+    {
+      "name": "explicit_false_conflict",
+      "row": {
+        "realized_excess_pct": 0,
+        "realized_excess_pct_unrounded": 0.001,
+        "favorable": false
+      },
+      "expected": null
+    },
+    {
+      "name": "explicit_true_conflict",
+      "row": {
+        "realized_excess_pct": 0,
+        "realized_excess_pct_unrounded": 0,
+        "favorable": true
+      },
+      "expected": null
+    },
+    {
+      "name": "boolean_precision",
+      "row": {
+        "realized_excess_pct": 1,
+        "realized_excess_pct_unrounded": true
+      },
+      "expected": null
+    },
+    {
+      "name": "null_precision",
+      "row": {
+        "realized_excess_pct": 1,
+        "realized_excess_pct_unrounded": null
+      },
+      "expected": null
+    },
+    {
+      "name": "text_precision",
+      "row": {
+        "realized_excess_pct": 1,
+        "realized_excess_pct_unrounded": "0.1"
+      },
+      "expected": null
+    },
+    {
+      "name": "nan_precision",
+      "row": {
+        "realized_excess_pct": 1,
+        "realized_excess_pct_unrounded": {
+          "special_number": "nan"
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "infinite_precision",
+      "row": {
+        "realized_excess_pct": 1,
+        "realized_excess_pct_unrounded": {
+          "special_number": "inf"
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "negative_infinite_precision",
+      "row": {
+        "realized_excess_pct": 1,
+        "realized_excess_pct_unrounded": {
+          "special_number": "-inf"
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "boolean_outcome",
+      "row": {
+        "realized_excess_pct_unrounded": 1,
+        "favorable": 1
+      },
+      "expected": null
+    }
+  ],
+  "risk": [
+    {
+      "name": "above_threshold",
+      "stock": -39.999,
+      "excess": -0.001,
+      "exact": true,
+      "avoidance": 1,
+      "capture": 0
+    },
+    {
+      "name": "at_threshold",
+      "stock": -40,
+      "excess": -0.001,
+      "exact": true,
+      "avoidance": 0,
+      "capture": 1
+    },
+    {
+      "name": "below_threshold",
+      "stock": -40.001,
+      "excess": -0.001,
+      "exact": true,
+      "avoidance": 0,
+      "capture": 1
+    },
+    {
+      "name": "exact_zero_excess",
+      "stock": -40,
+      "excess": 0,
+      "exact": true,
+      "avoidance": 0,
+      "capture": 0
+    },
+    {
+      "name": "positive_epsilon_excess",
+      "stock": -40,
+      "excess": 0.001,
+      "exact": true,
+      "avoidance": 0,
+      "capture": 0
+    },
+    {
+      "name": "legacy_threshold",
+      "stock": -40,
+      "excess": -1,
+      "exact": false,
+      "avoidance": null,
+      "capture": null
+    },
+    {
+      "name": "legacy_zero_excess",
+      "stock": -41,
+      "excess": 0,
+      "exact": false,
+      "avoidance": 0,
+      "capture": null
+    },
+    {
+      "name": "legacy_negative",
+      "stock": -41,
+      "excess": -1,
+      "exact": false,
+      "avoidance": 0,
+      "capture": 1
+    },
+    {
+      "name": "legacy_positive",
+      "stock": -39,
+      "excess": 1,
+      "exact": false,
+      "avoidance": 1,
+      "capture": 0
+    },
+    {
+      "name": "legacy_threshold_upper_edge",
+      "stock": -40.005,
+      "excess": -1,
+      "exact": false,
+      "avoidance": null,
+      "capture": null
+    },
+    {
+      "name": "legacy_threshold_lower_edge",
+      "stock": -39.995,
+      "excess": -1,
+      "exact": false,
+      "avoidance": null,
+      "capture": null
+    }
+  ]
+}

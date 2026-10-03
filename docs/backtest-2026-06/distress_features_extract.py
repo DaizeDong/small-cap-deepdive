@@ -8,19 +8,41 @@ without re-hitting EDGAR.
 Design: pull-once / iterate-features-locally. Resumable (skips rows already in the
 output JSON). Network-bound; modest thread pool respects EDGAR's 10 req/s.
 
-Output: docs/backtest-2026-06/distress_features.json
+Output: <private output_root>/backtest-research/distress_features.json
   [{ticker,cik,asof,year, label fields (blow,mos,peak,fund,total_return,bench,entry,status),
      series:{key:[{end,val},...]}}]
 """
 from __future__ import annotations
-import json, glob, os, sys, time
+import json, os, sys, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from _deepdive_concepts import concept_series_asof, _shares_series, REVENUE_CONCEPTS  # noqa: E402
+from _common import output_root
+from _output_paths import prove_output_path, prepare_output
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "distress_features.json")
+
+def features_path():
+    """Resolve the research artifact in the initialized PRIVATE companion."""
+    return prove_output_path(output_root() / "backtest-research" / "distress_features.json")
+
+
+def backtest_files():
+    """Read the same private cell directory used by backtest._write_cell."""
+    directory = prove_output_path(output_root() / "backtest")
+    return [prove_output_path(path) for path in sorted(directory.glob("*_*.json"))]
+
+
+def load_features():
+    with features_path().open(encoding="utf-8") as stream:
+        return json.load(stream)
+
+
+def write_features(rows):
+    # Re-prove every checkpoint, including an existing artifact's destination.
+    with prepare_output(features_path()).open("w", encoding="utf-8") as stream:
+        json.dump(rows, stream)
 
 CONCEPTS = {
     "cash": ["CashAndCashEquivalentsAtCarryingValue",
@@ -62,8 +84,8 @@ def pull_one(rec):
 
 
 def main():
-    files = [f for f in sorted(glob.glob(os.path.join(ROOT, "reports/smallcap/backtest/*_*.json")))
-             if not f.endswith(".run.log")]
+    destination = features_path()
+    files = backtest_files()
     rows = []
     for f in files:
         try:
@@ -87,12 +109,17 @@ def main():
             })
     # resume
     done = {}
-    if os.path.exists(OUT):
-        try:
-            for r in json.load(open(OUT)):
-                done[(r["ticker"], r["asof"])] = r
-        except Exception:
-            done = {}
+    if destination.exists():
+        previous = load_features()
+        if not isinstance(previous, list):
+            raise ValueError("Existing feature artifact must be a list of rows")
+        if any(not isinstance(row, dict)
+               or any(not isinstance(row.get(key), str) or not row[key].strip()
+                      for key in ("ticker", "asof"))
+               for row in previous):
+            raise ValueError("Existing feature rows require nonempty ticker and asof identities")
+        for r in previous:
+            done[(r["ticker"], r["asof"])] = r
     todo = [r for r in rows if (r["ticker"], r["asof"]) not in done]
     print(f"total rows={len(rows)} already_done={len(done)} todo={len(todo)}", flush=True)
     out = list(done.values())
@@ -110,11 +137,11 @@ def main():
                 out.append(r)
             n += 1
             if n % 25 == 0:
-                json.dump(out, open(OUT, "w"))
+                write_features(out)
                 el = time.time() - t0
                 print(f"  {n}/{len(todo)} done  {el:.0f}s  ~{el/n:.1f}s/name  eta {el/n*(len(todo)-n)/60:.0f}min", flush=True)
-    json.dump(out, open(OUT, "w"))
-    print(f"DONE wrote {len(out)} rows to {OUT} in {(time.time()-t0)/60:.1f}min", flush=True)
+    write_features(out)
+    print(f"DONE wrote {len(out)} rows to {destination} in {(time.time()-t0)/60:.1f}min", flush=True)
 
 
 if __name__ == "__main__":

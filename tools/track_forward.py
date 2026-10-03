@@ -5,16 +5,21 @@ Epistemic purpose: log every deep-dive verdict, score it against realized return
 horizon matures, compute Brier score + calibration — so the rubric can be tuned by evidence
 not vibes.
 
-Without this, the skill is "confident garbage" risk: 3 runs produced 40 deep-dives and 0 BUYs
-but we cannot know if that conservatism is CORRECT (market efficient) or MISCALIBRATED
-(rubric too strict) without forward tracking.
+Calibration needs dated verdicts and observed forward outcomes. A conservative
+rating distribution alone does not establish that the rubric is correctly calibrated.
 
-Usage:
+Private path setup:
+    Initialize a versioned PRIVATE companion with SMALL_CAP_DEEPDIVE_CONFIG_DIR.
+    Set REPORTS_ROOT to the absolute path returned by _common.reports_dir():
+        python -c "import sys; sys.path.insert(0, 'tools'); from _common import reports_dir; print(reports_dir())"
+    The resolver includes SMALLCAP_RUN when set and fails if initialization is missing.
+
+Usage (REPORTS_ROOT is the resolved absolute private path):
     # Record a verdict from a deepdive-fanout JSON:
-    python tools/track_forward.py --record reports/smallcap/deepdive_verdicts.json
+    python tools/track_forward.py --record "${REPORTS_ROOT}/deepdive_verdicts.json"
 
     # Record a single verdict via CLI flags:
-    python tools/track_forward.py --record --ticker EGAN --rating 观察 --theme aeromro \\
+    python tools/track_forward.py --record --ticker SYNTA --rating 观察 --theme synthetic \\
         --mos-pct null --mos-basis abstain --catalyst null
 
     # Score matured verdicts (today - verdict_date >= horizon_months):
@@ -32,7 +37,10 @@ Usage:
     # Run synthetic Brier math selftest (no network):
     python tools/track_forward.py --selftest
 
-Output: metrics/verdicts.jsonl (append-only), metrics/scorecard.md
+Output: _metrics_dir()/verdicts.jsonl and _metrics_dir()/scorecard.md.
+_metrics_dir() resolves datadir.resolve_data_dir("small-cap-deepdive")/"metrics",
+then proves the private output path. SMALL_CAP_DEEPDIVE_DATA_DIR may select the
+private data root. These are versioned companion DATA, never paths inside this tool repo.
 
 Notes:
     --backfill is the correct way to add prices to existing rows with null entry prices.
@@ -42,12 +50,15 @@ Notes:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import math
 import uuid
 import os
 import sys
 import warnings
-from datetime import datetime, timezone, timedelta
+from contextlib import contextmanager
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -67,10 +78,11 @@ from _output_paths import prove_output_path, prepare_output
 #   _recall.py, THEME_GOLD + recall@gold + 5-stage loss breakdown + candidate/universe readers.
 from _calibration import (
     RATING_PROB, RATING_DIRECTION, BLOWUP_DRAWDOWN_THRESHOLD, CALIB_BUCKETS,
-    _implied_prob_from_confidence, _brier,
+    _parse_confidence, _validate_probability, _implied_prob_from_confidence, _brier,
     _is_data_false_positive, _price_scorable,
     _blowup_avoidance_rate, _downside_capture_rate, _buy_data_integrity_rate,
-    _buy_data_integrity_summary,
+    _buy_data_integrity_summary, _adjudication_review, _adjudication_blocks_price,
+    _require_adjudication_receipt, _favorable_outcome, _outcome_summary, _risk_metric_summary,
 )
 from _recall import (
     THEME_GOLD, FTS_TOP_HITS_CAP, RECALL_STAGES, SIC_REVERSE_MARKER,
@@ -78,17 +90,22 @@ from _recall import (
     _truthy_csv, _recall_set_from_candidate_files, _recall_set_from_universe_files,
 )
 
-# Real-run output lives OUTSIDE this repo. `metrics/verdicts.jsonl` used to be a git-tracked file
-# here, so every run appended the operator's actual positions (ticker, entry date, entry price) to a
-# public repo -- hundreds of them, before the 2026-07 audit. No content scanner catches that; there is no
-# email or phone in it, just a life, correctly formatted. So the path resolves to the private store
-# and there is deliberately NO in-repo fallback: a fallback is not a convenience, it IS the leak.
+# Real run outputs belong in the verified private companion repository.
+# Resolve that location before every write and fail if it is unavailable.
+# Public tool files must never serve as a fallback for private observations.
 # datadir moved into the guards submodule: one copy for the fleet instead of one per repo,
 # which had already begun to drift. The insert above stays, because sibling modules in this
 # same tools/ directory are still imported by bare name.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "guards", "tools"))
-from datadir import resolve_data_dir, DataDirNotInitialized  # noqa: E402
+_datadir_path = Path(__file__).resolve().parents[1] / "guards/tools/datadir.py"
+if not _datadir_path.is_file():
+    raise ImportError("Pinned guards resolver is missing; initialize the guards submodule")
+_datadir_spec = importlib.util.spec_from_file_location("_smallcap_tracking_datadir", _datadir_path)
+if _datadir_spec is None or _datadir_spec.loader is None:
+    raise ImportError("Cannot load the pinned guards resolver; initialize the guards submodule")
+_datadir = importlib.util.module_from_spec(_datadir_spec)
+_datadir_spec.loader.exec_module(_datadir)
+resolve_data_dir = _datadir.resolve_data_dir
+DataDirNotInitialized = _datadir.DataDirNotInitialized
 
 REPO = Path(__file__).resolve().parent.parent
 SKILL = "small-cap-deepdive"
@@ -167,72 +184,244 @@ def _months_between(date1: str, date2: str) -> float:
     return (d2 - d1).days / 30.44
 
 
-def _fetch_close(ticker: str, on_date: str, verbose: bool = False) -> float | None:
-    """Fetch the DIVIDEND-ADJUSTED closing price for ticker on or near on_date via yfinance.
+def _positive_price(value) -> float | None:
+    """Accept a finite, strictly positive scalar without treating booleans as prices."""
+    try:
+        scalar = value.item() if hasattr(value, "item") else value
+        if isinstance(scalar, bool):
+            return None
+        price = float(scalar)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return price if math.isfinite(price) and price > 0 else None
 
-    Tries the exact date first (most recent trading day on or before on_date,
-    within a ±7 calendar day search window).
-    Returns None on any error (yfinance unavailable, ticker not found, etc.).
 
-    Total-return basis (P12b): yfinance is called with auto_adjust=True, which back-adjusts the
-    Close column for BOTH splits AND cash dividends. The price returned here is therefore a
-    total-return series — (horizon_close - entry_close) / entry_close is the dividend-adjusted
-    total return, not price-only. This removes the systematic bias that previously scored every
-    high-dividend WATCH name (MLPs/utilities: UAN, ARTNA, MSEX, YORW) as an underperformer.
-    With auto_adjust=True yfinance overwrites "Close" with the adjusted series and drops the
-    separate "Adj Close" column, so preferring "Close" below already yields the adjusted value.
+def _quote_date(value) -> date | None:
+    """Return an ordinary date only when its calendar value is unambiguous."""
+    try:
+        if isinstance(value, datetime):
+            value = value.date()
+        text = value.isoformat() if isinstance(value, date) else value
+        if not isinstance(text, str):
+            return None
+        parsed = date.fromisoformat(text)
+        return parsed if parsed.isoformat() == text else None
+    except (TypeError, ValueError, OverflowError):
+        return None
 
-    Bug-fix (Phase 6 review): close price is now derived from hist_filt (the date-filtered
-    slice), not from the unfiltered hist. The old code extracted close_col from hist before
-    filtering, so iloc[-1] could return a price one trading day AFTER the intended date.
+
+def _fetch_close(ticker: str, on_date: str, verbose: bool = False,
+                 *, evidence: dict | None = None) -> float | None:
+    """Fetch a valid close on or before the requested date, within seven calendar days.
+
+    The float/None API and injection point remain compatible. Callers can also retain
+    availability, date and provider-basis evidence through the optional dictionary.
+    The provider adjustment label does not prove that different retrieval snapshots
+    share a corporate-action basis.
     """
+    quote = evidence if evidence is not None else {}
+    quote.clear()
+    quote.update({
+        "schema_version": 1, "available": False, "price": None,
+        "ticker": ticker.strip().upper() if isinstance(ticker, str) else None,
+        "requested_date": on_date, "resolved_date": None,
+        "source": "yfinance", "price_basis": "yfinance_auto_adjust",
+        "price_column": None, "reason": None,
+    })
+
+    def unavailable(reason: str) -> None:
+        quote["reason"] = reason
+        if verbose:
+            print(f"    [_fetch_close] {quote['ticker']} on_date={on_date}: unavailable ({reason})")
+        return None
+
+    requested = _quote_date(on_date)
+    if requested is None or not isinstance(on_date, str):
+        return unavailable("invalid_requested_date")
+    if not quote["ticker"]:
+        return unavailable("invalid_ticker")
     try:
         import yfinance as yf
-        dt = datetime.strptime(on_date, "%Y-%m-%d")
-        start = (dt - timedelta(days=7)).strftime("%Y-%m-%d")
-        end = (dt + timedelta(days=2)).strftime("%Y-%m-%d")
+        start_date = requested - timedelta(days=7)
+        end_date = requested + timedelta(days=1)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            hist = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=True)
+            hist = yf.download(quote["ticker"], start=start_date.isoformat(),
+                               end=end_date.isoformat(), progress=False, auto_adjust=True)
         if hist is None or hist.empty:
-            return None
+            return unavailable("no_quotes")
 
-        # Filter to on or before on_date FIRST, then resolve Close column from the filtered slice.
-        hist_filt = hist[hist.index <= dt.strftime("%Y-%m-%d")]
-        if hist_filt.empty:
-            # Fallback: take the earliest available row (pre-listing or data gap edge case)
-            hist_filt = hist
+        dated_rows = [(_quote_date(value), position) for position, value in enumerate(hist.index)]
+        if any(day is None for day, _ in dated_rows):
+            return unavailable("invalid_quote_date")
+        eligible = [(day, position) for day, position in dated_rows
+                    if start_date <= day <= requested]
+        if not eligible:
+            return unavailable("no_admissible_quote_date")
+        resolved = max(day for day, _ in eligible)
+        positions = [position for day, position in eligible if day == resolved]
+        if len(positions) != 1:
+            return unavailable("ambiguous_quote_date")
 
-        # Resolve "Close" column: prefer "Close", then "Adj Close", then first column.
-        # Only use the positional fallback if neither named column is present.
-        if "Close" in hist_filt.columns:
-            close_col = hist_filt["Close"]
-        elif "Adj Close" in hist_filt.columns:
-            close_col = hist_filt["Adj Close"]
-        else:
-            close_col = hist_filt.iloc[:, 0]
-
-        raw = close_col.iloc[-1]
-        price = float(raw.item() if hasattr(raw, "item") else raw)
-
+        # Support flat single-symbol columns and yfinance's explicit field/symbol pairs.
+        columns = {"Close": [], "Adj Close": []}
+        for position, label in enumerate(hist.columns):
+            if isinstance(label, str) and label in columns:
+                columns[label].append(position)
+            elif isinstance(label, tuple) and len(label) == 2:
+                for field in columns:
+                    if label[0] == field and str(label[1]).upper() == quote["ticker"]:
+                        columns[field].append(position)
+                    elif label[1] == field and str(label[0]).upper() == quote["ticker"]:
+                        columns[field].append(position)
+        field = "Close" if columns["Close"] else "Adj Close"
+        if not columns[field]:
+            return unavailable("missing_price_column")
+        if len(columns[field]) != 1:
+            return unavailable("ambiguous_price_column")
+        price = _positive_price(hist.iloc[positions[0], columns[field][0]])
+        if price is None:
+            return unavailable("invalid_price")
+        quote.update(available=True, price=price, resolved_date=resolved.isoformat(),
+                     price_column=field)
         if verbose:
-            resolved_date = hist_filt.index[-1]
-            print(f"    [_fetch_close] {ticker} on_date={on_date} → resolved={resolved_date.date()} price={price:.4f}")
-
+            print(f"    [_fetch_close] {quote['ticker']} on_date={on_date}: "
+                  f"resolved={quote['resolved_date']} price={price:.4f}")
         return price
-    except Exception:
-        return None
+    except Exception as exc:
+        quote["error_type"] = type(exc).__name__
+        return unavailable("quote_fetch_error")
+
+
+def _fetch_return_snapshot(ticker: str, entry_date: str, horizon_date: str) -> dict:
+    """Fetch both return endpoints in one corporate-action adjustment snapshot."""
+    from _forward_snapshot import snapshot_return
+    first, last = _quote_date(entry_date), _quote_date(horizon_date)
+    if first is None or last is None or first >= last:
+        return {"available": False, "reason": "invalid_snapshot_dates"}
+    try:
+        import yfinance as yf
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            hist = yf.download(ticker, start=(first - timedelta(days=7)).isoformat(),
+                               end=(last + timedelta(days=1)).isoformat(),
+                               progress=False, auto_adjust=True)
+        if hist is None or hist.empty:
+            return {"available": False, "reason": "no_quotes"}
+        columns = {"Close": [], "Adj Close": []}
+        for position, label in enumerate(hist.columns):
+            if isinstance(label, str) and label in columns:
+                columns[label].append(position)
+            elif isinstance(label, tuple) and len(label) == 2:
+                for field in columns:
+                    if ((label[0] == field and str(label[1]).upper() == ticker.upper())
+                            or (label[1] == field and str(label[0]).upper() == ticker.upper())):
+                        columns[field].append(position)
+        field = "Close" if columns["Close"] else "Adj Close"
+        if not columns[field]:
+            return {"available": False, "reason": "missing_price_column"}
+        if len(columns[field]) != 1:
+            return {"available": False, "reason": "ambiguous_price_column"}
+        rows = []
+        for position, stamp in enumerate(hist.index):
+            day = _quote_date(stamp)
+            value = hist.iloc[position, columns[field][0]]
+            if hasattr(value, "item"):
+                value = value.item()
+            rows.append([day.isoformat() if day else None, value])
+        return snapshot_return(ticker, entry_date, horizon_date, rows, price_column=field,
+                               observed_at=datetime.now(timezone.utc).isoformat())
+    except Exception as exc:
+        return {"available": False, "reason": "quote_fetch_error", "error_type": type(exc).__name__}
+
+
+def _quote_problem(quote, ticker: str, requested_date: str, price=None) -> str | None:
+    """Validate persisted or freshly fetched quote evidence before using its value."""
+    if not isinstance(quote, dict) or not quote:
+        return "quote_evidence_missing"
+    if quote.get("available") is not True:
+        reason = quote.get("reason")
+        known_reasons = (
+            "invalid_requested_date", "invalid_ticker", "no_quotes", "invalid_quote_date",
+            "no_admissible_quote_date", "ambiguous_quote_date", "missing_price_column",
+            "ambiguous_price_column", "invalid_price", "quote_fetch_error",
+        )
+        return reason if reason in known_reasons else "quote_unavailable"
+    if type(quote.get("schema_version")) is not int or quote["schema_version"] != 1:
+        return "unsupported_quote_evidence_schema"
+    requested = _quote_date(requested_date)
+    resolved = _quote_date(quote.get("resolved_date"))
+    try:
+        first_allowed = requested - timedelta(days=7) if requested is not None else None
+    except OverflowError:
+        first_allowed = None
+    if (requested is None or resolved is None
+            or first_allowed is None
+            or not isinstance(quote.get("resolved_date"), str)
+            or quote.get("requested_date") != requested.isoformat()
+            or not first_allowed <= resolved <= requested):
+        return "invalid_quote_date_evidence"
+    if (not isinstance(ticker, str) or not ticker.strip()
+            or quote.get("ticker") != ticker.strip().upper()):
+        return "quote_ticker_mismatch"
+    if quote.get("source") != "yfinance" or quote.get("price_basis") != "yfinance_auto_adjust":
+        return "quote_basis_missing_or_unsupported"
+    if quote.get("price_column") not in ("Close", "Adj Close"):
+        return "quote_price_column_missing"
+    quoted = _positive_price(quote.get("price"))
+    if quoted is None:
+        return "invalid_quote_price"
+    if price is not None and _positive_price(price) != quoted:
+        return "quote_price_mismatch"
+    return None
+
+
+def _quote_on(ticker: str, on_date: str, verbose: bool = False) -> dict:
+    evidence = {}
+    price = _fetch_close(ticker, on_date, verbose=verbose, evidence=evidence)
+    problem = _quote_problem(evidence, ticker, on_date, price)
+    if problem is not None or price is None:
+        evidence.update(available=False, price=None, reason=problem or "invalid_quote_price")
+    else:
+        evidence["price"] = _positive_price(price)
+    return evidence
+
+
+def _entry_quote_problem(row: dict, price_key: str, quote_key: str, ticker: str) -> str | None:
+    """Legacy entry values remain untouched until dated basis evidence is supplied."""
+    price = _positive_price(row.get(price_key))
+    if price is None:
+        return "entry_price_unavailable_or_invalid"
+    quote = row.get(quote_key)
+    if (not isinstance(quote, dict) or not quote.get("resolved_date")
+            or not quote.get("price_basis")):
+        return "legacy_quote_evidence_missing"
+    verdict_date = row.get("verdict_date")
+    if row.get("entry_date", verdict_date) != verdict_date:
+        return "entry_date_mismatch"
+    return _quote_problem(quote, ticker, verdict_date, price)
+
+
+class _VerdictSnapshot(list):
+    """List-compatible ledger rows bound to the bytes and path originally read."""
+
+    def __init__(self, rows, source_path, source_bytes):
+        super().__init__(rows)
+        self.source_path = source_path
+        self.source_bytes = source_bytes
 
 
 def _load_verdicts() -> list[dict]:
     try:
-        path = Path(VERDICTS_FILE)
+        path = Path(VERDICTS_FILE).resolve()
     except DataDirNotInitialized:
         return []
-    if not path.exists():
-        return []
+    try:
+        content = path.read_bytes()
+    except FileNotFoundError:
+        return _VerdictSnapshot([], path, None)
     rows = []
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for number, line in enumerate(content.decode("utf-8").splitlines(), 1):
         line = line.strip()
         if line:
             try:
@@ -242,18 +431,73 @@ def _load_verdicts() -> list[dict]:
             if not isinstance(row, dict):
                 raise ValueError(f"Invalid ledger record at line {number}: expected an object")
             rows.append(row)
-    return rows
+    return _VerdictSnapshot(rows, path, content)
+
+
+@contextmanager
+def _ledger_lock(target):
+    """Fail fast on another writer; keep external quote work outside the lock.
+
+    All ledger writers use this exclusive sibling file. A crashed writer may leave
+    it behind: verify no tracker writer is running before manually removing it.
+    There is deliberately no automatic stale-lock deletion.
+    """
+    lock_path = prepare_output(target.with_name(f".{target.name}.lock"))
+    try:
+        stream = lock_path.open("x", encoding="ascii")
+    except FileExistsError as exc:
+        raise RuntimeError("Ledger update already in progress; retry after the writer finishes. "
+                           "If it crashed, verify no writer is active before removing " + str(lock_path)) from exc
+    try:
+        with stream:
+            stream.write(str(os.getpid()))
+        yield
+    finally:
+        lock_path.unlink()
 
 
 def _save_verdicts(rows: list[dict]) -> None:
-    """Atomically rewrite verdicts.jsonl.
+    """Commit an unchanged snapshot, or initialize a ledger from a plain list.
 
-    Writes to a temp file in the same directory, flushes, then os.replace() to the
-    final path. os.replace() is atomic on both POSIX and Windows (same-filesystem),
-    so a mid-write crash cannot leave a truncated ledger.
+    Quote retrieval happens before this short transaction. If any writer has
+    changed the loaded bytes, reject the stale result and preserve the newer ledger.
+    Reload and retry the command to score or backfill the current set of rows.
     """
     content = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
     target = prepare_output(VERDICTS_FILE)
+    with _ledger_lock(target):
+        try:
+            current = target.read_bytes()
+        except FileNotFoundError:
+            current = None
+        if isinstance(rows, _VerdictSnapshot):
+            if rows.source_path != target or rows.source_bytes != current:
+                raise RuntimeError("Ledger changed during quote retrieval; reload and retry. No rows were overwritten.")
+        elif current is not None:
+            raise RuntimeError("An existing ledger requires a loaded snapshot; reload before rewriting.")
+        previous = [json.loads(line) for line in (current or b"").decode("utf-8").splitlines() if line.strip()]
+        _validate_adjudication_writes(previous, rows)
+        _replace_verdicts(target, content)
+
+
+def _validate_adjudication_writes(previous, rows):
+    """Preserve legacy claims while requiring evidence for new completed reviews."""
+    for row in rows:
+        old = next((item for item in previous if
+                    (item.get("ticker"), item.get("verdict_date")) ==
+                    (row.get("ticker"), row.get("verdict_date"))), None)
+        fields = ("ticker", "cik", "verdict_date", "rating", "report_sha256",
+                  "adjudication", "adjudication_evidence")
+        if old is not None and all(old.get(field) == row.get(field) for field in fields):
+            continue
+        if old is not None and old.get("adjudication") == "data_false_positive" and (
+                row.get("adjudication") != "data_false_positive"):
+            raise ValueError("A persisted false-positive claim cannot be removed by a price update")
+        _require_adjudication_receipt(row)
+
+
+def _replace_verdicts(target, content):
+    """Replace the entire ledger while the caller holds its exclusive lock."""
     tmp_path = prepare_output(target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp"))
     created = False
     try:
@@ -269,17 +513,57 @@ def _save_verdicts(rows: list[dict]) -> None:
             tmp_path.unlink(missing_ok=True)
 
 
-def _append_verdict(row: dict) -> None:
-    content = json.dumps(row, ensure_ascii=False) + "\n"
+def _append_verdict(row: dict) -> bool:
+    """Atomically deduplicate and append; return whether a new row was recorded."""
+    _require_adjudication_receipt(row)
     target = prepare_output(VERDICTS_FILE)
-    with target.open("ab+") as stream:
-        stream.seek(0, os.SEEK_END)
-        separator = b""
-        if stream.tell():
-            stream.seek(-1, os.SEEK_END)
-            if stream.read(1) not in (b"\n", b"\r"):
-                separator = b"\n"
-        stream.write(separator + content.encode('utf-8'))
+    with _ledger_lock(target):
+        rows = _load_verdicts()
+        if not isinstance(rows, _VerdictSnapshot) or rows.source_path != target:
+            raise RuntimeError("Ledger destination changed; reload and retry before recording.")
+        key = (row["ticker"], row["verdict_date"])
+        if any((existing["ticker"], existing["verdict_date"]) == key for existing in rows):
+            return False
+        rows.append(row)
+        content = "\n".join(json.dumps(item, ensure_ascii=False) for item in rows) + "\n"
+        _replace_verdicts(target, content)
+        return True
+
+
+
+def _with_adjudication_receipt(row: dict, receipt: dict) -> dict:
+    """Attach a supplied review without inventing or changing its verdict binding."""
+    if not isinstance(receipt, dict):
+        raise ValueError("Adjudication evidence must be an object")
+    label = receipt.get("disposition")
+    if row.get("adjudication") not in (None, label):
+        raise ValueError("Receipt cannot replace a persisted adjudication label")
+    if row.get("adjudication_evidence") not in (None, receipt):
+        raise ValueError("Existing review evidence must be retained; conflicting replacement refused")
+    updated = dict(row, adjudication=label, adjudication_evidence=receipt)
+    _require_adjudication_receipt(updated)
+    if _adjudication_review(updated)["status"] != "reviewed":
+        raise ValueError("Receipt does not establish a completed review")
+    return updated
+
+
+def cmd_adjudicate(args) -> None:
+    """Attach a private, verdict-bound receipt through the existing snapshot transaction."""
+    receipt_path = prove_output_path(Path(args.adjudicate))
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if not isinstance(receipt, dict) or not isinstance(receipt.get("verdict"), dict):
+        raise ValueError("Receipt must contain its original verdict binding")
+    binding = receipt["verdict"]
+    rows = _load_verdicts()
+    matches = [index for index, row in enumerate(rows) if
+               row.get("ticker") == binding.get("ticker") and
+               row.get("verdict_date") == binding.get("verdict_date")]
+    if len(matches) != 1:
+        raise ValueError("Receipt must select exactly one existing verdict")
+    index = matches[0]
+    rows[index] = _with_adjudication_receipt(rows[index], receipt)
+    _save_verdicts(rows)
+    print("Adjudication receipt recorded; source authenticity remains the reviewer's responsibility.")
 
 
 def _integrity_description(summary: dict) -> str:
@@ -297,7 +581,7 @@ def _integrity_description(summary: dict) -> str:
 #
 # THE FIREWALL (approved philosophy decision Q2): the between-filings side-channel computed by
 # tools/signals.py lives in a SEPARATE top-level "signals" namespace and NEVER originates or
-# up-weights a BUY. track_forward's only contact with it is to SNAPSHOT a compact summary into
+# up-weights a BUY. track_forward retains the finalized snapshot or a legacy compact summary in
 # the verdict row so per-signal predictive value can be Brier-calibrated LATER. This snapshot is
 # WRITE-ONLY from the scorer's perspective: implied_prob, rating, and every scoring path
 # (_implied_prob_from_confidence, _brier, cmd_score, the scorecard) MUST NOT read it. It is
@@ -334,8 +618,9 @@ def _signals_snapshot(signals: dict | None) -> dict | None:
     if isinstance(own, dict):
         filings = own.get("recent_13d_13g") or []
         count = own.get("recent_13d_13g_count")
-        if count is None:
-            count = len(filings)
+        completion = own.get("recent_13d_13g_completion")
+        if not isinstance(completion, dict) or completion.get("status") != "complete":
+            count = None
         latest = None
         if filings:
             f0 = filings[0]
@@ -347,6 +632,7 @@ def _signals_snapshot(signals: dict | None) -> dict | None:
                 }
         snap["ownership"] = {
             "recent_13d_13g_count": count,
+            "recent_13d_13g_completion": completion,
             "latest_13d_13g": latest,
             "short_interest_pct": own.get("short_interest_pct"),
             "short_trend": own.get("short_trend"),
@@ -381,14 +667,11 @@ def _extract_signals(rec: dict) -> dict | None:
 def _build_verdict_from_flags(args) -> dict:
     """Build a verdict dict from explicit CLI flags."""
     verdict_date = args.verdict_date or _today()
+    if not isinstance(verdict_date, str) or _quote_date(verdict_date) is None:
+        raise ValueError("Verdict date must be YYYY-MM-DD")
     rating = args.rating
 
-    confidence: float | None = None
-    if getattr(args, "confidence", None) not in (None, "", "null", "none"):
-        try:
-            confidence = float(args.confidence)
-        except (TypeError, ValueError):
-            confidence = None
+    confidence = _parse_confidence(getattr(args, "confidence", None))
     # P12a: implied_prob = model confidence mapped by rating direction (fallback RATING_PROB).
     implied_prob = _implied_prob_from_confidence(rating, confidence)
 
@@ -408,8 +691,8 @@ def _build_verdict_from_flags(args) -> dict:
         catalyst = args.catalyst
 
     entry_date = verdict_date
-    entry_price = _fetch_close(args.ticker, entry_date, verbose=True)
-    benchmark_entry_price = _fetch_close(DEFAULT_BENCHMARK, entry_date, verbose=True)
+    entry_quote = _quote_on(args.ticker, entry_date, verbose=True)
+    benchmark_entry_quote = _quote_on(DEFAULT_BENCHMARK, entry_date, verbose=True)
 
     return {
         "verdict_date": verdict_date,
@@ -424,10 +707,12 @@ def _build_verdict_from_flags(args) -> dict:
         "confidence": confidence,
         "implied_prob": implied_prob,
         "horizon_months": DEFAULT_HORIZON_MONTHS,
-        "entry_price": entry_price,
+        "entry_price": entry_quote["price"],
         "entry_date": entry_date,
+        "entry_quote": entry_quote,
         "benchmark": DEFAULT_BENCHMARK,
-        "benchmark_entry_price": benchmark_entry_price,
+        "benchmark_entry_price": benchmark_entry_quote["price"],
+        "benchmark_entry_quote": benchmark_entry_quote,
         "scored": False,
         "stock_return_pct": None,
         "realized_excess_pct": None,
@@ -448,8 +733,20 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
     if not isinstance(raw, list):
         raw = [raw]
 
-    rows = []
+    # Validate every confidence before any quote lookup or ledger write.
+    confidences = []
     for rec in raw:
+        confidence = _parse_confidence(rec.get("confidence"))
+        unit = rec.get("confidence_unit")
+        if unit not in (None, "percent", "fraction"):
+            raise ValueError("Unknown confidence unit")
+        if unit == "percent" and confidence is not None:
+            confidence /= 100.0
+        elif unit == "fraction" and confidence is not None and confidence > 1:
+            raise ValueError("Fraction confidence must be between 0 and 1")
+        confidences.append(confidence)
+    rows = []
+    for rec, confidence in zip(raw, confidences):
         ticker = rec.get("ticker", "")
         rating = rec.get("rating", "观察")
         # Normalize: deepdive-fanout may use English
@@ -458,18 +755,13 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
         rating = _rating_norm.get(rating.lower(), rating)
 
         # P12a: confidence-as-probability mapped by rating direction (fallback RATING_PROB).
-        confidence: float | None = None
-        raw_conf = rec.get("confidence")
-        if raw_conf is not None and str(raw_conf).lower() not in ("null", "none", ""):
-            try:
-                confidence = float(raw_conf)
-            except (TypeError, ValueError):
-                confidence = None
         implied_prob = _implied_prob_from_confidence(rating, confidence)
 
         # mos_pct: from valuation json or report field
         mos_pct: float | None = None
-        raw_mos = rec.get("margin_of_safety_pct") or rec.get("mos_pct")
+        raw_mos = rec.get("margin_of_safety_pct")
+        if raw_mos is None:
+            raw_mos = rec.get("mos_pct")
         if raw_mos is not None:
             try:
                 mos_pct = float(raw_mos)
@@ -496,18 +788,25 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
 
         # verdict_date: try to infer from file or use today
         verdict_date = rec.get("verdict_date") or rec.get("date") or _today()
+        if not isinstance(verdict_date, str) or _quote_date(verdict_date) is None:
+            raise ValueError("Verdict date must be YYYY-MM-DD")
 
-        cik = str(rec.get("cik", "")) or None
+        cik = str(rec["cik"]) if rec.get("cik") else None
         theme = rec.get("theme") or rec.get("theme_slug") or None
 
         entry_date = verdict_date
-        entry_price = _fetch_close(ticker, entry_date, verbose=True) if ticker else None
-        benchmark_entry_price = _fetch_close(DEFAULT_BENCHMARK, entry_date, verbose=True)
+        entry_quote = _quote_on(ticker, entry_date, verbose=True)
+        benchmark_entry_quote = _quote_on(DEFAULT_BENCHMARK, entry_date, verbose=True)
 
-        # P15/P16/P17 firewall: snapshot the diagnostic side-channel (recorded-but-inert). Read
-        # the top-level "signals" namespace from the source record and compact it for FUTURE
-        # per-signal Brier calibration. This does NOT touch rating/implied_prob computed above.
-        signals_snapshot = _signals_snapshot(_extract_signals(rec))
+        # Keep diagnostic signals inert. Versioned snapshots validate claimed identity
+        # and signal digest; their source descriptor remains retained, unverified metadata.
+        # Legacy raw signals are compacted. Neither path changes rating/implied_prob.
+        if "signals_snapshot" in rec:
+            from _signal_snapshot import validate_signal_snapshot
+            signals_snapshot = validate_signal_snapshot(
+                rec["signals_snapshot"], ticker, cik, verdict_date)
+        else:
+            signals_snapshot = _signals_snapshot(_extract_signals(rec))
 
         row = {
             "verdict_date": verdict_date,
@@ -527,19 +826,23 @@ def _build_verdicts_from_json(path: Path) -> list[dict]:
             "confidence": confidence,
             "implied_prob": implied_prob,
             "horizon_months": DEFAULT_HORIZON_MONTHS,
-            "entry_price": entry_price,
+            "entry_price": entry_quote["price"],
             "entry_date": entry_date,
+            "entry_quote": entry_quote,
             "benchmark": DEFAULT_BENCHMARK,
-            "benchmark_entry_price": benchmark_entry_price,
+            "benchmark_entry_price": benchmark_entry_quote["price"],
+            "benchmark_entry_quote": benchmark_entry_quote,
             "scored": False,
             "stock_return_pct": None,
             "realized_excess_pct": None,
             "brier": None,
-            "adjudication": None,
-            "fp_cause": None,
+            "adjudication": rec.get("adjudication"),
+            "adjudication_evidence": rec.get("adjudication_evidence"),
+            "fp_cause": rec.get("fp_cause"),
             "signals_snapshot": signals_snapshot,
             "notes": None,
         }
+        _require_adjudication_receipt(row)
         rows.append(row)
     return rows
 
@@ -552,9 +855,6 @@ def cmd_record(args) -> None:
     use --backfill for that purpose. --backfill is idempotent and correctly fills null
     entry_price / benchmark_entry_price in-place without creating duplicate rows.
     """
-    existing = _load_verdicts()
-    existing_keys = {(r["ticker"], r["verdict_date"]) for r in existing}
-
     new_rows: list[dict] = []
 
     if args.record_path:
@@ -572,14 +872,11 @@ def cmd_record(args) -> None:
     added = 0
     warned = 0
     for row in new_rows:
-        key = (row["ticker"], row["verdict_date"])
-        if key in existing_keys:
+        if not _append_verdict(row):
             print(f"WARN: {row['ticker']} on {row['verdict_date']} already logged — skipping "
                   f"(use --backfill to fill null entry prices for existing rows)")
             warned += 1
             continue
-        existing_keys.add(key)
-        _append_verdict(row)
         added += 1
         price_str = f"${row['entry_price']:.2f}" if row["entry_price"] else "N/A (yfinance unavailable)"
         bm_str = f"${row['benchmark_entry_price']:.2f}" if row["benchmark_entry_price"] else "N/A"
@@ -598,7 +895,7 @@ def cmd_backfill(args) -> None:
     """--backfill: for every verdict with null entry_price or null benchmark_entry_price,
     fetch the historical close at its verdict_date (stock + IWM) and fill them in.
 
-    Idempotent: rows where both entry_price and benchmark_entry_price are already non-null
+    Idempotent: already-scored rows and rows where both entry values are non-null
     are skipped. Saves atomically via _save_verdicts.
 
     This is the correct way to populate prices for seeded verdicts. Do not use --record
@@ -611,9 +908,13 @@ def cmd_backfill(args) -> None:
 
     filled = 0
     skipped_already_filled = 0
+    skipped_scored = 0
     failed = []
 
     for row in rows:
+        if row.get("scored"):
+            skipped_scored += 1
+            continue
         ticker = row.get("ticker", "")
         verdict_date = row.get("verdict_date", "")
         has_stock = row.get("entry_price") is not None
@@ -625,27 +926,29 @@ def cmd_backfill(args) -> None:
 
         # Fetch whichever is missing
         changed = False
-        if not has_stock and ticker:
-            price = _fetch_close(ticker, verdict_date, verbose=True)
-            if price is not None:
-                row["entry_price"] = price
+        if not has_stock:
+            quote = _quote_on(ticker, verdict_date, verbose=True)
+            row["entry_quote"] = quote
+            if quote["available"]:
+                row["entry_price"] = quote["price"]
                 changed = True
             else:
-                failed.append(f"{ticker} ({verdict_date}) — stock price unavailable")
+                failed.append(f"{ticker} ({verdict_date}): stock quote unavailable ({quote['reason']})")
 
         if not has_bm:
             benchmark = row.get("benchmark", DEFAULT_BENCHMARK)
-            bm_price = _fetch_close(benchmark, verdict_date, verbose=True)
-            if bm_price is not None:
-                row["benchmark_entry_price"] = bm_price
+            quote = _quote_on(benchmark, verdict_date, verbose=True)
+            row["benchmark_entry_quote"] = quote
+            if quote["available"]:
+                row["benchmark_entry_price"] = quote["price"]
                 changed = True
             else:
-                failed.append(f"{ticker} ({verdict_date}) — {benchmark} price unavailable")
+                failed.append(f"{ticker} ({verdict_date}): {benchmark} quote unavailable ({quote['reason']})")
 
         if changed:
             filled += 1
-            ep = row.get("entry_price")
-            bm = row.get("benchmark_entry_price")
+            ep = _positive_price(row.get("entry_price"))
+            bm = _positive_price(row.get("benchmark_entry_price"))
             ep_str = f"${ep:.2f}" if ep is not None else "N/A"
             bm_str = f"${bm:.2f}" if bm is not None else "N/A"
             print(f"  Backfilled {ticker} | entry={ep_str} | {DEFAULT_BENCHMARK}={bm_str}")
@@ -655,7 +958,7 @@ def cmd_backfill(args) -> None:
 
     total = len(rows)
     print(f"\nBackfill complete: {filled} filled | {skipped_already_filled} already had prices "
-          f"| {len(failed)} failed | {total} total verdicts")
+          f"| {skipped_scored} already scored | {len(failed)} failed | {total} total verdicts")
     if failed:
         print("\nFailed tickers (thin markets / delisted / data unavailable):")
         for f in failed:
@@ -663,105 +966,29 @@ def cmd_backfill(args) -> None:
 
 
 # ---------------------------------------------------------------------------
-# --backfill-validation-fp  (P12d)
-# ---------------------------------------------------------------------------
-
-# The 19 BUY-eligible (MoS>=30%) names from the 2026-06-19 validation campaign, every one a
-# false positive with an identified XBRL/model cause (docs/2026-06-19-validation-report.md +
-# reports/smallcap/2026-06-19_validation-v0.2.0/). MoS% as reported (whole-percent); fp_cause is
-# the validated structural pathology. These are logged as rating=买入 with a NEW field
-# adjudication="data_false_positive" so the BUY arm of the calibration loop is not permanently
-# empty, and they are KEPT OUT of the price-Brier (adjudicated by balance-sheet cross-check,
-# not by a forward price). cik is unknown in the validation artifacts (not emitted by valuation
-# JSON) → null.
-VALIDATION_FP_DATE = "2026-06-19"
-VALIDATION_FP = [
-    # (ticker, mos_pct, theme, fp_cause)
-    ("CISS", 2355.0, "shipping",  "micro-cap collapse + debt=total-liabilities proxy"),
-    ("AII",   290.0, "lowev",     "material_weakness + cash unavailable -> EV excludes cash"),
-    ("GRNT",  209.0, "lowev",     "material_weakness + cash unavailable -> EV understated"),
-    ("QFIN",  190.0, "lowev",     "debt=total-liabilities proxy + OCF-proxy + China VIE"),
-    ("ARDT",  168.0, "cluster",   "OCF-proxy FCF (no capex) + large-cap out of scope"),
-    ("VSNT",  153.0, "spinoff",   "large-cap scope leak + structural decline + linear terminal value"),
-    ("SNFCA", 129.0, "microcap",  "NI unit anomaly from DEF 14A (32B vs 344M rev); wrong form"),
-    ("DAC",   128.0, "shipping",  "OCF-proxy FCF (no capex)"),
-    ("HCI",   118.0, "lowev",     "insurer financial-structure mismatch; FCF/EV model invalid"),
-    ("FSBW",  104.0, "regbank",   "debt truncation (stale 2022) -> false fcf_cap routing"),
-    ("GSL",   102.0, "shipping",  "total_debt=None -> EV collapses to market cap; ZERO flags raised"),
-    ("GNE",    97.0, "lowev",     "over-normalized FCF; multiple kill-flags"),
-    ("ESEA",   87.0, "shipping",  "going_concern + IFRS capex gaps"),
-    ("FVRR",   82.0, "netnet",    "material_weakness"),
-    ("SIGA",   76.0, "netnet",    "~90% single-customer BARDA concentration; lumpy/over-normalized OCF"),
-    ("GIII",   73.0, "netnet",    "material_weakness"),
-    ("RYAM",   63.0, "specchem",  "debt truncation 779M -> 21.5M -> false MoS"),
-    ("TUSK",   55.0, "oilsvc",    "FEMA one-time OCF inflates 5yr avg; revenue collapsed"),
-    ("CMRE",   45.0, "shipping",  "OCF-proxy FCF (no capex)"),
-]
+# Historical cohort promotion is retired. No real verdicts ship in executable constants.
 
 
 def _build_validation_fp_rows() -> list[dict]:
-    """Build the 19 data_false_positive BUY verdict rows (P12d). Deterministic; no network."""
-    rows = []
-    for ticker, mos_pct, theme, fp_cause in VALIDATION_FP:
-        rating = "买入"
-        # confidence is not the axis here, these are adversarially RESOLVED. Keep the BUY
-        # convention implied_prob=0.65 for reference, but they never enter the price-Brier.
-        implied_prob = _implied_prob_from_confidence(rating, None)
-        rows.append({
-            "verdict_date": VALIDATION_FP_DATE,
-            "ticker": ticker,
-            "cik": None,
-            "theme": theme,
-            "rating": rating,
-            "mos_pct": mos_pct,
-            "mos_basis": "fcf_cap",
-            "kill_flags": [],
-            "catalyst": None,
-            "confidence": None,
-            "implied_prob": implied_prob,
-            "horizon_months": DEFAULT_HORIZON_MONTHS,
-            "entry_price": None,
-            "entry_date": VALIDATION_FP_DATE,
-            "benchmark": DEFAULT_BENCHMARK,
-            "benchmark_entry_price": None,
-            "scored": False,
-            "stock_return_pct": None,
-            "realized_excess_pct": None,
-            "brier": None,
-            "adjudication": "data_false_positive",
-            "fp_cause": fp_cause,
-            "signals_snapshot": None,  # backfilled FP cohort predates the side-channel
-            "notes": "[validation 2026-06-19 BUY false-positive] kept OUT of price-Brier; "
-                     "feeds BUY-data-integrity metric. See docs/2026-06-19-validation-report.md.",
-        })
-    return rows
+    """Reject the retired route before it can alter the private calibration ledger."""
+    raise RuntimeError("Historical validation backfill is retired; preserve private evidence without automatic adjudication.")
 
 
 def cmd_backfill_validation_fp(args) -> None:
-    """--backfill-validation-fp: inject the 19 validation BUY false-positives (P12d).
-
-    Idempotent: rows whose (ticker, verdict_date) already exist are skipped. These rows carry
-    adjudication="data_false_positive" and are excluded from the price-Brier; they exist so the
-    BUY arm of calibration is observable (BUY-data-integrity metric) instead of empty for 12+ months.
-    """
-    existing = _load_verdicts()
-    existing_keys = {(r["ticker"], r["verdict_date"]) for r in existing}
-
+    """Retired CLI route; its production builder rejects before any ledger mutation."""
     added = 0
     skipped = 0
-    for row in _build_validation_fp_rows():
-        key = (row["ticker"], row["verdict_date"])
-        if key in existing_keys:
+    rows = _build_validation_fp_rows()
+    for row in rows:
+        if not _append_verdict(row):
             skipped += 1
             continue
-        existing_keys.add(key)
-        _append_verdict(row)
         added += 1
         print(f"  Backfilled FP {row['ticker']} | MoS={row['mos_pct']:.0f}% | "
               f"adjudication=data_false_positive | cause={row['fp_cause']}")
 
     print(f"\nValidation FP backfill: {added} added | {skipped} already present "
-          f"| {len(VALIDATION_FP)} total in cohort")
+          f"| {len(rows)} total in supplied rows")
     integrity = _buy_data_integrity_summary(_load_verdicts())
     print("BUY data-integrity now: " + _integrity_description(integrity))
 
@@ -774,60 +1001,111 @@ def cmd_score(args) -> None:
     """--score: for each unscored matured verdict, fetch horizon-end price and score."""
     rows = _load_verdicts()
     today_str = _today()
+    today = _quote_date(today_str)
+    if today is None:
+        raise ValueError("Scoring date must be YYYY-MM-DD")
 
     matured = 0
     scored_now = 0
     still_pending = 0
 
+    def unavailable(row: dict, reason: str) -> None:
+        nonlocal still_pending
+        row["score_unavailable_reason"] = reason
+        still_pending += 1
+        print(f"  WARN: {row.get('ticker', '')} remains unscored ({reason})")
+
     for row in rows:
         if row.get("scored"):
             continue
-        # data_false_positive verdicts (P12d) are adjudicated by balance-sheet cross-check, not by
-        # a forward price horizon, never price-score them.
-        if _is_data_false_positive(row):
+        # FP labels and unsupported adjudication claims remain outside price scoring.
+        if _adjudication_blocks_price(row):
             continue
-        months_elapsed = _months_between(row["verdict_date"], today_str)
-        if months_elapsed < row.get("horizon_months", DEFAULT_HORIZON_MONTHS):
+        verdict_date = row.get("verdict_date")
+        vd = _quote_date(verdict_date)
+        if not isinstance(verdict_date, str) or vd is None:
+            unavailable(row, "invalid_verdict_date")
+            continue
+        horizon_months = row.get("horizon_months", DEFAULT_HORIZON_MONTHS)
+        if isinstance(horizon_months, bool) or not isinstance(horizon_months, (int, float)):
+            unavailable(row, "invalid_horizon_months")
+            continue
+        try:
+            if not math.isfinite(horizon_months) or horizon_months <= 0:
+                raise ValueError("invalid horizon")
+            horizon_days = int(horizon_months * 30.44)
+            horizon = vd + timedelta(days=horizon_days)
+        except (ValueError, OverflowError):
+            unavailable(row, "invalid_horizon_months")
+            continue
+        months_elapsed = (today - vd).days / 30.44
+        if months_elapsed < horizon_months or horizon > today:
             still_pending += 1
             continue
 
         matured += 1
-        ticker = row["ticker"]
+        if row.get("implied_prob") is None:
+            unavailable(row, "missing_implied_prob")
+            continue
+        try:
+            implied_prob = _validate_probability(row["implied_prob"])
+        except ValueError:
+            unavailable(row, "invalid_implied_prob")
+            continue
+        ticker = row.get("ticker", "")
         benchmark = row.get("benchmark", DEFAULT_BENCHMARK)
 
-        # Horizon end date: verdict_date + horizon_months
-        vd = datetime.strptime(row["verdict_date"], "%Y-%m-%d")
-        horizon_days = int(row.get("horizon_months", DEFAULT_HORIZON_MONTHS) * 30.44)
-        horizon_date = (vd + timedelta(days=horizon_days)).strftime("%Y-%m-%d")
-
-        stock_horizon = _fetch_close(ticker, horizon_date)
-        bm_horizon = _fetch_close(benchmark, horizon_date)
-
-        if stock_horizon is None or bm_horizon is None:
-            print(f"  WARN: cannot fetch horizon price for {ticker} or {benchmark} at {horizon_date}; skipping")
-            still_pending += 1
+        # Frozen entry evidence fixes the observation date; its price is never rewritten.
+        problem = _entry_quote_problem(row, "entry_price", "entry_quote", ticker)
+        if problem is not None:
+            unavailable(row, f"stock_entry:{problem}")
+            continue
+        problem = _entry_quote_problem(row, "benchmark_entry_price", "benchmark_entry_quote", benchmark)
+        if problem is not None:
+            unavailable(row, f"benchmark_entry:{problem}")
             continue
 
-        entry_price = row.get("entry_price")
-        bm_entry = row.get("benchmark_entry_price")
-
-        if not entry_price or not bm_entry:
-            print(f"  WARN: {ticker} missing entry prices; cannot score")
-            still_pending += 1
+        horizon_date = horizon.isoformat()
+        stock_snapshot = _fetch_return_snapshot(ticker, verdict_date, horizon_date)
+        bm_snapshot = _fetch_return_snapshot(benchmark, verdict_date, horizon_date)
+        row["return_snapshot"] = stock_snapshot
+        row["benchmark_return_snapshot"] = bm_snapshot
+        row["horizon_quote"] = stock_snapshot.get("horizon_quote")
+        row["benchmark_horizon_quote"] = bm_snapshot.get("horizon_quote")
+        if not stock_snapshot["available"]:
+            unavailable(row, f"stock_snapshot:{stock_snapshot['reason']}")
+            continue
+        if not bm_snapshot["available"]:
+            unavailable(row, f"benchmark_snapshot:{bm_snapshot['reason']}")
+            continue
+        if stock_snapshot["entry_quote"]["resolved_date"] != row["entry_quote"]["resolved_date"]:
+            unavailable(row, "stock_snapshot:entry_date_changed")
+            continue
+        if bm_snapshot["entry_quote"]["resolved_date"] != row["benchmark_entry_quote"]["resolved_date"]:
+            unavailable(row, "benchmark_snapshot:entry_date_changed")
             continue
 
-        # Dividend-adjusted total returns (P12b): both legs use auto_adjust=True closes.
-        stock_return = (stock_horizon - entry_price) / entry_price
-        bm_return = (bm_horizon - bm_entry) / bm_entry
+        stock_return = stock_snapshot["return_fraction"]
+        bm_return = bm_snapshot["return_fraction"]
         excess = stock_return - bm_return
+        stock_return_pct = stock_return * 100
+        bm_return_pct = bm_return * 100
+        excess_pct = excess * 100
+        if not all(math.isfinite(value) for value in
+                   (stock_return, bm_return, excess, stock_return_pct, bm_return_pct, excess_pct)):
+            unavailable(row, "nonfinite_return")
+            continue
         favorable = excess > 0
 
-        implied_prob = row.get("implied_prob", 0.50)
         b = _brier(implied_prob, favorable)
 
-        row["stock_return_pct"] = round(stock_return * 100, 2)  # absolute total return (de-risk metrics)
-        row["realized_excess_pct"] = round(excess * 100, 2)
+        row["stock_return_pct"] = round(stock_return_pct, 2)
+        row["realized_excess_pct"] = round(excess_pct, 2)
+        row["stock_return_pct_unrounded"] = stock_return_pct
+        row["realized_excess_pct_unrounded"] = excess_pct
+        row["favorable"] = favorable
         row["brier"] = round(b, 6)
+        row.pop("score_unavailable_reason", None)
         row["scored"] = True
         scored_now += 1
         print(f"  Scored {ticker}: stock={stock_return*100:+.1f}% bm={bm_return*100:+.1f}% "
@@ -850,11 +1128,14 @@ def cmd_scorecard(args) -> None:
     # Price-Brier population excludes data_false_positive BUYs (P12d): they have no forward price.
     scored = _price_scorable(rows)
     fp_rows = [r for r in rows if _is_data_false_positive(r)]
-    pending = [r for r in rows if not r.get("scored") and not _is_data_false_positive(r)]
+    quarantined = [r for r in rows if _adjudication_blocks_price(r)]
+    pending = [r for r in rows if not r.get("scored") and not _adjudication_blocks_price(r)]
 
     # De-risk-native metrics (P12c), measurable now, alongside / ahead of the price-Brier.
-    blowup_avoid = _blowup_avoidance_rate(rows)
-    downside_cap = _downside_capture_rate(rows)
+    blowup = _risk_metric_summary(rows, "avoidance", BLOWUP_DRAWDOWN_THRESHOLD)
+    downside = _risk_metric_summary(rows, "capture", BLOWUP_DRAWDOWN_THRESHOLD)
+    blowup_avoid = blowup["rate"]
+    downside_cap = downside["rate"]
     buy_integrity = _buy_data_integrity_summary(rows)
 
     lines = [
@@ -867,33 +1148,34 @@ def cmd_scorecard(args) -> None:
         "",
         "## De-Risk-Native Metrics",
         "",
-        "*(A de-risk scanner's job is blowup AVOIDANCE, not beating IWM by a hair. These measure that.)*",
+        "Review coverage and outcomes among flagged names describe separate populations; the above-threshold rate does not establish successful loss avoidance.",
         "",
         "| Metric | Value | N | Notes |",
         "|---|---|---|---|",
         f"| BUY data-integrity (clean / reviewed BUY) | "
         f"{_integrity_description(buy_integrity)} | "
         f"{buy_integrity['reviewed_buys']} | "
-        f"{buy_integrity['false_positive_buys']} adjudicated data_false_positive |",
-        f"| Blowup-avoidance (观察/避开 avoided <= {BLOWUP_DRAWDOWN_THRESHOLD*100:.0f}% total return) | "
+        f"{buy_integrity['false_positive_buys']} receipt-backed data_false_positive |",
+        f"| Above-threshold outcome rate (观察/避开 total return > {BLOWUP_DRAWDOWN_THRESHOLD*100:.0f}%) | "
         f"{(f'{blowup_avoid*100:.1f}%' if blowup_avoid is not None else '—')} | "
-        f"{len([r for r in scored if r.get('rating') in ('观察','避开') and r.get('stock_return_pct') is not None])} | "
-        f"needs matured price verdicts |",
+        f"{blowup['observed']} | "
+        f"coverage {blowup['observed']}/{blowup['total']}; missing {blowup['missing']} |",
         f"| Downside-capture (避开 underperformed AND blew up) | "
         f"{(f'{downside_cap*100:.1f}%' if downside_cap is not None else '—')} | "
-        f"{len([r for r in scored if r.get('rating')=='避开' and r.get('stock_return_pct') is not None])} | "
-        f"needs matured 避开 verdicts |",
+        f"{downside['observed']} | "
+        f"coverage {downside['observed']}/{downside['total']}; missing {downside['missing']} |",
         "",
     ]
 
+    lines += [f"Price quarantine: {len(quarantined)} verdicts (FP labels or unsupported review claims).", "",
+              "Review coverage requires verdict-bound receipts; legacy labels alone remain pending.", ""]
     if fp_rows:
         lines += [
-            "## BUY Data-Integrity (validation false-positive cohort)",
+            "## BUY Data-Integrity (ledger adjudication labels)",
             "",
-            f"{len(fp_rows)} BUY-eligible (MoS>=30%) names from the 2026-06-19 validation campaign, each "
-            "adjudicated `data_false_positive` by balance-sheet cross-check. Kept OUT of the price-Brier "
-            "(no forward horizon); they populate the BUY-data-integrity metric so the BUY arm is not "
-            "permanently empty.",
+            f"{len(fp_rows)} ledger rows carry `data_false_positive`. These labels are excluded "
+            "from price-Brier. Their presence does not prove review quality, historical provenance "
+            "or current implementation performance; retain the underlying private evidence.",
             "",
             "| Ticker | MoS% | fp_cause |",
             "|---|---|---|",
@@ -943,9 +1225,10 @@ def cmd_scorecard(args) -> None:
                 f"{r.get('implied_prob',0.5):.2f} | {r['verdict_date']} | {maturity} |"
             )
     else:
-        # Compute overall Brier
+        # Stored Brier scores remain available even when a legacy outcome lost precision.
         overall_brier = sum(r["brier"] for r in scored) / len(scored)
-        overall_hit_rate = sum(1 for r in scored if r.get("realized_excess_pct", 0) > 0) / len(scored)
+        outcomes = _outcome_summary(scored)
+        overall_hit = f"{outcomes['rate']*100:.1f}%" if outcomes["rate"] is not None else "N/A"
 
         lines += [
             "## Overall",
@@ -953,8 +1236,11 @@ def cmd_scorecard(args) -> None:
             f"- **Scored verdicts:** {len(scored)}",
             f"- **Pending verdicts:** {len(pending)}",
             f"- **Overall Brier score:** {overall_brier:.4f} "
-            "(0=perfect, 0.25=uninformative random, 1=perfectly wrong)",
-            f"- **Overall hit rate (stock beat benchmark):** {overall_hit_rate*100:.1f}%",
+            f"(all {len(scored)} stored scores; 0=perfect, 0.25=uninformative random, 1=perfectly wrong)",
+            f"- **Outcome coverage:** {outcomes['observed']}/{outcomes['total']}; "
+            f"missing {outcomes['missing']} (legacy rounding or invalid outcome evidence)",
+            f"- **Overall hit rate (stock beat benchmark):** {overall_hit}",
+            "Outcome rates exclude unknown results; a legacy rounded zero is not evidence of failure.",
             "",
         ]
 
@@ -962,18 +1248,19 @@ def cmd_scorecard(args) -> None:
         lines += [
             "## By Rating Bucket",
             "",
-            "| Rating | N | Avg Brier | Hit Rate (stock > benchmark) | Implied p |",
-            "|---|---|---|---|---|",
+            "| Rating | N | Outcome N | Avg Brier | Hit Rate (stock > benchmark) | Implied p |",
+            "|---|---|---|---|---|---|",
         ]
         for rating in ["买入", "观察", "避开"]:
             bucket = [r for r in scored if r.get("rating") == rating]
             if not bucket:
-                lines.append(f"| {rating} | 0 | — | — | {RATING_PROB.get(rating, '—')} |")
+                lines.append(f"| {rating} | 0 | 0 | — | — | {RATING_PROB.get(rating, '—')} |")
                 continue
             avg_b = sum(r["brier"] for r in bucket) / len(bucket)
-            hit = sum(1 for r in bucket if r.get("realized_excess_pct", 0) > 0) / len(bucket)
+            outcome = _outcome_summary(bucket)
+            hit = f"{outcome['rate']*100:.1f}%" if outcome["rate"] is not None else "N/A"
             p = RATING_PROB.get(rating, 0.5)
-            lines.append(f"| {rating} | {len(bucket)} | {avg_b:.4f} | {hit*100:.1f}% | {p:.2f} |")
+            lines.append(f"| {rating} | {len(bucket)} | {outcome['observed']} | {avg_b:.4f} | {hit} | {p:.2f} |")
 
         # Calibration table
         # Calibration error = realized_freq − mean(implied_prob of members in bucket).
@@ -985,20 +1272,22 @@ def cmd_scorecard(args) -> None:
             "## Calibration Table",
             "",
             "*(Predicted probability bucket vs. realized favorable frequency)*",
-            "*(Calibration error = realized_freq − mean implied_prob of bucket members)*",
+            "*(Calibration error uses mean implied_prob and favorable frequency among known outcomes)*",
             "",
-            "| p bucket | N | Mean implied_p | Realized freq | Calibration error |",
-            "|---|---|---|---|---|",
+            "| p bucket | N | Outcome N | Mean implied_p | Realized freq | Calibration error |",
+            "|---|---|---|---|---|---|",
         ]
         for (lo, hi) in CALIB_BUCKETS:
             bucket = [r for r in scored if lo <= r.get("implied_prob", 0.5) < hi]
-            if not bucket:
-                lines.append(f"| {lo:.2f}–{hi:.2f} | 0 | — | — | — |")
+            outcome = _outcome_summary(bucket)
+            observed = outcome["rows"]
+            if not observed:
+                lines.append(f"| {lo:.2f}–{hi:.2f} | {len(bucket)} | 0 | — | — | — |")
                 continue
-            mean_p = sum(r.get("implied_prob", 0.5) for r in bucket) / len(bucket)
-            realized = sum(1 for r in bucket if r.get("realized_excess_pct", 0) > 0) / len(bucket)
+            mean_p = sum(r.get("implied_prob", 0.5) for r in observed) / len(observed)
+            realized = outcome["rate"]
             err = realized - mean_p
-            lines.append(f"| {lo:.2f}–{hi:.2f} | {len(bucket)} | {mean_p:.3f} | {realized:.2f} | {err:+.2f} |")
+            lines.append(f"| {lo:.2f}–{hi:.2f} | {len(bucket)} | {len(observed)} | {mean_p:.3f} | {realized:.2f} | {err:+.2f} |")
 
         # Individual scored table
         lines += [
@@ -1009,7 +1298,8 @@ def cmd_scorecard(args) -> None:
             "|---|---|---|---|---|---|",
         ]
         for r in sorted(scored, key=lambda x: x["verdict_date"]):
-            fav = "YES" if r.get("realized_excess_pct", 0) > 0 else "NO"
+            outcome = _favorable_outcome(r)
+            fav = "UNKNOWN" if outcome is None else ("YES" if outcome else "NO")
             lines.append(
                 f"| {r['ticker']} | {r['rating']} | {r.get('implied_prob',0.5):.2f} | "
                 f"{r.get('realized_excess_pct','—')} | {fav} | {r.get('brier','—')} |"
@@ -1051,8 +1341,9 @@ def cmd_status(args) -> None:
     today_str = _today()
 
     fp_rows = [r for r in rows if _is_data_false_positive(r)]
+    quarantined = [r for r in rows if _adjudication_blocks_price(r)]
     scored = _price_scorable(rows)
-    unscored = [r for r in rows if not r.get("scored") and not _is_data_false_positive(r)]
+    unscored = [r for r in rows if not r.get("scored") and not _adjudication_blocks_price(r)]
 
     matured_unscored = []
     pending = []
@@ -1068,7 +1359,8 @@ def cmd_status(args) -> None:
     print(f"  Scored (price):      {len(scored)}")
     print(f"  Matured (unscored):  {len(matured_unscored)}  <- run --score")
     print(f"  Pending (horizon not reached): {len(pending)}")
-    print(f"  data_false_positive (BUY, out of price-Brier): {len(fp_rows)}")
+    print(f"  data_false_positive labels (out of price-Brier): {len(fp_rows)}")
+    print(f"  Price quarantine (all unsupported claims and FP labels): {len(quarantined)}")
     buy_integrity = _buy_data_integrity_summary(rows)
     print("  BUY data-integrity:  " + _integrity_description(buy_integrity))
 
@@ -1093,64 +1385,78 @@ def cmd_status(args) -> None:
 # --recall-gold (P8 recall floor measurement)
 # ---------------------------------------------------------------------------
 
-def cmd_recall_gold(args) -> None:
-    """--recall-gold: compute recall@gold for a theme's recall set vs its hand-built gold list.
+def cmd_recall_gold(args) -> int:
+    """Report discovery and final-set recall using the same distinct gold cohort.
 
-    v0.3.1 backlog #6: recall@gold is measured against the UNIVERSE (raw FTS ∪ SIC-reverse,
-    pre band/burn/liquidity) so the SIC floor is credited and a size-capped / burn-rejected gold
-    member is attributed to its TRUE loss stage rather than mislabeled `fts_missed`. Pass the
-    discover.py universe CSV via --universe (the correct, preferred source).
-
-    --recall-gold (candidate JSON) is still accepted for backward compatibility and, when supplied
-    ALONGSIDE --universe, contributes ONLY its deep-dive `gated_out` set — gating is a deep-dive
-    outcome invisible in the universe CSV. The universe always owns recall / fts / sic /
-    dropped_mktcap; the candidates file never demotes a universe recall into fts_missed.
+    Universe files retain upstream discovery and filter outcomes. Candidate files
+    can additionally establish downstream gate losses. Those losses reduce final
+    inclusion without erasing discovery provenance.
     """
     theme = args.theme
     if not theme:
         print("recall-gold requires --theme", file=sys.stderr)
         sys.exit(2)
     universe_paths = [Path(p) for p in (getattr(args, "universe", None) or [])]
-    cand_paths = [Path(p) for p in (args.recall_gold or [])]
+    cand_paths = [Path(p) for p in (args.recall_gold or [])
+                  if not str(p).endswith(".stage.json")]
     if not universe_paths and not cand_paths:
         print("recall-gold requires --universe (preferred) and/or candidate JSON path(s)",
               file=sys.stderr)
         sys.exit(2)
 
+    upstream = []
     if universe_paths:
-        # #6: the universe is the recall denominator. It owns recall/fts/sic/dropped_mktcap.
-        recalled, fts_count, stage_sets = _recall_set_from_universe_files(universe_paths)
+        # The gold cohort is the denominator; the universe supplies upstream evidence.
+        observed = _recall_set_from_universe_files(universe_paths)
+        recalled, fts_count, stage_sets = observed
+        upstream.append(observed.completion)
         source = "universe"
-        # If candidate files are ALSO supplied, layer ONLY their gated_out (deep-dive stage) on
-        # top, the universe cannot see gating. Never let candidates shrink the universe recall.
+        # Candidate gate outcomes occur after universe filtering.
         if cand_paths:
-            _, _, cand_stages = _recall_set_from_candidate_files(cand_paths)
-            stage_sets["gated_out"] |= cand_stages["gated_out"]
+            candidate_observed = _recall_set_from_candidate_files(cand_paths)
+            cand_final, _, cand_stages = candidate_observed
+            upstream.append(candidate_observed.completion)
+            stage_sets["gated_out"] |= cand_stages["gated_out"] - cand_final
+            recalled -= stage_sets["gated_out"]
             source = "universe+candidates(gated_out)"
     else:
         # Legacy / fallback: post-filter candidate set only. WARN that recall is under-credited.
-        recalled, fts_count, stage_sets = _recall_set_from_candidate_files(cand_paths)
+        observed = _recall_set_from_candidate_files(cand_paths)
+        recalled, fts_count, stage_sets = observed
+        upstream.append(observed.completion)
         source = "candidates (post-filter)"
         print("  [warn] recall-gold reading the POST-FILTER candidate set — size-capped / "
               "burn-rejected gold members will mislabel as fts_missed. Pass --universe "
               "<universe_*.csv> for a true recall floor (v0.3.1 #6).", file=sys.stderr)
 
+    from filter_by_sic import stage_completion
+    completion = stage_completion("recall_gold", len(recalled), upstream=upstream)
     res = recall_at_gold(
         theme, recalled, fts_hit_count=fts_count,
         fts_tickers=stage_sets["fts"],
         sic_tickers=stage_sets["sic"],
         mktcap_dropped=stage_sets["mktcap_dropped"],
         gated_out=stage_sets["gated_out"],
+        completion=completion,
     )
     if res is None:
         print(f"recall@gold: no gold list for theme '{theme}' — not measurable")
-        return
+        return 0
     print(f"recall@gold — theme '{theme}'  [source: {source}]")
+    print(f"  observation coverage: {res['coverage_status']}")
+    if not res["coverage_complete"]:
+        print("  [WARN] incomplete observation; measured recall does not establish full coverage")
+        print(f"  unknown_missing_gold: {', '.join(res['unknown_missing_gold']) or '—'}")
     print(f"  gold ({len(res['gold'])}):     {', '.join(res['gold'])}")
     print(f"  recalled_gold: {', '.join(res['recalled_gold']) or '—'}")
     print(f"  MISSING_gold:  {', '.join(res['missing_gold']) or '—'}")
     print(f"  recall@gold:   {res['recall_at_gold']*100:.1f}% "
           f"({len(res['recalled_gold'])}/{len(res['gold'])})")
+    print(f"  discovery@gold: {res['discovery_recall_at_gold']*100:.1f}% "
+          f"({len(res['discovered_gold'])}/{len(res['gold'])})")
+    print("  discovery channels:")
+    for channel, members in res['discovery_channels'].items():
+        print(f"    {channel:<20} {len(members):>2}  {', '.join(members) or 'none'}")
     sb = res["stage_breakdown"]
     print(f"  loss-stage breakdown:")
     for stage in RECALL_STAGES:
@@ -1158,6 +1464,7 @@ def cmd_recall_gold(args) -> None:
         print(f"    {stage:<15} {len(members):>2}  {', '.join(members) or '—'}")
     if res["fts_cap_warning"]:
         print(f"  [WARN] {res['fts_cap_warning']}")
+    return 0 if res["coverage_complete"] else 2
 
 
 # ---------------------------------------------------------------------------
@@ -1315,20 +1622,27 @@ def _selftest() -> None:
     assert abs(_brier(0.65, excess > 0) - (0.65 - 1.0) ** 2) < 1e-9, "Brier on total-return outcome wrong"
     print(f"  PASS: dividend-adjusted total return — stock {stock_return:+.0%}, excess {excess:+.0%}")
 
-    # --- Test 10 (P12d): data_false_positive class excluded from price-Brier ---
-    fp_rows = _build_validation_fp_rows()
-    assert len(fp_rows) == 19, f"expected 19 validation FP rows, got {len(fp_rows)}"
-    assert len(VALIDATION_FP) == 19, f"VALIDATION_FP cohort must be 19, got {len(VALIDATION_FP)}"
-    for r in fp_rows:
-        assert r["adjudication"] == "data_false_positive", f"{r['ticker']} missing adjudication"
-        assert r["rating"] == "买入", f"{r['ticker']} FP must be rated 买入"
-        assert r["fp_cause"], f"{r['ticker']} missing fp_cause"
-        assert r["mos_pct"] is not None and r["mos_pct"] >= 30.0, f"{r['ticker']} MoS must be >=30%"
-        assert _is_data_false_positive(r), f"{r['ticker']} not recognized as data_false_positive"
-    tickers = [r["ticker"] for r in fp_rows]
-    assert len(set(tickers)) == 19, "duplicate ticker in validation FP cohort"
-    for must in ("SIGA", "GSL", "VSNT", "HCI", "CMRE"):
-        assert must in tickers, f"{must} missing from validation FP cohort"
+    # --- Test 10 (P12d): retired history route cannot write or affect calibration ---
+    from make_fixtures import tracking_scenarios, ownership_completion_fixture
+    from unittest.mock import patch
+    ledger = tracking_scenarios()["unreviewed"]
+    before = _buy_data_integrity_summary(ledger)
+    writes = []
+    with patch.dict(globals(), {
+            "_append_verdict": lambda row: writes.append(row) or True,
+            "_load_verdicts": lambda: list(ledger)}):
+        try:
+            cmd_backfill_validation_fp(argparse.Namespace())
+        except RuntimeError as exc:
+            assert "retired" in str(exc)
+        else:
+            raise AssertionError("Retired history route must reject")
+    assert writes == [], "Retired history route must not mutate the ledger"
+    assert _buy_data_integrity_summary(ledger) == before
+    assert before["reviewed_buys"] == 0 and before["rate"] is None
+
+    # Independent synthetic metric arithmetic comes only from the fixture generator.
+    fp_rows = [tracking_scenarios()["mixed"][1]]
     # A FP BUY scored=True must NOT count toward the price-Brier population.
     scored_fp = dict(fp_rows[0]); scored_fp["scored"] = True; scored_fp["brier"] = 0.1225
     mixed = [
@@ -1340,15 +1654,15 @@ def _selftest() -> None:
     assert len(ps) == 1 and not _is_data_false_positive(ps[0]), (
         "price-scorable population must exclude data_false_positive rows"
     )
-    print(f"  PASS: data_false_positive class — 19-name cohort, all 买入/MoS>=30%, excluded from price-Brier")
+    print("  PASS: retired history route is inert; synthetic false-positive excluded from price-Brier")
 
     # --- Test 11 (P12c): de-risk-native metrics (blowup-avoidance / downside-capture / BUY-integrity) ---
-    # BUY data-integrity: 19 FP + 1 clean BUY -> 1/20 = 0.05.
+    # Synthetic BUY data-integrity: 1 false positive + 1 clean BUY -> 1/2.
     from make_fixtures import tracking_scenarios
     clean_buy = tracking_scenarios()['mixed'][0]
     integ_rows = fp_rows + [clean_buy]
     integ = _buy_data_integrity_rate(integ_rows)
-    assert abs(integ - (1.0 / 20.0)) < 1e-9, f"BUY data-integrity wrong: {integ}"
+    assert abs(integ - 0.5) < 1e-9, f"BUY data-integrity wrong: {integ}"
     # All-FP -> 0.0; no BUY at all -> None.
     assert _buy_data_integrity_rate(fp_rows) == 0.0, "all-FP integrity should be 0.0"
     assert _buy_data_integrity_rate([{"rating": "观察"}]) is None, "no-BUY integrity should be None"
@@ -1390,281 +1704,272 @@ def _selftest() -> None:
         "P8: recall_at_gold must be None (not measurable) for an unmapped theme"
     )
 
-    # Full recall: every gold member present -> recall@gold == 1.0, missing empty.
-    _full = recall_at_gold("deathcare", ["SCI", "CSV", "MATW", "HI", "STON", "SNFCA", "NOISE"])
-    assert _full["recall_at_gold"] == 1.0, f"P8: full recall must be 1.0, got {_full['recall_at_gold']}"
-    assert _full["missing_gold"] == [], f"P8: full recall must miss none, got {_full['missing_gold']}"
+    # Synthetic stage scenarios are isolated from the operational gold lookup above.
+    from make_fixtures import source34_scenarios
+    from unittest.mock import patch
+    import _recall as _recall_module
+    _recall_case = source34_scenarios()["recall"]
+    _g0, _g1, _g2, _g3, _g4, _g5 = _recall_case["gold"]
+    with patch.dict(_recall_module.THEME_GOLD,
+                    {_recall_case["theme"]: _recall_case["gold"]}, clear=True):
 
-    # Partial recall: SIC floor catches SCI/CSV (SIC-7200) but the cross-SIC names leak ->
-    # recall@gold = 2/6, missing = the 4 cross-SIC members. This is the residual FTS-only gap.
-    _part = recall_at_gold("deathcare", ["sci", "csv"])  # lower-case -> must normalize
-    assert _part["recall_at_gold"] == round(2 / 6, 4), (
-        f"P8: partial recall must be 2/6 (rounded), got {_part['recall_at_gold']}"
-    )
-    assert _part["recalled_gold"] == ["CSV", "SCI"], f"P8: hits must normalize+sort: {_part['recalled_gold']}"
-    assert _part["missing_gold"] == ["HI", "MATW", "SNFCA", "STON"], (
-        f"P8: missing must be the cross-SIC leak: {_part['missing_gold']}"
-    )
-    assert _part["fts_cap_warning"] is None, "P8: no cap warning when fts_hit_count omitted"
-    # Default stage_breakdown (no per-stage inputs): recalled gold -> recalled_final, the rest ->
-    # fts_missed, and the five lists partition gold exactly with no double-counting.
-    _psb = _part["stage_breakdown"]
-    assert set(_psb) == set(RECALL_STAGES), f"P8: stage_breakdown keys must be RECALL_STAGES: {set(_psb)}"
-    assert _psb["recalled_final"] == ["CSV", "SCI"], f"P8: default recalled_final: {_psb['recalled_final']}"
-    assert _psb["fts_missed"] == ["HI", "MATW", "SNFCA", "STON"], (
-        f"P8: default missing -> fts_missed: {_psb['fts_missed']}"
-    )
-    assert _psb["sic_recovered"] == [] and _psb["dropped_mktcap"] == [] and _psb["gated_out"] == [], (
-        "P8: no per-stage inputs => only recalled_final/fts_missed populated"
-    )
-    _allmembers = [t for st in RECALL_STAGES for t in _psb[st]]
-    assert sorted(_allmembers) == sorted(_part["gold"]), "P8: stages must partition gold exactly"
-    assert len(_allmembers) == len(set(_allmembers)), "P8: each gold member in exactly one stage"
-    assert len(_psb["recalled_final"]) + len(_psb["sic_recovered"]) == len(_part["recalled_gold"]), (
-        "P8: recalled_final ∪ sic_recovered must reconcile to recall hits"
-    )
+        _full = recall_at_gold(_recall_case["theme"], [_g0, _g1, _g2, _g3, _g4, _g5, "NOISE"])
+        assert _full["recall_at_gold"] == 1.0, f"P8: full recall must be 1.0, got {_full['recall_at_gold']}"
+        assert _full["missing_gold"] == [], f"P8: full recall must miss none, got {_full['missing_gold']}"
 
-    # FTS top-1000 cap warning: a recall set at/over the cap warns; below the cap does not.
-    _capped = recall_at_gold("deathcare", ["SCI"], fts_hit_count=FTS_TOP_HITS_CAP)
-    assert _capped["fts_cap_warning"] is not None and "cap" in _capped["fts_cap_warning"], (
-        "P8: fts_hit_count >= 1000 must set the top-1000 cap warning"
-    )
-    _uncapped = recall_at_gold("deathcare", ["SCI"], fts_hit_count=999)
-    assert _uncapped["fts_cap_warning"] is None, "P8: below the cap must NOT warn"
 
-    # P8 loss-stage breakdown, a SYNTHETIC candidate set + gold list exercising every stage.
-    # Deathcare gold = {SCI, CSV, MATW, HI, STON, SNFCA}; construct one member per stage:
-    #   SCI   -> recalled_final (FTS hit, survived to the final set)
-    #   MATW  -> sic_recovered  (FTS missed it, SIC reverse-recall caught it)
-    #   STON  -> dropped_mktcap (recalled then dropped by the market-cap band)
-    #   HI    -> gated_out      (survived to deep-dive, then gated buy_ineligible)
-    #   CSV   -> fts_missed     (never recalled by any channel)
-    #   SNFCA -> fts_missed     (never recalled by any channel)
-    _gold = theme_gold("deathcare")
-    _sb = recall_stage_breakdown(
-        _gold,
-        recalled_tickers=["SCI"],
-        fts_tickers=["SCI"],              # MATW absent from FTS -> SIC recovery is real
-        sic_tickers=["SCI", "MATW"],     # MATW recovered by the SIC floor
-        mktcap_dropped=["STON"],
-        gated_out=["HI"],
-    )
-    assert _sb["recalled_final"] == ["SCI"], f"P8 stage: recalled_final: {_sb['recalled_final']}"
-    assert _sb["sic_recovered"] == ["MATW"], f"P8 stage: sic_recovered: {_sb['sic_recovered']}"
-    assert _sb["dropped_mktcap"] == ["STON"], f"P8 stage: dropped_mktcap: {_sb['dropped_mktcap']}"
-    assert _sb["gated_out"] == ["HI"], f"P8 stage: gated_out: {_sb['gated_out']}"
-    assert _sb["fts_missed"] == ["CSV", "SNFCA"], f"P8 stage: fts_missed: {_sb['fts_missed']}"
-    # Stages partition gold exactly (every member once, no leaks, no double-count).
-    _members = [t for st in RECALL_STAGES for t in _sb[st]]
-    assert sorted(_members) == sorted(_gold), f"P8 stage: must partition gold exactly: {_members}"
-    assert len(_members) == len(set(_members)) == len(_gold), "P8 stage: each member exactly once"
-    # A member recalled into the final set is recalled_final even if also tagged elsewhere
-    # (recalled wins; stage order is pipeline-priority). Verify precedence.
-    _sb2 = recall_stage_breakdown(
-        ["SCI"], recalled_tickers=["SCI"], sic_tickers=["SCI"], mktcap_dropped=["SCI"], gated_out=["SCI"],
-    )
-    assert _sb2["recalled_final"] == ["SCI"] and all(
-        _sb2[s] == [] for s in RECALL_STAGES if s != "recalled_final"
-    ), "P8 stage: recalled_final must take precedence over downstream tags"
-    # recall_at_gold carries the same stage_breakdown when per-stage inputs are passed, and the
-    # recall ratio reconciles to recalled_final ∪ sic_recovered.
-    _resb = recall_at_gold(
-        "deathcare", ["SCI"], fts_tickers=["SCI"], sic_tickers=["SCI", "MATW"],
-        mktcap_dropped=["STON"], gated_out=["HI"],
-    )
-    assert _resb["stage_breakdown"] == _sb, "P8 stage: recall_at_gold must embed the breakdown"
-    _hits = len(_resb["stage_breakdown"]["recalled_final"]) + len(_resb["stage_breakdown"]["sic_recovered"])
-    # recalled_gold is the final-set ∩ gold (SCI only); sic_recovered is an ADDITIONAL floor hit.
-    assert _resb["recalled_gold"] == ["SCI"], f"P8 stage: recalled_gold (final set): {_resb['recalled_gold']}"
-    assert _hits == 2, f"P8 stage: recall hits incl SIC recovery = 2, got {_hits}"
 
-    # _recall_set_from_candidate_files: reads ticker + recall_channel + downstream-drop tags,
-    # tolerates list and dict-wrapped shapes, dedupes, counts FTS-channel rows, and returns the
-    # per-stage ticker sets used by the breakdown.
-    import tempfile
-    with tempfile.TemporaryDirectory() as _td:
-        _cf = Path(_td) / "candidates_deathcare.json"
-        _cf.write_text(json.dumps([
-            {"ticker": "SCI", "recall_channel": "both"},
-            {"ticker": "CSV", "recall_channel": "fts"},
-            {"ticker": "MATW", "recall_channel": "sic_reverse"},          # SIC-only -> not in fts count
-            {"ticker": "sci", "recall_channel": "fts"},                   # dupe (case) -> one ticker
-            {"ticker": "STON", "recall_channel": "both", "dropped_stage": "mktcap"},  # dropped on mktcap
-            {"ticker": "HI", "recall_channel": "fts", "buy_ineligible": True},        # gated out
-        ]), encoding="utf-8")
-        _rset, _fts, _stages = _recall_set_from_candidate_files([_cf])
-        # STON/HI tagged dropped downstream -> NOT in the final recall set.
-        assert _rset == {"SCI", "CSV", "MATW"}, f"P8: recall set dedupe/normalize: {_rset}"
-        assert _fts == 5, f"P8: FTS-channel count (fts+both, excl sic_reverse): {_fts}"
-        assert _stages["sic"] == {"SCI", "MATW", "STON"}, f"P8: SIC-channel set: {_stages['sic']}"
-        assert _stages["mktcap_dropped"] == {"STON"}, f"P8: mktcap-dropped set: {_stages['mktcap_dropped']}"
-        assert _stages["gated_out"] == {"HI"}, f"P8: gated-out set: {_stages['gated_out']}"
-        _res = recall_at_gold(
-            "deathcare", _rset,
-            fts_tickers=_stages["fts"], sic_tickers=_stages["sic"],
-            mktcap_dropped=_stages["mktcap_dropped"], gated_out=_stages["gated_out"],
+        _part = recall_at_gold(_recall_case["theme"], [_g0.lower(), _g1.lower()])
+        assert _part["recall_at_gold"] == round(2 / 6, 4), (
+            f"P8: partial recall must be 2/6 (rounded), got {_part['recall_at_gold']}"
         )
-        assert _res["recall_at_gold"] == round(3 / 6, 4), (
-            f"P8: 3 of 6 gold recalled from candidate file, got {_res['recall_at_gold']}"
+        assert _part["recalled_gold"] == [_g1, _g0], f"P8: hits must normalize+sort: {_part['recalled_gold']}"
+        assert _part["missing_gold"] == [_g3, _g2, _g5, _g4], (
+            f"P8: missing must be the cross-SIC leak: {_part['missing_gold']}"
         )
-        # File-driven stage breakdown: SCI/CSV/MATW survived to the final set (recalled_final);
-        # STON dropped on mktcap; HI gated out; SNFCA never recalled (fts_missed). recalled wins
-        # over the SIC tag, so MATW (in _rset) is recalled_final, not sic_recovered.
-        _fsb = _res["stage_breakdown"]
-        assert _fsb["recalled_final"] == ["CSV", "MATW", "SCI"], f"P8 file stage recalled_final: {_fsb['recalled_final']}"
-        assert _fsb["sic_recovered"] == [], f"P8 file stage sic_recovered (recalled wins): {_fsb['sic_recovered']}"
-        assert _fsb["dropped_mktcap"] == ["STON"], f"P8 file stage dropped_mktcap: {_fsb['dropped_mktcap']}"
-        assert _fsb["gated_out"] == ["HI"], f"P8 file stage gated_out: {_fsb['gated_out']}"
-        assert _fsb["fts_missed"] == ["SNFCA"], f"P8 file stage fts_missed: {_fsb['fts_missed']}"
-    print("  P8 recall@gold: floor measured + loss-stage breakdown "
-          "(full/partial/cap-warn + 5-stage partition + file read)  OK")
+        assert _part["fts_cap_warning"] is None, "P8: no cap warning when fts_hit_count omitted"
 
-    # --- v0.3.1 #6: recall@gold against the UNIVERSE (raw FTS ∪ SIC-reverse), not candidates ---
-    # The bug this fixes: the post-filter candidates file drops a gold member that WAS recalled but
-    # then size-capped / burn-rejected, and the breakdown mislabels it `fts_missed`, under-crediting
-    # both the SIC floor and the FTS recall. Reproduce the exact deathcare regression: a candidates
-    # file holds only the SURVIVORS (CSV, SNFCA) -> 2/6 = 33.3% with SCI/MATW/HI dumped into
-    # fts_missed; the UNIVERSE CSV holds the raw recall set -> 5/6 with each loss attributed to its
-    # TRUE stage and only the delisted STON genuinely fts_missed. Deathcare reads ~100% of the
-    # live names at universe level (5/6; STON delisted ~2022).
-    import tempfile as _tf6
-    import csv as _csv6
-    with _tf6.TemporaryDirectory() as _td6:
-        # (1) Post-filter candidates: only the two names that survived band/burn/liquidity.
-        _cf6 = Path(_td6) / "candidates_deathcare.json"
-        _cf6.write_text(json.dumps([
-            {"ticker": "CSV", "recall_channel": "both"},
-            {"ticker": "SNFCA", "recall_channel": "fts"},
-        ]), encoding="utf-8")
-        _crec, _cfts, _cstg = _recall_set_from_candidate_files([_cf6])
-        _cres = recall_at_gold(
-            "deathcare", _crec, fts_hit_count=_cfts,
-            fts_tickers=_cstg["fts"], sic_tickers=_cstg["sic"],
-            mktcap_dropped=_cstg["mktcap_dropped"], gated_out=_cstg["gated_out"],
+
+        _psb = _part["stage_breakdown"]
+        assert set(_psb) == set(RECALL_STAGES), f"P8: stage_breakdown keys must be RECALL_STAGES: {set(_psb)}"
+        assert _psb["recalled_final"] == [_g1, _g0], f"P8: default recalled_final: {_psb['recalled_final']}"
+        assert _psb["fts_missed"] == [_g3, _g2, _g5, _g4], (
+            f"P8: default missing -> fts_missed: {_psb['fts_missed']}"
         )
-        # The candidates-only view UNDER-credits recall and mislabels size/burn drops as fts_missed.
-        assert _cres["recall_at_gold"] == round(2 / 6, 4), (
-            f"#6: post-filter candidates must read 2/6=33.3% (the regression), got {_cres['recall_at_gold']}"
+        assert _psb["discovered_not_final"] == [] and _psb["dropped_mktcap"] == [] and _psb["gated_out"] == [], (
+            "P8: no per-stage inputs => only recalled_final/fts_missed populated"
         )
-        assert "SCI" in _cres["stage_breakdown"]["fts_missed"], (
-            "#6: candidates-only mislabels size-capped SCI as fts_missed (the bug being fixed)"
+        _allmembers = [t for st in RECALL_STAGES for t in _psb[st]]
+        assert sorted(_allmembers) == sorted(_part["gold"]), "P8: stages must partition gold exactly"
+        assert len(_allmembers) == len(set(_allmembers)), "P8: each gold member in exactly one stage"
+        assert len(_psb["recalled_final"]) == len(_part["recalled_gold"]), (
+            "P8: final stage must reconcile to final-set recall hits"
         )
 
-        # (2) UNIVERSE CSV (discover.py schema): the RAW recall set, pre band/burn/liquidity. Five
-        # of six gold present; STON absent (delisted). Stages exercised, mirroring the live run:
-        #   CSV   smallcap_candidate=True,  recall_channel=both        -> recalled_final (FTS+SIC)
-        #   SNFCA smallcap_candidate=True,  recall_channel=fts         -> recalled_final
-        #   MATW  smallcap_candidate=True,  matched_phrase=[sic_reverse] (no recall_channel col path
-        #                                                                  not used here) -> recalled_final
-        #   SCI   smallcap_candidate=False, flag_too_big=True          -> dropped_mktcap (size-cap)
-        #   HI    smallcap_candidate=False, flag_illiquid=True         -> dropped_mktcap (liquidity)
-        #   STON  ABSENT from universe                                 -> fts_missed (delisted, true leak)
-        _uf6 = Path(_td6) / "universe_deathcare_2026-06-21.csv"
-        _ufields = ["name", "ticker", "cik", "sic", "matched_phrase", "flag_too_big",
-                    "flag_illiquid", "band", "smallcap_candidate", "recall_channel"]
-        with open(_uf6, "w", newline="", encoding="utf-8") as _ufh:
-            _w = _csv6.DictWriter(_ufh, fieldnames=_ufields)
-            _w.writeheader()
-            _w.writerows([
-                {"name": "Carriage Svcs", "ticker": "CSV", "cik": "1016281", "sic": "7200",
-                 "matched_phrase": "funeral", "flag_too_big": False, "flag_illiquid": False,
-                 "band": "deep", "smallcap_candidate": True, "recall_channel": "both"},
-                {"name": "Security Natl Fin", "ticker": "SNFCA", "cik": "318673", "sic": "6199",
-                 "matched_phrase": "funeral", "flag_too_big": False, "flag_illiquid": False,
-                 "band": "deep", "smallcap_candidate": True, "recall_channel": "fts"},
-                {"name": "Matthews Intl", "ticker": "MATW", "cik": "63296", "sic": "3360",
-                 "matched_phrase": "[sic_reverse]", "flag_too_big": False, "flag_illiquid": False,
-                 "band": "deep", "smallcap_candidate": True, "recall_channel": "sic_reverse"},
-                {"name": "Svc Corp Intl", "ticker": "SCI", "cik": "89089", "sic": "7200",
-                 "matched_phrase": "funeral", "flag_too_big": True, "flag_illiquid": False,
-                 "band": "large", "smallcap_candidate": False, "recall_channel": "both"},
-                {"name": "Hillenbrand", "ticker": "HI", "cik": "1417398", "sic": "3990",
-                 "matched_phrase": "cemetery", "flag_too_big": False, "flag_illiquid": True,
-                 "band": "unknown", "smallcap_candidate": False, "recall_channel": "fts"},
-            ])
-        _urec, _ufts, _ustg = _recall_set_from_universe_files([_uf6])
-        # Universe recall set = the names that cleared size/liquidity (smallcap_candidate True).
-        assert _urec == {"CSV", "SNFCA", "MATW"}, f"#6: universe survivor set: {_urec}"
-        # FTS-channel count: fts/both rows (CSV, SNFCA, SCI, HI), MATW is sic_reverse-only.
-        assert _ufts == 4, f"#6: universe FTS-hit count (fts+both): {_ufts}"
-        assert _ustg["sic"] == {"CSV", "MATW", "SCI"}, f"#6: universe SIC-channel set: {_ustg['sic']}"
-        assert _ustg["mktcap_dropped"] == {"SCI", "HI"}, (
-            f"#6: size/liquidity drops attributed (NOT fts_missed): {_ustg['mktcap_dropped']}"
-        )
-        _ures = recall_at_gold(
-            "deathcare", _urec, fts_hit_count=_ufts,
-            fts_tickers=_ustg["fts"], sic_tickers=_ustg["sic"],
-            mktcap_dropped=_ustg["mktcap_dropped"], gated_out=_ustg["gated_out"],
-        )
-        # recall@gold at the universe = 5/6: the five live names recalled (recalled_final ∪
-        # sic_recovered ∪ dropped_mktcap are all recall hits at the universe level), STON the lone
-        # true leak. deathcare reads ~100% of the live names (5/6), NOT the 2/6 candidate artifact.
-        _u_sb = _ures["stage_breakdown"]
-        _u_recalled_or_dropped = (
-            set(_u_sb["recalled_final"]) | set(_u_sb["sic_recovered"]) | set(_u_sb["dropped_mktcap"])
-        )
-        assert len(_u_recalled_or_dropped) == 5, (
-            f"#6: 5/6 gold present in universe (only STON missing), got {sorted(_u_recalled_or_dropped)}"
-        )
-        # THE CORE ASSERTION (#6): a size-capped (SCI) and a burn/liquidity-rejected (HI) gold
-        # member are attributed to dropped_mktcap, NOT fts_missed.
-        assert "SCI" in _u_sb["dropped_mktcap"], "#6: size-capped SCI must attribute to dropped_mktcap, not fts_missed"
-        assert "HI" in _u_sb["dropped_mktcap"], "#6: liquidity-dropped HI must attribute to dropped_mktcap, not fts_missed"
-        assert "SCI" not in _u_sb["fts_missed"] and "HI" not in _u_sb["fts_missed"], (
-            "#6: recalled-then-dropped gold members must NEVER land in fts_missed"
-        )
-        # MATW: SIC-reverse recall (FTS missed it, the floor caught it) AND it survived size/
-        # liquidity into the candidate set -> recalled_final (a survivor wins over the channel
-        # tag; pipeline-priority order). The SIC-floor credit is that it was recalled at all ,
-        # visible in the sic channel set (asserted above), not lost to fts_missed.
-        assert "MATW" in _u_sb["recalled_final"], (
-            f"#6: SIC-recovered survivor MATW must be recalled_final: {_u_sb['recalled_final']}"
-        )
-        assert "MATW" in _ustg["sic"] and "MATW" not in _ustg["fts"], (
-            "#6: MATW must be credited to the SIC floor (sic channel, FTS missed it)"
-        )
-        assert _u_sb["fts_missed"] == ["STON"], (
-            f"#6: only the delisted STON is the true recall leak: {_u_sb['fts_missed']}"
-        )
-        # Deathcare reads ~100% of the LIVE names at universe level (5 of the 5 non-delisted gold).
-        _live_recall = len(_u_recalled_or_dropped) / 5.0
-        assert _live_recall == 1.0, f"#6: deathcare live-name recall must be ~100% at universe, got {_live_recall}"
-        # The universe view STRICTLY improves on the candidates view (more recall, fewer false leaks).
-        assert _ures["recall_at_gold"] > _cres["recall_at_gold"], (
-            "#6: universe recall@gold must exceed the post-filter candidate artifact"
-        )
-        assert len(_u_sb["fts_missed"]) < len(_cres["stage_breakdown"]["fts_missed"]), (
-            "#6: universe must attribute fewer names to fts_missed than the candidates file"
-        )
 
-        # cmd_recall_gold dispatch contract: --universe is the preferred source; a candidates file
-        # passed alongside contributes ONLY gated_out (deep-dive stage invisible to the universe)
-        # and can NEVER demote a universe recall into fts_missed.
-        class _A6:
-            theme = "deathcare"
-            universe = [str(_uf6)]
-            recall_gold = [str(_cf6)]
-        cmd_recall_gold(_A6())  # smoke: must not raise; merges gated_out from candidates
-        # universe-only also dispatches (recall_gold None).
-        class _A6b:
-            theme = "deathcare"
-            universe = [str(_uf6)]
-            recall_gold = None
-        cmd_recall_gold(_A6b())
-        # Merge keeps universe recall intact: a name dropped on mktcap in the universe stays
-        # dropped_mktcap even if the candidates file never lists it (no demotion to fts_missed).
-        _, _, _merge_cand = _recall_set_from_candidate_files([_cf6])
-        _ustg["gated_out"] |= _merge_cand["gated_out"]
-        _mres = recall_at_gold(
-            "deathcare", _urec, fts_hit_count=_ufts,
-            fts_tickers=_ustg["fts"], sic_tickers=_ustg["sic"],
-            mktcap_dropped=_ustg["mktcap_dropped"], gated_out=_ustg["gated_out"],
+        _capped = recall_at_gold(_recall_case["theme"], [_g0], fts_hit_count=FTS_TOP_HITS_CAP)
+        assert _capped["fts_cap_warning"] is not None and "cap" in _capped["fts_cap_warning"], (
+            "P8: fts_hit_count >= 1000 must set the top-1000 cap warning"
         )
-        assert "SCI" in _mres["stage_breakdown"]["dropped_mktcap"], (
-            "#6: candidates merge must not demote a universe dropped_mktcap name to fts_missed"
+        _uncapped = recall_at_gold(_recall_case["theme"], [_g0], fts_hit_count=999)
+        assert _uncapped["fts_cap_warning"] is None, "P8: below the cap must NOT warn"
+
+
+
+
+
+
+
+
+
+        _gold = theme_gold(_recall_case["theme"])
+        _sb = recall_stage_breakdown(
+            _gold,
+            recalled_tickers=[_g0],
+            fts_tickers=[_g0],
+            sic_tickers=[_g0, _g2],
+            mktcap_dropped=[_g4],
+            gated_out=[_g3],
         )
-    print("  v0.3.1 #6 recall@gold: UNIVERSE source — size/burn drops attributed to true stage "
-          "(deathcare 5/6 live=100% at universe vs 2/6 candidate artifact)  OK")
+        assert _sb["recalled_final"] == [_g0], f"P8 stage: recalled_final: {_sb['recalled_final']}"
+        assert len(_sb["discovered_not_final"]) == 1, "P8: one discovered member has no final outcome"
+        assert _sb["dropped_mktcap"] == [_g4], f"P8 stage: dropped_mktcap: {_sb['dropped_mktcap']}"
+        assert _sb["gated_out"] == [_g3], f"P8 stage: gated_out: {_sb['gated_out']}"
+        assert _sb["fts_missed"] == [_g1, _g5], f"P8 stage: fts_missed: {_sb['fts_missed']}"
+
+        _members = [t for st in RECALL_STAGES for t in _sb[st]]
+        assert sorted(_members) == sorted(_gold), f"P8 stage: must partition gold exactly: {_members}"
+        assert len(_members) == len(set(_members)) == len(_gold), "P8 stage: each member exactly once"
+
+
+        _sb2 = recall_stage_breakdown(
+            [_g0], recalled_tickers=[_g0], sic_tickers=[_g0], mktcap_dropped=[_g0], gated_out=[_g0],
+        )
+        assert _sb2["recalled_final"] == [_g0] and all(
+            _sb2[s] == [] for s in RECALL_STAGES if s != "recalled_final"
+        ), "P8 stage: recalled_final must take precedence over downstream tags"
+
+
+        _resb = recall_at_gold(
+            _recall_case["theme"], [_g0], fts_tickers=[_g0], sic_tickers=[_g0, _g2],
+            mktcap_dropped=[_g4], gated_out=[_g3],
+        )
+        assert _resb["stage_breakdown"] == _sb, "P8 stage: recall_at_gold must embed the breakdown"
+        _hits = len(_resb["stage_breakdown"]["recalled_final"])
+
+        assert _resb["recalled_gold"] == [_g0], f"P8 stage: recalled_gold (final set): {_resb['recalled_gold']}"
+        assert _hits == len(_resb['recalled_gold']) == 1, "P8: only final inclusion counts in final recall"
+        assert len(_resb['discovered_gold']) == 4, "P8: channel and downstream-loss evidence establish discovery"
+
+
+
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as _td:
+            _cf = Path(_td) / "synthetic-candidates.json"
+            _cf.write_text(json.dumps([
+                {"ticker": _g0, "recall_channel": "both"},
+                {"ticker": _g1, "recall_channel": "fts"},
+                {"ticker": _g2, "recall_channel": "sic_reverse"},
+                {"ticker": _g0.lower(), "recall_channel": "fts"},
+                {"ticker": _g4, "recall_channel": "both", "dropped_stage": "mktcap"},
+                {"ticker": _g3, "recall_channel": "fts", "buy_ineligible": True},
+            ]), encoding="utf-8")
+            _rset, _fts, _stages = _recall_set_from_candidate_files([_cf])
+
+            assert _rset == {_g0, _g1, _g2}, f"P8: recall set dedupe/normalize: {_rset}"
+            assert _fts == 5, f"P8: FTS-channel count (fts+both, excl sic_reverse): {_fts}"
+            assert _stages["sic"] == {_g0, _g2, _g4}, f"P8: SIC-channel set: {_stages['sic']}"
+            assert _stages["mktcap_dropped"] == {_g4}, f"P8: mktcap-dropped set: {_stages['mktcap_dropped']}"
+            assert _stages["gated_out"] == {_g3}, f"P8: gated-out set: {_stages['gated_out']}"
+            _res = recall_at_gold(
+                _recall_case["theme"], _rset,
+                fts_tickers=_stages["fts"], sic_tickers=_stages["sic"],
+                mktcap_dropped=_stages["mktcap_dropped"], gated_out=_stages["gated_out"],
+            )
+            assert _res["recall_at_gold"] == round(3 / 6, 4), (
+                f"P8: 3 of 6 gold recalled from candidate file, got {_res['recall_at_gold']}"
+            )
+
+
+
+            _fsb = _res["stage_breakdown"]
+            assert _fsb["recalled_final"] == [_g1, _g2, _g0], f"P8 file stage recalled_final: {_fsb['recalled_final']}"
+            assert _fsb["discovered_not_final"] == [], "P8: all discovered members have a recorded terminal outcome"
+            assert _fsb["dropped_mktcap"] == [_g4], f"P8 file stage dropped_mktcap: {_fsb['dropped_mktcap']}"
+            assert _fsb["gated_out"] == [_g3], f"P8 file stage gated_out: {_fsb['gated_out']}"
+            assert _fsb["fts_missed"] == [_g5], f"P8 file stage fts_missed: {_fsb['fts_missed']}"
+        print("  P8 recall@gold: floor measured + loss-stage breakdown "
+              "(full/partial/cap-warn + 5-stage partition + file read)  OK")
+
+
+
+
+
+
+
+
+
+        import tempfile as _tf6
+        import csv as _csv6
+        with _tf6.TemporaryDirectory() as _td6:
+
+            _cf6 = Path(_td6) / "synthetic-candidates.json"
+            _cf6.write_text(json.dumps([
+                {"ticker": _g1, "recall_channel": "both"},
+                {"ticker": _g5, "recall_channel": "fts"},
+            ]), encoding="utf-8")
+            _crec, _cfts, _cstg = _recall_set_from_candidate_files([_cf6])
+            _cres = recall_at_gold(
+                _recall_case["theme"], _crec, fts_hit_count=_cfts,
+                fts_tickers=_cstg["fts"], sic_tickers=_cstg["sic"],
+                mktcap_dropped=_cstg["mktcap_dropped"], gated_out=_cstg["gated_out"],
+            )
+
+            assert _cres["recall_at_gold"] == round(2 / 6, 4), (
+                f"#6: post-filter candidates must read 2/6=33.3% (the regression), got {_cres['recall_at_gold']}"
+            )
+            assert _g0 in _cres["stage_breakdown"]["fts_missed"], (
+                "#6: candidates-only mislabels size-capped first member as fts_missed (the bug being fixed)"
+            )
+
+
+
+
+
+
+
+
+
+
+            _uf6 = Path(_td6) / "synthetic-universe.csv"
+            _ufields = ["name", "ticker", "cik", "sic", "matched_phrase", "flag_too_big",
+                        "flag_illiquid", "band", "smallcap_candidate", "recall_channel"]
+            with open(_uf6, "w", newline="", encoding="utf-8") as _ufh:
+                _w = _csv6.DictWriter(_ufh, fieldnames=_ufields)
+                _w.writeheader()
+                _w.writerows(_recall_case["universe"])
+            _urec, _ufts, _ustg = _recall_set_from_universe_files([_uf6])
+
+            assert _urec == {_g1, _g5, _g2}, f"#6: universe survivor set: {_urec}"
+
+            assert _ufts == 4, f"#6: universe FTS-hit count (fts+both): {_ufts}"
+            assert _ustg["sic"] == {_g1, _g2, _g0}, f"#6: universe SIC-channel set: {_ustg['sic']}"
+            assert _ustg["mktcap_dropped"] == {_g0, _g3}, (
+                f"#6: size/liquidity drops attributed (NOT fts_missed): {_ustg['mktcap_dropped']}"
+            )
+            _ures = recall_at_gold(
+                _recall_case["theme"], _urec, fts_hit_count=_ufts,
+                fts_tickers=_ustg["fts"], sic_tickers=_ustg["sic"],
+                mktcap_dropped=_ustg["mktcap_dropped"], gated_out=_ustg["gated_out"],
+            )
+
+            _u_sb = _ures["stage_breakdown"]
+            _u_recalled_or_dropped = (
+                set(_u_sb["recalled_final"]) | set(_u_sb["discovered_not_final"]) | set(_u_sb["dropped_mktcap"])
+            )
+            assert len(_u_recalled_or_dropped) == 5, (
+                f"#6: 5/6 gold present in universe (only omitted member missing), got {sorted(_u_recalled_or_dropped)}"
+            )
+
+
+            assert _g0 in _u_sb["dropped_mktcap"], "#6: size-capped first member must attribute to dropped_mktcap, not fts_missed"
+            assert _g3 in _u_sb["dropped_mktcap"], "#6: liquidity-dropped fourth member must attribute to dropped_mktcap, not fts_missed"
+            assert _g0 not in _u_sb["fts_missed"] and _g3 not in _u_sb["fts_missed"], (
+                "#6: recalled-then-dropped gold members must NEVER land in fts_missed"
+            )
+
+
+
+
+            assert _g2 in _u_sb["recalled_final"], (
+                f"#6: SIC-recovered survivor third member must be recalled_final: {_u_sb['recalled_final']}"
+            )
+            assert _g2 in _ustg["sic"] and _g2 not in _ustg["fts"], (
+                "#6: third member must be credited to the SIC floor (sic channel, FTS missed it)"
+            )
+            assert _u_sb["fts_missed"] == [_g4], (
+                f"#6: only the omitted synthetic omitted member is the true recall leak: {_u_sb['fts_missed']}"
+            )
+
+            _represented_recall = len(_u_recalled_or_dropped) / 5.0
+            assert _represented_recall == 1.0, f"#6: synthetic_recall represented-member recall must be ~100% at universe, got {_represented_recall}"
+
+            assert _ures["recall_at_gold"] > _cres["recall_at_gold"], (
+                "#6: universe recall@gold must exceed the post-filter candidate artifact"
+            )
+            assert len(_u_sb["fts_missed"]) < len(_cres["stage_breakdown"]["fts_missed"]), (
+                "#6: universe must attribute fewer names to fts_missed than the candidates file"
+            )
+
+
+
+
+            class _A6:
+                theme = _recall_case["theme"]
+                universe = [str(_uf6)]
+                recall_gold = [str(_cf6)]
+            cmd_recall_gold(_A6())
+
+            class _A6b:
+                theme = _recall_case["theme"]
+                universe = [str(_uf6)]
+                recall_gold = None
+            cmd_recall_gold(_A6b())
+
+
+            _, _, _merge_cand = _recall_set_from_candidate_files([_cf6])
+            _ustg["gated_out"] |= _merge_cand["gated_out"]
+            _mres = recall_at_gold(
+                _recall_case["theme"], _urec, fts_hit_count=_ufts,
+                fts_tickers=_ustg["fts"], sic_tickers=_ustg["sic"],
+                mktcap_dropped=_ustg["mktcap_dropped"], gated_out=_ustg["gated_out"],
+            )
+            assert _g0 in _mres["stage_breakdown"]["dropped_mktcap"], (
+                "#6: candidates merge must not demote a universe dropped_mktcap name to fts_missed"
+            )
+        print("  v0.3.1 #6 recall@gold: UNIVERSE source — size/burn drops attributed to true stage "
+              "(synthetic_recall 5/6 represented=100% at universe vs 2/6 candidate artifact)  OK")
 
     # --- P15/P16/P17 (FIREWALL): signals_snapshot is RECORDED-BUT-INERT ---
     # The diagnostic side-channel may be SNAPSHOT into a verdict row for FUTURE per-signal Brier
@@ -1687,6 +1992,7 @@ def _selftest() -> None:
                 {"form": "SC 13G", "file_date": "2026-02-03", "filer": "INDEX FUND TRUST"},
             ],
             "recent_13d_13g_count": 2,
+            "recent_13d_13g_completion": ownership_completion_fixture(2),
             "short_interest_pct": 18.4,
             "short_trend": "rising",
             "staleness_note": "13F lags ~45d; short interest bi-monthly — positioning context only",
@@ -1789,7 +2095,7 @@ def _selftest() -> None:
 # main
 # ---------------------------------------------------------------------------
 
-def main() -> None:
+def main() -> int | None:
     ap = argparse.ArgumentParser(
         description="track_forward.py — Phase 6 track-forward calibration & Brier scoring"
     )
@@ -1812,13 +2118,15 @@ def main() -> None:
                     help="mos_basis for single-verdict --record")
     ap.add_argument("--catalyst", default="null", help="Catalyst string or null")
     ap.add_argument("--confidence", default="", dest="confidence",
-                    help="Model confidence 0..1 (P12a). Mapped to implied_prob by rating "
-                         "direction. Omit to use the fixed RATING_PROB convention.")
+                    help="Finite confidence: 0..1 fraction or >1..100 percent (1 means 100 percent). "
+                         "Mapped by rating direction. Omit for the fixed RATING_PROB convention.")
     ap.add_argument("--kill-flags", default="", dest="kill_flags",
                     help="Comma-separated kill flags")
     ap.add_argument("--theme", default="", help="Theme slug")
     ap.add_argument("--verdict-date", default="", dest="verdict_date",
                     help="YYYY-MM-DD (defaults to today)")
+    ap.add_argument("--adjudicate", metavar="PRIVATE_RECEIPT_JSON",
+                    help="Attach a supplied verdict-bound review receipt to an existing private ledger row")
     ap.add_argument("--score", action="store_true",
                     help="Score all matured unscored verdicts")
     ap.add_argument("--scorecard", action="store_true",
@@ -1830,8 +2138,7 @@ def main() -> None:
                          "with null prices. Idempotent — skips rows already filled. "
                          "Use this (not --record) to add prices to existing rows.")
     ap.add_argument("--backfill-validation-fp", action="store_true", dest="backfill_validation_fp",
-                    help="Inject the 19 validation BUY false-positives as adjudication="
-                         "data_false_positive (P12d). Idempotent. Kept out of the price-Brier.")
+                    help="Retired: historical evidence cannot be automatically adjudicated or injected.")
     ap.add_argument("--recall-gold", nargs="+", dest="recall_gold", metavar="CANDIDATES_JSON",
                     help="P8: compute recall@gold for --theme against its hand-built gold "
                          "true-member list. Reads the POST-FILTER candidate set — prefer "
@@ -1849,6 +2156,10 @@ def main() -> None:
 
     if args.selftest:
         _selftest()
+        return
+
+    if args.adjudicate:
+        cmd_adjudicate(args)
         return
 
     if args.record is not None:
@@ -1877,11 +2188,10 @@ def main() -> None:
         return
 
     if args.recall_gold or getattr(args, "universe", None):
-        cmd_recall_gold(args)
-        return
+        return cmd_recall_gold(args)
 
     ap.print_help()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

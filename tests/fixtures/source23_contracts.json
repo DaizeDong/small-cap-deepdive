@@ -1,0 +1,452 @@
+{
+  "ticker": "SYNTA",
+  "cik": "0000000123",
+  "entry_date": "2000-01-03",
+  "horizon_date": "2000-02-02",
+  "snapshots": [
+    {
+      "name": "split",
+      "rows": [
+        [
+          "2000-01-03",
+          50
+        ],
+        [
+          "2000-02-02",
+          55
+        ]
+      ],
+      "frozen": 100,
+      "expected": 0.10000000000000009
+    },
+    {
+      "name": "reverse_split",
+      "rows": [
+        [
+          "2000-01-03",
+          1000
+        ],
+        [
+          "2000-02-02",
+          1100
+        ]
+      ],
+      "frozen": 100,
+      "expected": 0.10000000000000009
+    },
+    {
+      "name": "dividend_adjusted",
+      "rows": [
+        [
+          "2000-01-03",
+          90
+        ],
+        [
+          "2000-02-02",
+          100
+        ]
+      ],
+      "frozen": 100,
+      "expected": 0.11111111111111116
+    },
+    {
+      "name": "unchanged",
+      "rows": [
+        [
+          "2000-01-03",
+          100
+        ],
+        [
+          "2000-02-02",
+          110
+        ]
+      ],
+      "frozen": 100,
+      "expected": 0.10000000000000009
+    }
+  ],
+  "bad_snapshots": [
+    {
+      "name": "empty",
+      "rows": []
+    },
+    {
+      "name": "missing_entry",
+      "rows": [
+        [
+          "2000-02-02",
+          110
+        ]
+      ]
+    },
+    {
+      "name": "duplicate_entry",
+      "rows": [
+        [
+          "2000-01-03",
+          100
+        ],
+        [
+          "2000-01-03",
+          100
+        ],
+        [
+          "2000-02-02",
+          110
+        ]
+      ]
+    },
+    {
+      "name": "duplicate_exit",
+      "rows": [
+        [
+          "2000-01-03",
+          100
+        ],
+        [
+          "2000-02-02",
+          110
+        ],
+        [
+          "2000-02-02",
+          111
+        ]
+      ]
+    },
+    {
+      "name": "future_only_exit",
+      "rows": [
+        [
+          "2000-01-03",
+          100
+        ],
+        [
+          "2000-02-03",
+          110
+        ]
+      ]
+    },
+    {
+      "name": "stale_entry",
+      "rows": [
+        [
+          "1999-12-26",
+          100
+        ],
+        [
+          "2000-02-02",
+          110
+        ]
+      ]
+    },
+    {
+      "name": "invalid_date",
+      "rows": [
+        [
+          "2000-01-03",
+          100
+        ],
+        [
+          "2000-02-30",
+          110
+        ]
+      ]
+    },
+    {
+      "name": "bad_7",
+      "rows": [
+        [
+          "2000-01-03",
+          0
+        ],
+        [
+          "2000-02-02",
+          110
+        ]
+      ]
+    },
+    {
+      "name": "bad_8",
+      "rows": [
+        [
+          "2000-01-03",
+          -1
+        ],
+        [
+          "2000-02-02",
+          110
+        ]
+      ]
+    },
+    {
+      "name": "bad_9",
+      "rows": [
+        [
+          "2000-01-03",
+          true
+        ],
+        [
+          "2000-02-02",
+          110
+        ]
+      ]
+    },
+    {
+      "name": "bad_10",
+      "rows": [
+        [
+          "2000-01-03",
+          null
+        ],
+        [
+          "2000-02-02",
+          110
+        ]
+      ]
+    },
+    {
+      "name": "bad_11",
+      "rows": [
+        [
+          "2000-01-03",
+          "100"
+        ],
+        [
+          "2000-02-02",
+          110
+        ]
+      ]
+    },
+    {
+      "name": "bad_12",
+      "rows": [
+        [
+          "2000-01-03",
+          "NaN"
+        ],
+        [
+          "2000-02-02",
+          110
+        ]
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "name": "known_clear",
+      "deep": {
+        "ticker": "SYNTA",
+        "cik": "0000000123",
+        "tenk": {
+          "available": true,
+          "has_going_concern": false,
+          "has_material_weakness": false,
+          "has_death_spiral": false
+        },
+        "derived": {
+          "concentration_flag": null,
+          "fundamental_decline_flag": false,
+          "distress_kill": false
+        }
+      },
+      "bucket": "buy_eligible",
+      "count": 0
+    },
+    {
+      "name": "missing",
+      "deep": {},
+      "bucket": "abstain",
+      "count": null
+    },
+    {
+      "name": "missing_tenk",
+      "deep": {
+        "derived": {
+          "concentration_flag": null,
+          "fundamental_decline_flag": false,
+          "distress_kill": false
+        }
+      },
+      "bucket": "abstain",
+      "count": null
+    },
+    {
+      "name": "invalid_count",
+      "deep": {
+        "ticker": "SYNTA",
+        "cik": "0000000123",
+        "tenk": {
+          "available": true,
+          "has_going_concern": false,
+          "has_material_weakness": false,
+          "has_death_spiral": false
+        },
+        "derived": {
+          "concentration_flag": null,
+          "fundamental_decline_flag": false,
+          "distress_kill": false
+        },
+        "killflag_count": true
+      },
+      "bucket": "abstain",
+      "count": null
+    },
+    {
+      "name": "historical",
+      "deep": {
+        "ticker": "SYNTA",
+        "cik": "0000000123",
+        "tenk": {
+          "available": true,
+          "has_going_concern": false,
+          "has_material_weakness": false,
+          "has_death_spiral": false
+        },
+        "derived": {
+          "concentration_flag": null,
+          "fundamental_decline_flag": false,
+          "distress_kill": false
+        },
+        "as_of": "2000-01-03"
+      },
+      "bucket": "abstain",
+      "count": 0
+    },
+    {
+      "name": "known_risk",
+      "deep": {
+        "ticker": "SYNTA",
+        "cik": "0000000123",
+        "tenk": {
+          "available": true,
+          "has_going_concern": true,
+          "has_material_weakness": false,
+          "has_death_spiral": false
+        },
+        "derived": {
+          "concentration_flag": null,
+          "fundamental_decline_flag": false,
+          "distress_kill": false
+        }
+      },
+      "bucket": "AVOID",
+      "count": 1
+    }
+  ],
+  "valuation": {
+    "mos_basis": "fcf_cap",
+    "margin_of_safety_pct": 0.4,
+    "buy_eligible": true
+  },
+  "clean": {
+    "ticker": "SYNTA",
+    "cik": "0000000123",
+    "tenk": {
+      "available": true,
+      "has_going_concern": false,
+      "has_material_weakness": false,
+      "has_death_spiral": false
+    },
+    "derived": {
+      "concentration_flag": null,
+      "fundamental_decline_flag": false,
+      "distress_kill": false
+    }
+  },
+  "signals": {
+    "price_divergence": {
+      "divergence_label": "aligned"
+    },
+    "ownership": {
+      "recent_13d_13g_count": 0,
+      "recent_13d_13g": [],
+      "short_interest_pct": null,
+      "short_trend": null,
+      "staleness_note": "Synthetic unavailable observation."
+    },
+    "signals_meta": {
+      "diagnostic_only": true,
+      "never_affects_buy": true,
+      "generated_utc": "2000-01-03T12:00:00Z"
+    }
+  },
+  "totals": [
+    {
+      "name": "empty",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td>No results found</td></tr></table>",
+      "status": "complete"
+    },
+    {
+      "name": "empty_total",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td>No results found</td></tr></table><p>Showing 1 to 10 of 100</p>",
+      "status": "partial"
+    },
+    {
+      "name": "empty_zero_total",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td>No results found</td></tr></table><p>Showing 0 to 0 of 0</p>",
+      "status": "complete"
+    },
+    {
+      "name": "empty_next",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td>No results found</td></tr></table><a rel=\"next\" href=\"?page=2\">Next</a>",
+      "status": "partial"
+    },
+    {
+      "name": "valid_larger_total",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table><p>Showing 1 to 1 of 100</p>",
+      "status": "partial"
+    },
+    {
+      "name": "valid_zero_total",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td></td><td>2000-12-15 12:30:00</td><td>2000-12-14</td><td>SYNTHA</td><td>AcmeCorp Synthetic A</td><td>Synthetic</td><td>2</td><td>P - Purchase</td><td>$1</td><td>+100</td><td>100</td><td>+1%</td><td>+$100</td><td></td><td></td><td></td><td></td></tr></table><p>Showing 0 to 0 of 0</p>",
+      "status": "partial"
+    },
+    {
+      "name": "conflicting_totals",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td>No results found</td></tr></table><p>Showing 0 to 0 of 0</p><p>Showing 1 to 1 of 1</p>",
+      "status": "partial"
+    },
+    {
+      "name": "malformed_total",
+      "html": "<table><tr><th>X</th><th>Filing Date</th><th>Trade Date</th><th>Ticker</th><th>Company Name</th><th>Industry</th><th>Ins</th><th>Trade Type</th><th>Price</th><th>Qty</th><th>Owned</th><th>%Own</th><th>Value</th><th>1d</th><th>1w</th><th>1m</th><th>6m</th></tr><tr><td>No results found</td></tr></table><p>Showing 0 to 0 of 1,,0</p>",
+      "status": "partial"
+    }
+  ],
+  "event_asof": "2001-01-01",
+  "response_url": "https://openinsider.com/latest-cluster-buys",
+  "bootstrap": [
+    {
+      "ticker": "SYNTA",
+      "year": 2000,
+      "core4": 4,
+      "blow": true
+    },
+    {
+      "ticker": "SYNTB",
+      "year": 2000,
+      "core4": 0,
+      "blow": false
+    }
+  ],
+  "bootstrap_spill": [
+    {
+      "ticker": "SYNTA",
+      "year": 2000,
+      "core4": 4,
+      "blow": false
+    },
+    {
+      "ticker": "SYNTB",
+      "year": 2000,
+      "core4": 3,
+      "blow": true
+    },
+    {
+      "ticker": "SYNTC",
+      "year": 2000,
+      "core4": 0,
+      "blow": false
+    }
+  ],
+  "report": "# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: watch\nconfidence: 64\nhold_period: 12 months\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n"
+}

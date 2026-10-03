@@ -22,10 +22,8 @@ from _deepdive_concepts import (
     _get_sec_tickers,
 )
 
-# P3, concentration extraction. Magnitude-based, sourced from concentration-footnote numerics
-# in the filing text (companyconcept XBRL does NOT expose dimensional segment members, so the
-# segment-member breakdown is only recoverable from the footnote text). Replaces the old
-# substring detector ("customers accounted for") which SIGA's filing never used.
+# Concentration magnitude comes from filing footnotes; companyconcept does not expose
+# dimensional segment members. Associate each percentage with its own context.
 # A single named counterparty (government, "one customer", named largest client) = top_customer_pct.
 # A single product/program/segment/drug share of revenue = top_program_pct.
 _CONC_SINGLE_CUSTOMER = re.compile(
@@ -40,6 +38,37 @@ _CONC_SINGLE_PROGRAM = re.compile(
     r"a single (?:product|program|segment|drug)",
     re.IGNORECASE,
 )
+_CONC_SHARE_PREDICATE = re.compile(
+    r"\b(?:accounts? for|accounted for|represents?|represented|constitutes?|constituted|"
+    r"comprises?|comprised|totals?|totaled|generates?|generated|contributes?|contributed|"
+    r"provides?|provided|makes? up|made up|is|are|was|were)\b",
+    re.IGNORECASE,
+)
+_CONC_SHARED_MODIFIERS = re.compile(
+    r"(?:(?:it|they)\b\s*)?"
+    # Recognize grammatical modifiers explicitly; a word ending in -ly may be a noun.
+    # Unrecognized prefixes retain an ambiguity note instead of borrowing a subject.
+    r"(?:(?:previously|subsequently|initially|eventually|ultimately|currently|formerly|"
+    r"lately|recently|frequently|infrequently|regularly|usually|occasionally|generally|"
+    r"consistently|repeatedly|continually|continuously|invariably|primarily|principally|"
+    r"mainly|mostly|largely|partially|partly|substantially|significantly|approximately|"
+    r"roughly|nearly|only|merely|solely|completely|entirely|directly|indirectly|jointly|"
+    r"collectively|separately|individually|effectively|also|still|already|then|now|always|often|sometimes|never|"
+    r"almost|even|just|again|nevertheless|nonetheless|however|therefore|thus|hence|"
+    r"otherwise|meanwhile|instead|likewise|furthermore|moreover|indeed|has|have|had|will|"
+    r"would|could|may|might|did|do|does|is|are|was|were|be|been|being|not)\b\s*|"
+    r"(?:in\s+(?:total|aggregate|all|effect|fact|part|practice)|on\s+average|at\s+times)\b\s*|"
+    r"(?:in|during|throughout|over|for)\s+"
+    r"(?:(?:[a-z][a-z-]*|\d+)\s+){0,5}"
+    r"(?:years?|quarters?|periods?|months?|weeks?)\b\s*)*",
+    re.IGNORECASE,
+)
+# These relations attribute the filer's revenue to a customer or its group.
+# Other possessive heads do not establish that revenue relationship.
+_CONC_CUSTOMER_RELATION = re.compile(r"(?:its|their)\s+(?:orders|purchases|affiliates)\b")
+_CONC_ENTITY_NAME = re.compile(
+    r"\b[A-Z][\w.'-]*(?:\s+(?:(?:and|of|the)\s+)?[A-Z][\w.'-]*)*"
+)
 _CONC_REVENUE_TERM = re.compile(
     r"revenue|net sales|product sales|of (?:our |its |total )?sales|"
     r"accounts receivable|receivable",
@@ -48,20 +77,23 @@ _CONC_REVENUE_TERM = re.compile(
 _CONC_PCT = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*%")
 # How far (chars) a percentage may sit from its qualifying context phrase.
 _CONC_WINDOW = 180
+_CONC_NAME_DOTS = re.compile(
+    r"\b(?:[A-Za-z]\.\s*){2,}|\b[A-Z][a-z0-9]+(?:\.[A-Z][a-z0-9]+)+\b|"
+    r"\b(?i:St|Ste|Mt|Dr|Jr|Sr|Inc|Corp|Co|Ltd|Pte|Pty|Intl|Assn|Bros)\.(?=\s|[’',)]|$)|"
+    r"\d+\.\d+"
+)
+_CONC_CLAUSE_END = re.compile(r"[.!?;:,]")
+_CONC_AGGREGATE_END = re.compile(
+    r"%\s*of\s*(?:(?:the|our|its)\s+)?"
+    r"(?P<aggregate>(?:(?:total|consolidated|net|combined|overall|company|group)\s+)?)"
+    r"(?:revenues?|sales|receivables?)\b\s*"
+    r"(?P<boundary>[.!?;:,]|(?:and|but|while|whereas)\b)",
+    re.IGNORECASE,
+)
 
-# v0.3.1 #7, SEGMENT-disclosure guard. DSGR's "100% of [Canada Branch Division] revenue" is a
-# segment/geography breakdown, NOT customer concentration, yet it mis-set top_customer_pct=100 and
-# killed a real $1.32B distributor pre-deep-dive. When the percent is followed (within a short
-# window) by "of [<segment/division/branch/region/subsidiary/geography ...>] revenue", it is a
-# segment disclosure: do NOT treat it as customer concentration. The optional bracketed/named span
-# between "of" and "revenue" is allowed up to ~40 chars so the qualifier and "revenue" both land.
-# Robustness (v0.3.1 verifier): EDGAR text extraction routinely COLLAPSES whitespace
-# ("ofCanada", "approximately100%") and emits a curly apostrophe ("division’s"). So inter-token
-# whitespace is `\s*` (zero-or-more, not `\s+`), the optional `[` is allowed inline, and both the
-# token-run and the segment->"revenue" tail char-classes include the curly apostrophe ’ (U+2019)
-# and a literal ASCII apostrophe so "branch division’s revenue" bridges to "revenue". Without this
-# the guard silently no-ops on the very DSGR string it exists to catch (the selftest had passed
-# for the wrong reason, no customer phrase near the pct, masking the regex break).
+# Segment or geography revenue percentages must not become customer concentration.
+# Bind the denominator to this percentage and its clause. Accept collapsed whitespace
+# and both apostrophe forms, preserving genuine customer percentages in nearby clauses.
 _CONC_SEGMENT_CTX = re.compile(
     r"%?\s*of\s*\[?\s*(?:(?:the|our|its|total)\s+)?"
     r"(?:[a-z][\w&./’'-]+\s*){0,4}?"
@@ -70,29 +102,16 @@ _CONC_SEGMENT_CTX = re.compile(
     r"[\w\s&./’'\]\[-]{0,40}?revenue",
     re.IGNORECASE,
 )
-# v0.3.1 #7 (cont.), POSSESSIVE proper-noun segment guard. The real DSGR filing also says
-# "approximately 92% of Lawson’s revenue" (Lawson Products is a DSGR operating segment). That has
-# NO generic segment keyword, so _CONC_SEGMENT_CTX misses it, and an UNRELATED "our largest
-# customer accounted for <5%" sentence elsewhere in the 180-char window bound the 92% to the
-# customer class -> phantom top_customer_pct=92 -> DSGR re-killed at cheap_pass. A "% of
-# <ProperNoun>'s revenue" construction is a SEGMENT / own-subsidiary breakdown ("X% of [Segment]'s
-# OWN revenue"), never customer concentration (which is always phrased "X% of OUR/total/consolidated
-# revenue [came from <customer>]"). So: when the percent is immediately followed by "of
-# <Capitalized ProperNoun>'s revenue" and the noun is NOT a generic denominator
-# (total/consolidated/net/company/group/its/our/all), treat it as a segment disclosure. Runs on the
-# ORIGINAL-CASE tail (capitalization is the discriminator), unlike the lowercased _CONC_SEGMENT_CTX.
+# A capitalized possessive denominator can identify a segment's own revenue.
+# Match original case and exclude generic company-wide denominator words.
 _CONC_SEGMENT_POSSESSIVE = re.compile(
     r"%\s*of\s*"
     r"(?!(?:the\s+)?(?:total|consolidated|net|company|group|combined|its|our|all)\b)"
-    # ProperNoun (1-4 Capitalized tokens), then a possessive apostrophe, trailing "s" OPTIONAL so
-    # PLURAL possessives ("Gexpro Services’ revenue") match too, then up to ~20 chars of qualifier
-    # (a fiscal year, "total", "consolidated") before "revenue" ("Services’ 2025 total revenue").
+    # Match one to four capitalized tokens and singular or plural possessives.
+    # Allow a short qualifier before revenue.
     r"[A-Z][\w&.'-]+(?:\s+[A-Z][\w&.'-]+){0,3}\s*[’'](?:s)?\s+[\w\s]{0,20}?revenue",
 )
-# v0.3.1 #7 (cont.), DIVERSIFICATION guard. "the top 20 customers represented approximately 83%"
-# / "our 15 largest customers" is a DIVERSIFIED base (plural N customers), the OPPOSITE of single-
-# counterparty concentration, it must never produce a kill. Real DSGR states exactly this for the
-# Gexpro Services segment. Distinct from the singular _CONC_SINGLE_CUSTOMER ("our largest customer").
+# Plural customer groups describe diversification rather than single-counterparty risk.
 _CONC_DIVERSIFIED_CUSTOMERS = re.compile(
     r"top\s+\d+\s+customers|\d+\s+largest\s+customers|our\s+\d+\s+largest\b",
     re.IGNORECASE,
@@ -110,15 +129,9 @@ def _validate_ticker_entity(ticker: str, resolved_cik: str, rev_series: list, sh
     3. shares_outstanding < 1000 → suspiciously small (sub-entity or wrong CIK).
     4. revenue is present but absurdly small (<$1000) → unit-of-1 mis-tag or wrong subsidiary.
 
-    A4 change: the |NI|/rev ratio trigger is REMOVED entirely. It mislabeled present-but-tiny-
-    revenue tails (STSS/MVIS/TIPT) as "wrong entity" — a misleading reason-string that also
-    gated buy_eligible on the wrong field. The tiny-revenue / large-loss pattern is now carried
-    solely by low_revenue_loss_ratio (advisory label) and its tiered low_revenue_loss_ratio_extreme
-    (ratio>20, which valuation gates on). wrong_entity_suspected fires ONLY on a genuine
-    unit-mistag / wrong-CIK signature: shares<1000, ticker-absent, CIK-mismatch, or revenue<$1000.
-
-    P-B history: an earlier ratio>2.0 heuristic mislabeled the pre-/early-revenue resource
-    pattern (URG/ASPI/IMSR/XOMA); P-B raised it to >50, A4 removes it.
+    Loss relative to revenue is a financial-shape check, not an entity-identity check.
+    The low_revenue_loss_ratio and low_revenue_loss_ratio_extreme flags express those
+    advisory and blocking tiers separately.
 
     Returns (False, None) when no issue detected.
     Returns (True, reason) when any heuristic fires.
@@ -146,9 +159,7 @@ def _validate_ticker_entity(ticker: str, resolved_cik: str, rev_series: list, sh
         if latest_shares is not None and latest_shares < 1000:
             reasons.append(f"shares_lt_1000:{latest_shares:.0f}")
 
-    # A4: the |NI|/rev ratio trigger is REMOVED. The present-but-tiny-revenue tail
-    # (STSS/MVIS/TIPT) is carried by low_revenue_loss_ratio / low_revenue_loss_ratio_extreme,
-    # NOT mislabeled as a wrong entity here.
+    # Loss-to-revenue ratios are handled by the separate financial-shape flags.
 
     # Heuristic 4: revenue absurdly low (below $1000 = unit mis-tag)
     latest_rev = rev_series[-1]["val"] if rev_series else None
@@ -165,11 +176,8 @@ def _low_revenue_loss_ratio(rev_series: list, ni_series: list) -> tuple[bool, bo
 
     TIERED (A4):
     - ratio > 2.0  → low_revenue_loss_ratio (advisory label; does NOT gate buy_eligible).
-      The right-entity early-revenue pattern (URG/ASPI/IMSR/XOMA): genuine large loss against
-      tiny real revenue. Surfaced for the trust banner only.
-    - ratio > 20.0 → ALSO low_revenue_loss_ratio_extreme (bool). The extreme tail (STSS 1384x,
-      MVIS 78.6x, TIPT 71.6x) that previously co-fired the misleading wrong_entity_suspected and
-      gated on it. valuation now gates buy_eligible on this flag instead, with the accurate label.
+      Surface the advisory label without changing eligibility.
+    - ratio > 20.0 also sets low_revenue_loss_ratio_extreme, which blocks buy_eligible.
 
     Returns (low_revenue_loss_ratio, low_revenue_loss_ratio_extreme, detail_str).
     """
@@ -193,14 +201,10 @@ def _insurance_concepts_present(
 ) -> tuple[bool, str | None]:
     """A3 — detect an insurance underwriter / insurance-subsidiary holdco from XBRL concepts.
 
-    Probes the INSURANCE_CONCEPTS set via companyconcept. valuation reads this so an insurance-
-    bearing holdco on a non-financial SIC (BOC SIC-65, surety-insurance sub) routes like
-    financial_sic (nav/abstain) rather than fcf_cap.
+    Probes INSURANCE_CONCEPTS via companyconcept. A corroborated insurance signal
+    routes to NAV/abstention even when the registered SIC is non-financial.
 
-    v0.3.1 #4 — PRECISION FIX. The old detector fired True on the FIRST concept with any value,
-    so a SINGLE stray tag (PremiumsEarnedNet / DeferredPolicyAcquisitionCosts) hit non-insurers
-    (SPB consumer-prod SIC-3690, ASTE machinery, SKIL learning-SaaS, ALLR oncology, TOPP trucking).
-    Now require EITHER:
+    A single stray accounting tag is insufficient. Require either:
       (a) the company's SIC starts with "63" (insurance carriers) or "64" (insurance agents), OR
       (b) at least TWO DISTINCT insurance concepts are present.
     A single insurance concept on a non-63/64 SIC is no longer sufficient -> no false fire.
@@ -241,9 +245,8 @@ def _lessor_asset_heavy(
 ) -> tuple[bool, str | None]:
     """v0.3.2 #8 — detect an asset-heavy leasing/rental business (railcar/equipment/auto lessor).
 
-    Returns (lessor_asset_heavy, detail). valuation forces fcf_cap_model_unsuitable=True (route to
-    lease-fleet NAV) when this is True EVEN IF debt/assets < 0.62 — closing the GBX/RAIL hole where
-    a textbook NAV candidate was mis-valued on trough-cycle FCF.
+    Returns (lessor_asset_heavy, detail). Valuation forces NAV routing when this is
+    true even below the debt/assets threshold.
 
     Fires when ANY of three independent leasing signals is present:
       (a) SIC in LESSOR_SIC_CODES (leasing/rental businesses), OR
@@ -393,14 +396,12 @@ def _extract_concentration(tenk_text: str) -> tuple[float | None, float | None, 
 
     companyconcept XBRL does NOT expose dimensional segment members, so the only mechanical
     source for the magnitude is the concentration-footnote text the filing already provides.
-    This replaces the old English substring detector ("customers accounted for"), which SIGA's
-    ~90%-BARDA-dependent filing never used.
+    A single fixed substring cannot cover the supported disclosure forms.
 
-    Strategy: scan every percentage in the text; keep one whose context window contains BOTH
-    a revenue/sales/receivable term AND a single-counterparty phrase (top_customer_pct) or a
-    single-product/program phrase (top_program_pct). Take the max per class (worst-case
-    concentration). A counterparty match takes precedence over a program match for the same
-    percentage (named-customer dependence is the harder kill-flag).
+    Bind each percentage to a revenue denominator and single customer/program in the same
+    statement. Other percentages delimit its context unless they form a numeric list sharing
+    a denominator. Preserve abbreviation/name dots and appositive commas. Take the maximum
+    per class; the nearest qualifying phrase assigns the class, with ties going to customer.
 
     Returns (top_customer_pct, top_program_pct, detail) — pcts are floats 0-100 or None.
     The kill/watch flag is composed by the caller (_concentration_flag).
@@ -412,6 +413,7 @@ def _extract_concentration(tenk_text: str) -> tuple[float | None, float | None, 
     top_program: float | None = None
     cust_ctx: str | None = None
     prog_ctx: str | None = None
+    ambiguous_clause = False
     def _nearest_dist(pat, window, anchor):
         """Smallest char distance from `anchor` (pct position within window) to any match of pat."""
         best = None
@@ -431,35 +433,132 @@ def _extract_concentration(tenk_text: str) -> tuple[float | None, float | None, 
             continue
         lo = max(0, m.start() - _CONC_WINDOW)
         hi = min(len(low), m.end() + _CONC_WINDOW)
+        original_window = tenk_text[lo:hi]
+        protected = [span.span() for span in _CONC_NAME_DOTS.finditer(original_window)]
+        boundaries = {punct.span() for punct in re.finditer(r"[.!?;]", original_window)
+                      if not any(start <= punct.start() < end for start, end in protected)}
+        # An aggregate denominator ends its statement even when collapsed spacing
+        # resembles a dotted brand name, such as "total Revenue.Next sentence".
+        boundaries.update(end.span("boundary") for end in _CONC_AGGREGATE_END.finditer(original_window)
+                          if end.group("aggregate") or not any(
+                              start <= end.start("boundary") < stop for start, stop in protected))
+        anchor = m.start() - lo
+        before = max((end for start, end in boundaries if end <= anchor), default=0)
+        after = min((start for start, end in boundaries if start >= anchor), default=len(original_window))
+        hi, lo = lo + after, lo + before
+
+        # A list such as "55%, 45%, and 35% of revenue" shares its subject and
+        # denominator. A different percentage assertion cannot lend either one.
+        percentages = list(_CONC_PCT.finditer(low, lo, hi))
+        index = next(i for i, pct_match in enumerate(percentages) if pct_match.start() == m.start())
+        first = last = index
+        while first > 0 and re.fullmatch(r"[\s,]*(?:(?:and|or)\s*)?",
+                                        low[percentages[first - 1].end():percentages[first].start()]):
+            first -= 1
+        while last + 1 < len(percentages) and re.fullmatch(r"[\s,]*(?:(?:and|or)\s*)?",
+                                                          low[percentages[last].end():percentages[last + 1].start()]):
+            last += 1
+        if first > 0:
+            lo = percentages[first - 1].end()
+        if last + 1 < len(percentages):
+            hi = percentages[last + 1].start()
+        group_start, group_end = percentages[first].start(), percentages[last].end()
+        # Carry a subject across a conjunction only when the next predicate is
+        # explicitly shared. A nominal or unresolved prefix starts its own clause.
+        prefix = low[lo:group_start]
+        original_prefix = tenk_text[lo:group_start]
+        # Qualifiers can overlap: "our largest" must not hide the longer
+        # "largest customer" ending immediately before a company name.
+        subjects = []
+        for offset in range(len(prefix)):
+            for kind, pattern in (("customer", _CONC_SINGLE_CUSTOMER), ("program", _CONC_SINGLE_PROGRAM)):
+                subject = pattern.match(original_prefix, offset)
+                if subject:
+                    subjects.append((subject.end(), kind))
+        subject_ends = [end for end, kind in subjects]
+        named_subjects = [name.span() for name in _CONC_ENTITY_NAME.finditer(original_prefix)
+                          if any(end <= name.start()
+                                 and not original_prefix[end:name.start()].strip(" ,")
+                                 for end in subject_ends)]
+        joins = []
+        ambiguous_prefix = False
+        for join in re.finditer(r"\b(?:and|but|while|whereas)\b", prefix):
+            if any(start <= join.start() < end for start, end in named_subjects):
+                continue
+            remainder = prefix[join.end():]
+            predicates = list(_CONC_SHARE_PREDICATE.finditer(remainder))
+            predicate = predicates[-1] if predicates else None
+            modifiers = remainder[:predicate.start()].strip() if predicate else None
+            original_modifiers = (original_prefix[join.end():join.end() + predicate.start()].strip()
+                                  if predicate else None)
+            relation = _CONC_CUSTOMER_RELATION.match(modifiers) if modifiers else None
+            antecedent = max((subject for subject in subjects if subject[0] <= join.start()),
+                             key=lambda subject: subject[0], default=(0, None))[1]
+            if (relation and antecedent == "customer"
+                    and _CONC_SHARED_MODIFIERS.fullmatch(modifiers[relation.end():].strip())):
+                continue
+            if (modifiers is not None and _CONC_SHARED_MODIFIERS.fullmatch(modifiers)
+                    and not (original_modifiers and original_modifiers[0].isupper())):
+                continue
+            if (modifiers and original_modifiers and antecedent is not None
+                    and (re.match(r"(?:its|their)\b", modifiers)
+                         or (not original_modifiers[0].isupper()
+                             and not re.match(r"(?:a|an|the|our|another|these|those)\b", modifiers)))):
+                ambiguous_prefix = True
+            # This also handles percentage-led clauses. Numeric lists already
+            # share a group_start, so their internal joins never land here.
+            joins.append(join)
+        if joins:
+            lo += joins[-1].end()
         window = low[lo:hi]
-        if not _CONC_REVENUE_TERM.search(window):
+        # Revenue must be the percentage's denominator or the subject of a share
+        # assertion. A revenue mention elsewhere in the statement is insufficient.
+        denominator = re.match(
+            r"\s*(?:,\s*respectively\s*,)?\s*of\s*"
+            r"(?:(?:the|our|its|total|consolidated|net|combined|overall|company|group|"
+            r"all|annual|global|worldwide|\d{4})\s+)*",
+            low[group_end:hi])
+        revenue_after = (denominator is not None and re.match(
+            r"(?:revenues?|(?:(?:net|product)\s+)?sales|(?:accounts\s+)?receivables?)\b",
+            low[group_end + denominator.end():hi]) is not None)
+        revenue_before = any(re.fullmatch(
+            r"\s*(?:share\s*)?(?:(?:from|with|to)\s+[^,;.!?]+?\s+)?"
+            r"(?:was|were|represented|accounted for|constituted|comprised|totaled)\s*"
+            r"(?:(?:approximately|about|nearly|over|under|more than|less than)\s*)?",
+            low[term.end():group_start]) for term in _CONC_REVENUE_TERM.finditer(low, lo, group_start))
+        if not revenue_after and not revenue_before:
             continue
-        # v0.3.1 #7, SEGMENT-disclosure guard. If THIS percentage is "X% of [<segment/division/
-        # branch/region/subsidiary> ...] revenue" (a segment/geography breakdown), it is NOT
-        # customer/program concentration, skip it entirely so DSGR's "100% of [Canada Branch
-        # Division] revenue" never mis-sets top_customer_pct. Anchor the segment match to the text
-        # starting AT the percent (the "% of ... revenue" tail) so a nearby unrelated segment word
-        # elsewhere in the window does not suppress a genuine customer percentage.
-        tail = low[m.start():hi]
-        if _CONC_SEGMENT_CTX.search(tail):
+        # Bind a segment denominator to this percentage and clause, so an unrelated
+        # segment word cannot suppress a genuine customer concentration percentage.
+        # Keep the denominator inside its clause while retaining abbreviation/name dots.
+        # An explicit aggregate denominator takes priority over a dotted-name interpretation.
+        tail_start = percentages[last].end() - 1
+        original_tail = tenk_text[tail_start:hi]
+        protected = [span.span() for span in _CONC_NAME_DOTS.finditer(original_tail)]
+        boundary = next((punct.start() for punct in _CONC_CLAUSE_END.finditer(original_tail)
+                         if not any(start <= punct.start() < end for start, end in protected)),
+                        len(original_tail))
+        aggregate_end = _CONC_AGGREGATE_END.match(original_tail)
+        if aggregate_end and (aggregate_end.group("aggregate") or not any(
+                start <= aggregate_end.start("boundary") < stop for start, stop in protected)):
+            boundary = min(boundary, aggregate_end.start("boundary"))
+        tail_end = tail_start + boundary
+        tail = low[tail_start:tail_end]
+        if _CONC_SEGMENT_CTX.match(tail):
             continue
-        # v0.3.1 #7 (cont.), POSSESSIVE proper-noun segment guard, on ORIGINAL-CASE tail (capitalization
-        # is the discriminator). "X% of Lawson’s revenue" / "X% of [Segment]’s revenue" is a segment
-        # breakdown, not customer concentration, skip so an unrelated "largest customer" sentence in
-        # the window can't bind this segment percentage to the customer class (the DSGR 92% re-kill).
-        orig_tail = tenk_text[m.start():hi]
-        if _CONC_SEGMENT_POSSESSIVE.search(orig_tail):
+        # Capitalized possessive denominators identify segment revenue; an unrelated
+        # customer sentence cannot reclassify the segment's percentage.
+        orig_tail = tenk_text[tail_start:tail_end]
+        if _CONC_SEGMENT_POSSESSIVE.match(orig_tail):
             continue
-        # v0.3.1 #7 (cont.), DIVERSIFICATION guard. "the top 20 customers represented ~83%" is a
-        # diversified base (the opposite of single-counterparty risk). If a plural "top N customers"
-        # phrase sits in the window AND it is NEARER the percent than any single-customer phrase,
-        # this percentage is a diversification disclosure, not a kill, skip it. (Nearness so a
-        # genuine single-customer percentage elsewhere is not suppressed by an unrelated diverse one.)
+        # A plural customer-group phrase nearer than any single-customer phrase
+        # identifies diversification. Keep unrelated single-customer evidence intact.
         _div_d = _nearest_dist(_CONC_DIVERSIFIED_CUSTOMERS, window, m.start() - lo)
         if _div_d is not None:
             _sc_d = _nearest_dist(_CONC_SINGLE_CUSTOMER, window, m.start() - lo)
             if _sc_d is None or _div_d <= _sc_d:
                 continue
+        ambiguous_clause = ambiguous_clause or ambiguous_prefix
         anchor = m.start() - lo  # pct position relative to window start
         cust_d = _nearest_dist(_CONC_SINGLE_CUSTOMER, window, anchor)
         prog_d = _nearest_dist(_CONC_SINGLE_PROGRAM, window, anchor)
@@ -485,6 +584,8 @@ def _extract_concentration(tenk_text: str) -> tuple[float | None, float | None, 
         parts.append(f"top_customer={top_customer:.0f}% [{cust_ctx}]")
     if top_program is not None:
         parts.append(f"top_program={top_program:.0f}% [{prog_ctx}]")
+    if ambiguous_clause:
+        parts.append("ambiguous_concentration_clause: prior subject not inherited")
     detail = " ; ".join(parts) if parts else None
     return top_customer, top_program, detail
 
@@ -535,14 +636,13 @@ def _trajectory_fields(rev_series: list, norm_base_series: list, ni_series: list
       prior normalization-base values.
     - contamination_ratio (float|None): latest normalization-base / 5yr-avg of the base.
     - fundamental_decline_flag (bool): rev_slope_sign<0 AND 0<contamination_ratio<1.0 AND
-      latest_below_avg. The melting-ice-cube / lumpy-OCF value-trap veto (SIGA contamination ~0.68).
+      latest_below_avg. This veto requires a positive normalization base.
       A1: the 0< lower bound rejects a degenerate NEGATIVE base so the veto can't fire trivially.
     - peak_contamination_flag (bool): 0<contamination_ratio<0.8 AND latest_below_avg AND
       latest_net_income<0. P-A — the V-shape value-trap catch (trough->peak->rollover) that
       fundamental_decline_flag MISSES because that flag is gated on rev_slope_sign<0. On a V-shape
       the whole-window slope is +1 (so fundamental_decline_flag stays False), but the normalization
-      base is past-peak-contaminated AND the company is now loss-making — a clean mechanical BUY that
-      is actually a melting ice cube (NRP: contamination=0.7445, latest_below_avg, NI=-84.8M).
+      base is past-peak-contaminated and current net income is negative.
       Computed INDEPENDENT of rev_slope_sign. Requires latest_net_income passed in via ni_series.
 
     `norm_base_series` is the series the valuation layer normalizes on (OCF/FCF); revenue is the
@@ -559,11 +659,8 @@ def _trajectory_fields(rev_series: list, norm_base_series: list, ni_series: list
         "peak_contamination_flag": False,
     }
 
-    # RECENT-window trajectory. The raw multiyear series can be contaminated at the FRONT by
-    # sub-annual stubs / mislabeled fiscal years (e.g. SIGA's 9-month 8.1M stub + a duplicate-year
-    # tag), whose ancient ramp inverts the all-time least-squares slope to +1 even when the company
-    # is currently rolling over. Annualize, then slope over the trailing <=5 years so the veto
-    # measures CURRENT trajectory rather than an ancient scale-up.
+    # Use at most five annual revenue observations so old stubs and duplicate years
+    # cannot dominate the recent trajectory.
     rev_window = _annual_vals(rev_series)[-5:]
     # Revenue slope sign via least-squares slope over index 0..n-1 of the recent window.
     if len(rev_window) >= 2:
@@ -598,25 +695,16 @@ def _trajectory_fields(rev_series: list, norm_base_series: list, ni_series: list
             out["contamination_ratio"] = round(latest / avg5, 4)
 
     cr = out["contamination_ratio"]
-    # A1: degenerate-base guard. The contamination test "latest base well below a POSITIVE 5yr
-    # avg" is only meaningful for a POSITIVE normalization base. A NEGATIVE contamination_ratio
-    # arises when the 5yr-avg base is negative (negative FCF/OCF normalization base), then
-    # cr<1.0 / cr<0.8 pass TRIVIALLY for any negative number and the veto fires on garbage
-    # (BWIN fired at cr=-2.4618). Require 0 < cr on BOTH flags so a negative/degenerate base can
-    # never trip the veto. (cr==0 is likewise excluded: a zero latest base is not a meaningful
-    # contamination signal.)
+    # Both trajectory flags require a positive contamination ratio. A negative or
+    # zero base does not satisfy these positive-base comparisons.
     out["fundamental_decline_flag"] = bool(
         out["rev_slope_sign"] < 0
         and cr is not None and 0 < cr < 1.0
         and out["latest_below_avg"]
     )
 
-    # P-A: peak_contamination_flag, independent of rev_slope_sign. Catches the V-shape value
-    # trap (trough->peak->rollover) where the all-window slope is +1 so fundamental_decline_flag
-    # never fires, yet the normalization base is past-peak-contaminated (<0.8) AND the company is
-    # currently loss-making. NRP: cr=0.7445, latest_below_avg=True, NI=-84.8M -> True while its
-    # rev_slope_sign=+1 keeps fundamental_decline_flag=False.
-    # A1: same 0 < cr lower bound as fundamental_decline_flag, a negative cr must not trip it.
+    # Peak contamination is independent of revenue slope. Current losses can coexist
+    # with a positive whole-window slope after a peak.
     latest_ni = None
     if ni_series:
         for s in reversed(ni_series):
@@ -663,12 +751,10 @@ def _normalization_masks_current_loss(
     latest_fcf: float | None,
     contamination_ratio: float | None,
 ) -> bool:
-    """v0.3.1 #1 — the degenerate-base / divested-stub catch (the TUSK hole).
+    """Detect a positive trailing average that masks current cash burn.
 
-    When contamination_ratio<0 (or the latest base is negative), the A1 (0<cr) guard silences BOTH
-    cyclical vetoes, yet the trailing average still yields a POSITIVE normalized_fcf -> a phantom
-    positive MoS (TUSK: latest_ocf=-18.6M, latest_fcf=-89.1M, EBITDA=-29.7M, but normalized_fcf>0
-    -> +55.1% mechanical BUY only the human caught).
+    A negative contamination ratio lies outside the positive-base cyclical vetoes;
+    current cash losses still need their own eligibility check.
 
     Returns True when the trailing average is masking CURRENT cash burn / a divested-segment stub:
         normalized_fcf > 0
@@ -697,12 +783,10 @@ def distress_core4(
 ) -> dict:
     """CORE-4 point-in-time fundamental DISTRESS rank — the de-risk layer's blowup predictor.
 
-    Out-of-sample-validated (docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md): over a 25-cell
-    survivorship-safe PIT panel (non-financial operating companies, n=412, 55 forward-12mo blowups
-    <-40%), the count of these four mechanism-grounded distress flags concentrates blowups far above
-    base rate — at the kill cutoff (score>=3): precision 35.4% vs 13.3% base (lift 2.65x), recall 62%;
-    ticker-cluster bootstrap 95% CI on the top-quintile lift = [1.73, 3.00], P(lift<=1)=0 over 5000
-    resamples. The cliff is sharp: score 0-2 ~5-9% blowup, score 3 = 25%, score 4 = 41.7%.
+    This four-flag policy score ranges from zero to four. Historical predictive
+    figures are not current validation: the shipped analysis ranks within years,
+    does not implement logistic refitting, and requires a new occurrence-correct
+    bootstrap run on the preserved private dataset.
 
     Each flag is from PIT fundamentals ONLY (no forward / price info), grounded in distress theory:
       * neg_ocf       — operating cash flow < 0

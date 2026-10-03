@@ -9,8 +9,16 @@ cheap_pass.py — Stage 0 机械体检 + kill-flag 扫描(无定性叙事)
 kill-flag(成簇出现≈几乎必暴雷):going concern / material weakness / 重述 /
   death-spiral 可转债(variable conversion) / 审计师更换 / 反向拆股。
 
-用法: python cheap_pass.py --universe universe_<slug>_<date>.csv
-输出: reports/smallcap/cheappass_<slug>_<date>.csv
+Private path setup:
+    Initialize a versioned PRIVATE companion with SMALL_CAP_DEEPDIVE_CONFIG_DIR.
+    Set REPORTS_ROOT to the absolute path returned by _common.reports_dir():
+        python -c "import sys; sys.path.insert(0, 'tools'); from _common import reports_dir; print(reports_dir())"
+    The resolver includes SMALLCAP_RUN when set and fails if initialization is missing.
+
+Usage (REPORTS_ROOT is the resolved absolute private path):
+    python tools/cheap_pass.py --universe "${REPORTS_ROOT}/universe_synthetic_2000-01-01.csv" --out-slug synthetic
+Output: _common.reports_dir()/cheappass_synthetic_<date>.csv, with its stage receipt.
+The universe and its receipt remain in the versioned private companion.
 """
 from __future__ import annotations
 import argparse
@@ -36,11 +44,14 @@ from _common import (
 # the same deterministic extractor on that text to surface the kill-flag BEFORE the expensive
 # deepdive, rather than duplicating the regex contract here.
 from deepdive_data import _extract_concentration, _concentration_flag
+from _filing_disclosures import scan_disclosures
+from filter_by_sic import (stage_completion, stage_work, read_stage_receipt,
+                           write_stage_receipt, prepare_stage_output)
 
 FACTS = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json"
 
-# kill-flag 短语:在最新 10-K 全文里出现即为真信号(edgartools 读全文,非全市场计数)。
-# 注意:SEC FTS 的 cik 参数过滤不可靠(实测健康公司也返回上限),故必须读单家全文判定。
+# Going-concern and material-weakness entries use local statement evidence.
+# The remaining legacy phrase flags are lexical indicators, not semantic findings.
 KILL_PHRASES = {
     "going_concern": "going concern",
     "substantial_doubt": "substantial doubt",       # 比 going concern 更特异
@@ -130,12 +141,11 @@ def _extract_business_blurb(txt: str, max_chars: int = 2000,
 
 
 def killflag_scan(ticker: str) -> dict:
-    """读最新年报全文,判定各 kill-flag 短语是否真实出现。
-    going_concern + substantial_doubt 同时命中 = 强信号(真持续经营疑虑)。
+    """Read the latest annual filing and retain disclosure evidence with its polarity.
 
-    material_weakness: requires affirmative ICFR finding (identified/not-effective),
-    not bare risk-factor boilerplate ("our failure to maintain effective controls...").
-    This prevents the 4/4 false-positive pattern seen in the audit run.
+    Going-concern and material-weakness flags distinguish current assertions,
+    explicit negatives and completed remediation. Unsupported or conditional
+    statements yield None and disclosure_review_required, with original spans.
 
     Also extracts business_blurb (Item 1 first ~2000 chars) for theme-fit gate reuse,
     avoiding redundant WebSearch in theme-fit-gate.js.
@@ -144,10 +154,12 @@ def killflag_scan(ticker: str) -> dict:
     If get_filings(form="10-K", amendments=False) returns no results, falls back to
     20-F then 40-F. Foreign-domiciled filers (shipping, some industrials/mining) file
     20-F/40-F; going-concern and material-weakness language is structurally similar.
-    The same kill-flag phrases and business_blurb extraction are reused unchanged.
+    The same disclosure rules and business_blurb extraction apply to each form.
     Sets out["filing_form"] to the form type that was actually read.
     """
     out = {f"kf_{k}": 0 for k in KILL_PHRASES}
+    out.update(kf_going_concern=None, kf_substantial_doubt=None, kf_material_weakness=None,
+               disclosure_evidence={}, disclosure_review_required=True)
     out["kf_scanned"] = False
     out["business_blurb"] = ""
     out["filing_form"] = None
@@ -181,21 +193,20 @@ def killflag_scan(ticker: str) -> dict:
             return out
         out["filing_form"] = form_used
         txt = f.text() if hasattr(f, "text") else str(f.obj())
+        if not isinstance(txt, str) or not txt.strip():
+            out["error"] = "Annual filing text is unavailable"
+            return out
         low = txt.lower()
+        evidence = scan_disclosures(txt)
+        out["disclosure_evidence"] = evidence
+        out["disclosure_review_required"] = any(row["flag"] is None for row in evidence.values())
         for name, phrase in KILL_PHRASES.items():
-            if name == "material_weakness":
-                # Affirmative-finding rule: "material weakness" must co-occur with
-                # an affirmative finding phrase to fire the flag.
-                # Risk-factor boilerplate alone ("if we fail to maintain...") does NOT count.
-                _mw_affirmative = (
-                    "identified a material weakness" in low
-                    or "identified material weakness" in low
-                    or "were not effective" in low
-                    or "was not effective" in low
-                )
-                out["kf_material_weakness"] = 1 if (phrase in low and _mw_affirmative) else 0
+            topic = "going_concern" if name == "substantial_doubt" else name
+            if topic in evidence:
+                flag = evidence[topic]["flag"]
+                out[f"kf_{name}"] = None if flag is None else int(flag)
             else:
-                out[f"kf_{name}"] = 1 if phrase in low else 0
+                out[f"kf_{name}"] = int(phrase in low)
         out["kf_scanned"] = True
         # Extract business blurb for theme-fit gate, form-aware (C fix):
         # 20-F/40-F: Item 4 "Information on the Company"; 10-K: Item 1 "Business"
@@ -209,6 +220,8 @@ def killflag_scan(ticker: str) -> dict:
         out["top_program_pct"] = _tp
         out["concentration_flag"] = _concentration_flag(_tc, _tp)
         out["concentration_detail"] = _cd
+        if _cd and "ambiguous_concentration_clause" in _cd:
+            out["disclosure_review_required"] = True
     except Exception as e:
         print(f"  [warn] killflag {ticker}: {e}", file=sys.stderr)
     return out
@@ -234,7 +247,9 @@ def latest_val(series: list):
 
 def health_check(row) -> dict:
     """单公司机械体检:runway / 现金流质量 / 稀释 / kill-flag。"""
-    cik = str(row["cik"])
+    cik = str(row.get("cik", "")).strip()
+    if not re.fullmatch(r"[0-9]{1,10}", cik) or int(cik) == 0:
+        raise ValueError("Valid SEC issuer identity required before financial screening")
     out = {"ticker": row["ticker"], "name": row["name"], "mktcap": row.get("mktcap")}
 
     # --- 财务硬数据(XBRL) ---
@@ -257,9 +272,9 @@ def health_check(row) -> dict:
     burn = None
     if ocf:
         recent_ocf = ocf[-1]["val"]
-        if recent_ocf < 0 and cash:
+        if recent_ocf < 0 and cash is not None:
             burn = cash / (abs(recent_ocf))  # 单位=该 OCF 期数(粗略,多为年度)
-    out["runway_periods"] = round(burn, 1) if burn else None
+    out["runway_periods"] = round(burn, 1) if burn is not None else None
 
     # 现金流质量:净利>0 但 OCF<0 = 红旗
     out["flag_ocf_ni_divergence"] = (
@@ -275,7 +290,7 @@ def health_check(row) -> dict:
     going = 1 if has_going_concern else 0
     out["killflag_count"] = (
         going
-        + flags.get("kf_material_weakness", 0)
+        + (flags.get("kf_material_weakness") or 0)
         + flags.get("kf_death_spiral", 0)
         + flags.get("kf_reverse_split", 0)
     )
@@ -286,9 +301,27 @@ def health_check(row) -> dict:
 def score(df: pd.DataFrame) -> pd.DataFrame:
     """0-100 体检分 + 淘汰判定。"""
     df = df.copy()
+    if len(df) == 0:
+        numeric = ("mktcap", "cash", "net_income", "ocf_latest", "revenue",
+                   "runway_periods", "killflag_count", "health_score",
+                   "top_customer_pct", "top_program_pct")
+        boolean = ("flag_ocf_ni_divergence", "kf_scanned", "disclosure_review_required",
+                   "reject_going_concern", "reject_killflags", "reject_burn",
+                   "reject_concentration", "rejected", "health_score_complete")
+        for col in numeric:
+            df[col] = pd.Series(dtype="float64")
+        for col in boolean:
+            df[col] = pd.Series(dtype="bool")
+        for col in ("ticker", "name", "concentration_flag", "concentration_detail",
+                    "business_blurb", "filing_form", "disclosure_evidence"):
+            df[col] = pd.Series(dtype="object")
+        for key in KILL_PHRASES:
+            df[f"kf_{key}"] = pd.Series(dtype="float64")
+        return df
     # 淘汰规则(kill-flag 计数已收紧,going concern 需双命中才计1)
-    df["reject_going_concern"] = (df.get("kf_going_concern", 0).fillna(0).astype(bool)
-                                  & df.get("kf_substantial_doubt", 0).fillna(0).astype(bool))
+    zero = pd.Series(0, index=df.index)
+    df["reject_going_concern"] = (df.get("kf_going_concern", zero).fillna(0).astype(bool)
+                                  & df.get("kf_substantial_doubt", zero).fillna(0).astype(bool))
     df["reject_killflags"] = df["killflag_count"] >= 2
     # I4: use OCF (cash burn), not GAAP net_income, for burn rejection.
     # net_income < 0 conflates non-cash GAAP losses (impairments, write-offs) with cash distress.
@@ -298,7 +331,7 @@ def score(df: pd.DataFrame) -> pd.DataFrame:
                         (df["ocf_latest"].fillna(0) < 0)
     # P3, concentration kill-flag is a hard reject at the cheap-pass stage.
     # concentration_flag=="kill" (>60% single-program OR >40% single-customer) is a
-    # BUY-blocking pathology (SIGA ~90% BARDA dependence); reject before deepdive.
+    # BUY-blocking concentration; reject before deepdive.
     # "watch" does NOT reject here, it flows through to the deepdive/rubric WATCH-cap.
     if "concentration_flag" in df.columns:
         df["reject_concentration"] = df["concentration_flag"].fillna("") == "kill"
@@ -313,6 +346,11 @@ def score(df: pd.DataFrame) -> pd.DataFrame:
     s -= (df["revenue"].fillna(0) <= 0).astype(int) * 25
     s -= (df["runway_periods"].fillna(99) < 2).astype(int) * 20
     df["health_score"] = s.clip(0, 100)
+    # The numeric score summarizes observed flags. Unknown disclosure evidence
+    # remains eligible for further investigation, but cannot be labeled complete.
+    unresolved = df.get("disclosure_review_required", pd.Series(True, index=df.index))
+    scanned = df.get("kf_scanned", pd.Series(False, index=df.index))
+    df["health_score_complete"] = scanned.fillna(False).astype(bool) & ~unresolved.fillna(True).astype(bool)
     return df
 
 
@@ -423,41 +461,21 @@ def _selftest():
     else:
         print("  STNG blurb: empty (acceptable — theme-fit gate will fall back to WebSearch)")
 
-    # Test 7: I4, reject_burn uses OCF not net_income (MATW-like scenario)
-    # A company with positive OCF but negative GAAP net income must NOT be rejected by reject_burn.
-    # runway_periods < 1.0 is a required condition; simulate it with low cash relative to OCF.
-    # But with positive OCF, runway_periods would be None (OCF >= 0 → no burn).
-    # Key scenario: company has negative net_income, POSITIVE ocf_latest → runway=None → no burn reject.
-    _test_data_positive_ocf = pd.DataFrame([{
-        "ticker": "FAKE_MATW",
-        "name": "Fake Matthews-like",
-        "mktcap": 840_000_000,
-        "cash": 50_000_000,
-        "net_income": -100_000_000,  # negative GAAP (impairment-driven)
-        "ocf_latest": 80_000_000,    # positive OCF = NOT burning cash
-        "revenue": 1_800_000_000,
-        "runway_periods": None,      # runway=None because OCF>0 (no burn by construction)
-        "flag_ocf_ni_divergence": True,
-        "killflag_count": 0,
-        "kf_going_concern": 0,
-        "kf_substantial_doubt": 0,
-        "kf_material_weakness": 0,
-        "kf_death_spiral": 0,
-        "kf_reverse_split": 0,
-        "kf_scanned": True,
-        "business_blurb": "Memorialization products and brand management.",
-    }])
+    # Generated positive-OCF case with a non-cash net loss must survive burn screening.
+    from make_fixtures import source34_scenarios
+    _cases = source34_scenarios()
+    _test_data_positive_ocf = pd.DataFrame([_cases["positive_ocf"]])
     _scored = score(_test_data_positive_ocf)
     assert not _scored["reject_burn"].iloc[0], (
-        f"I4: MATW-like company with positive OCF must NOT be rejected by reject_burn "
+        f"I4: generated positive-OCF company with positive OCF must NOT be rejected by reject_burn "
         f"(runway_periods=None so no burn condition). "
         f"reject_burn={_scored['reject_burn'].iloc[0]}"
     )
     assert not _scored["rejected"].iloc[0], (
-        f"I4: MATW-like company must survive cheap_pass (no kill-flags, positive OCF). "
+        f"I4: generated positive-OCF company must survive cheap_pass (no kill-flags, positive OCF). "
         f"rejected={_scored['rejected'].iloc[0]}"
     )
-    print("  I4 reject_burn (OCF not net_income): MATW-like company with positive OCF survives  OK")
+    print("  I4 reject_burn (OCF not net_income): generated positive-OCF company with positive OCF survives  OK")
 
     # Also verify the burn logic fires when OCF is negative (real cash-burn scenario):
     _test_data_negative_ocf = pd.DataFrame([{
@@ -496,20 +514,9 @@ def _selftest():
     assert _concentration_flag(None, None) is None, "no concentration data must be None"
     print("  P3 _concentration_flag contract (kill>60prog/>40cust, watch 40-60): OK")
 
-    # Test 9: P3, score() rejects a concentration_flag=="kill" row at the cheap-pass stage,
-    # and does NOT reject "watch"/None/missing (those flow through to the deepdive WATCH-cap).
-    # Build a row that is otherwise perfectly clean (no kill-flags, positive OCF) so the ONLY
-    # difference is the concentration flag. This is the SIGA ~90%-BARDA scenario.
+    # Vary only the concentration label in an otherwise clean generated company.
     def _clean_conc_row(ticker, conc_flag):
-        return {
-            "ticker": ticker, "name": f"Conc {ticker}", "mktcap": 5e8,
-            "cash": 5e7, "net_income": 1e7, "ocf_latest": 2e7, "revenue": 1e8,
-            "runway_periods": None, "flag_ocf_ni_divergence": False,
-            "killflag_count": 0, "kf_going_concern": 0, "kf_substantial_doubt": 0,
-            "kf_material_weakness": 0, "kf_death_spiral": 0, "kf_reverse_split": 0,
-            "kf_scanned": True, "business_blurb": "Single-program drug maker.",
-            "concentration_flag": conc_flag,
-        }
+        return dict(_cases["concentration_base"], ticker=ticker, concentration_flag=conc_flag)
     _conc_df = pd.DataFrame([
         _clean_conc_row("FAKE_KILL", "kill"),
         _clean_conc_row("FAKE_WATCH", "watch"),
@@ -519,7 +526,7 @@ def _selftest():
     assert _conc_scored.loc["FAKE_KILL", "reject_concentration"], (
         "P3: concentration_flag=='kill' must set reject_concentration=True")
     assert _conc_scored.loc["FAKE_KILL", "rejected"], (
-        "P3: a clean company with concentration 'kill' must be REJECTED before deepdive (SIGA case)")
+        "P3: a clean company with concentration 'kill' must be REJECTED before deepdive (generated concentration case)")
     assert not _conc_scored.loc["FAKE_WATCH", "reject_concentration"], (
         "P3: 'watch' concentration must NOT reject at cheap_pass (flows to WATCH-cap)")
     assert not _conc_scored.loc["FAKE_WATCH", "rejected"], (
@@ -586,43 +593,39 @@ def _selftest():
         "P5: a 0.5B reconstructed mktcap must band 'deep' (in-scope, flows to deepdive)")
     print("  P5 SEC-shares x price reconstruction leg (yfinance-null -> in-scope 'deep'): OK")
 
-    # Test 13: P12, a row with yfinance mktcap=None but a RESOLVABLE SEC shares x price
-    # must be reconstructed INSIDE resolve_ceiling, land in a real band, and NOT be
-    # size-excluded. This is the SJW/HI/MRC bug: yfinance returns NaN for a real small-cap,
-    # the row used to be discarded before reaching cheap_pass. resolve_ceiling must run the
-    # SEC reconstruction BEFORE the size-exclusion. shares_fn is injected (network-free):
-    #   SJWX: 30M shares x $50 = $1.5B  -> 'deep'  (in-scope; the SJW fix)
-    #   BIGX: 200M shares x $50 = $10B  -> 'large' (correctly excluded AFTER reconstruction)
+    # A generated missing-cap company resolves before size exclusion.
+    _cap = _cases["market_cap"]
+    _p12_ticker = _cap["ticker"]
     _p12_df = pd.DataFrame([
-        {"ticker": "SJWX", "name": "SJW-like", "cik": "766829", "mktcap": None,
-         "price": 50.0, "smallcap_candidate": True},
-        {"ticker": "BIGX", "name": "Big-after-recon", "cik": "111", "mktcap": None,
-         "price": 50.0, "smallcap_candidate": True},
+        {"ticker": _p12_ticker, "name": _cap["name"], "cik": _cap["cik"], "mktcap": None,
+         "price": _cap["price"], "smallcap_candidate": True},
+        {"ticker": "BIGX", "name": "AcmeCorp Synthetic Oversize", "cik": _cap["large_cik"],
+         "mktcap": None, "price": _cap["large_price"], "smallcap_candidate": True},
     ])
-    _shares = {"766829": 30_000_000, "111": 200_000_000}
+    _shares = {_cap["cik"]: _cap["shares"], _cap["large_cik"]: _cap["large_shares"]}
     _p12_kept = resolve_ceiling(
         _p12_df, max_mcap=2e9, watch_max=5e9,
         shares_fn=lambda c: _shares.get(str(c).strip().lstrip("0")),
     ).set_index("ticker")
-    assert "SJWX" in _p12_kept.index, (
+    assert _p12_ticker in _p12_kept.index, (
         "P12: a yfinance-NaN row with resolvable SEC shares x price must NOT be size-excluded "
-        "(the SJW bug — real name dropped before reaching cheap_pass)")
-    assert _p12_kept.loc["SJWX", "mktcap"] == 1.5e9, (
-        f"P12: SJWX mktcap must reconstruct to 30M x $50 = $1.5B, "
-        f"got {_p12_kept.loc['SJWX','mktcap']}")
-    assert _p12_kept.loc["SJWX", "mktcap_source"] == "sec_shares_x_price", (
-        f"P12: SJWX must be sourced via SEC shares x price, "
-        f"got {_p12_kept.loc['SJWX','mktcap_source']!r}")
-    assert _p12_kept.loc["SJWX", "band"] == "deep", (
-        f"P12: reconstructed $1.5B must band 'deep' (in-scope, NOT 'unknown'), "
-        f"got {_p12_kept.loc['SJWX','band']!r}")
+        "(resolved market cap must reach cheap_pass)")
+    assert _p12_kept.loc[_p12_ticker, "mktcap"] == _cap["value"], (
+        f"P12: generated market cap must equal shares times price, "
+        f"got {_p12_kept.loc[_p12_ticker,'mktcap']}")
+    assert _p12_kept.loc[_p12_ticker, "mktcap_source"] == "sec_shares_x_price", (
+        f"P12: generated market cap must use SEC shares times price, "
+        f"got {_p12_kept.loc[_p12_ticker,'mktcap_source']!r}")
+    assert _p12_kept.loc[_p12_ticker, "band"] == "deep", (
+        f"P12: generated in-band reconstruction must band 'deep' (in-scope, NOT 'unknown'), "
+        f"got {_p12_kept.loc[_p12_ticker,'band']!r}")
     # BIGX: the SEC reconstruction fires FIRST, THEN the >watch_max exclusion bites ,
     # confirming resolution strictly precedes size-exclusion (not the reverse).
     assert "BIGX" not in _p12_kept.index, (
         "P12: a reconstructed mktcap that is genuinely 'large' is excluded AFTER resolution "
         "(resolve-then-size-exclude ordering)")
     print("  P12 SEC shares x price fires BEFORE size-exclusion "
-          "(yfinance-NaN SJW kept as 'deep'; oversize excluded after reconstruction): OK")
+          "(missing-cap case kept as 'deep'; oversize excluded after reconstruction): OK")
 
     print("cheap_pass selftest PASS (IQST going-concern + KOP amendment exclusion + EGAN MW FP fix + business_blurb + KOP MW=0 + STNG 20-F form-aware blurb + I4 reject_burn OCF fix + P3 concentration kill-reject + P5 ceiling resolution/unknown flow-through + P12 SEC shares x price before size-exclusion)")
 
@@ -636,13 +639,11 @@ def resolve_ceiling(cand: pd.DataFrame, max_mcap: float,
     null/non-positive (yfinance -> SEC companyfacts shares x price), then tag a band via
     band_for. Only the "large" band (> watch_band_max) is excluded as out-of-scope. The
     "deep", "watch", AND "unknown" bands FLOW THROUGH into the body health check — a null
-    mktcap is NEVER a silent drop (the v0.2.0 bug that discarded 91-100% of some themes).
+    mktcap remains explicit as unknown when resolution is unavailable.
 
-    P12 — the SEC shares x price reconstruction is run HERE, BEFORE the size-exclusion,
-    so a real name whose yfinance mktcap came back NaN (SJW, HI, MRC) but whose SEC
-    shares x price IS resolvable gets a real band and is NOT excluded. The resolve step
-    strictly precedes the `band != "large"` filter — never the reverse. shares_fn is
-    injectable so the selftest can prove this leg without a network call.
+    SEC shares times price reconstruction precedes the size filter. An eligible
+    reconstruction receives its resolved band before exclusion; unresolved rows
+    continue with the unknown band. shares_fn permits isolated acquisition controls.
 
     Sets/overwrites these columns on the returned frame:
       - mktcap         (resolved, may stay None for unknown)
@@ -688,7 +689,10 @@ def main():
     ap.add_argument("--max-mcap", type=float, default=CFG["market_cap_max"])
     ap.add_argument("--limit", type=int, default=0, help="只测前N家(调试用)")
     ap.add_argument("--out-slug", default="", help="输出文件名 slug(多主题区分)")
-    ap.add_argument("--selftest", action="store_true", help="Run selftest")
+    ap.add_argument(
+        "--selftest", action="store_true",
+        help="Run legacy checks using live SEC filings; requires configured EDGAR access",
+    )
     args = ap.parse_args()
 
     if args.selftest:
@@ -698,56 +702,129 @@ def main():
     if not args.universe:
         ap.error("--universe is required when not using --selftest")
 
-    init_edgar()
+    if args.limit < 0 or not 0 < args.max_mcap < float("inf"):
+        ap.error("--limit must be nonnegative and --max-mcap finite and positive")
     uni_path = Path(args.universe)
-    if uni_path.suffix.lower() == ".json":
-        # Event-mode: --universe is a candidates_event_*.json (list of dicts from discover_events.py)
-        records = json.loads(uni_path.read_text(encoding="utf-8"))
-        if not isinstance(records, list):
-            ap.error(f"--universe JSON must be a list of candidate records, got {type(records)}")
-        # Build DataFrame; supply required columns with defaults if absent
-        uni = pd.DataFrame(records)
-        # Ensure required columns exist
-        if "ticker" not in uni.columns:
-            uni["ticker"] = ""
-        if "cik" not in uni.columns:
-            uni["cik"] = ""
-        if "name" not in uni.columns:
-            uni["name"] = ""
-        if "mktcap" not in uni.columns:
-            uni["mktcap"] = None
-        if "price" not in uni.columns:
-            uni["price"] = None
-        # In event mode, all records are candidates (no smallcap_candidate filter needed).
-        # P5: resolve the ceiling here via the _common fallback, unknown mktcap flows through
-        # (pre-listing spinoffs), only out-of-scope large caps are excluded.
-        cand = resolve_ceiling(uni, args.max_mcap)
-    else:
-        uni = pd.read_csv(args.universe)
-        cand = uni[uni["smallcap_candidate"] == True].copy()
-        if "price" not in cand.columns:
-            cand["price"] = None
-        # P5: resolve the ceiling INSIDE cheap_pass via the _common fallback chain instead of
-        # the old `mktcap <= max_mcap` filter, which silently DROPPED null/NaN mktcap rows
-        # (the v0.2.0 bug). band="unknown" rows now flow through; only "large" is excluded.
-        cand = resolve_ceiling(cand, args.max_mcap)
+    is_json = uni_path.suffix.lower() == ".json"
+    required = {"ticker", "cik", "name"}
+    try:
+        if is_json:
+            records = json.loads(uni_path.read_text(encoding="utf-8"))
+            if not isinstance(records, list) or any(
+                    not isinstance(row, dict) or not required.issubset(row) for row in records):
+                raise ValueError("JSON must be a list of records with ticker, cik and name")
+            uni = pd.DataFrame(records) if records else pd.DataFrame(columns=sorted(required))
+        elif uni_path.suffix.lower() == ".csv":
+            uni = pd.read_csv(uni_path, dtype={"ticker": str, "cik": str, "name": str})
+            if not (required | {"smallcap_candidate"}).issubset(uni.columns):
+                raise ValueError("CSV requires ticker, cik, name and smallcap_candidate columns")
+            if not uni["smallcap_candidate"].isin([True, False]).all():
+                raise ValueError("smallcap_candidate must contain boolean values")
+        else:
+            raise ValueError("--universe must be a JSON or CSV file")
+        for col in required:
+            if any(isinstance(value, bool) or (not pd.isna(value) and not isinstance(value, (str, int)))
+                   for value in uni[col]):
+                raise ValueError(f"invalid {col} value")
+            uni[col] = uni[col].fillna("").astype(str)
+        for col in ("mktcap", "price"):
+            if col not in uni:
+                uni[col] = None
+            uni[col] = pd.to_numeric(uni[col], errors="raise")
+    except (OSError, ValueError, TypeError) as exc:
+        ap.error(f"invalid --universe: {exc}")
+    upstream = read_stage_receipt(uni_path, len(uni))
+    if upstream["status"] == "invalid":
+        ap.error("--universe has an invalid or mismatched completion receipt")
+    event_binding = None
+    if upstream.get("stage") in {"event_spinoffs", "event_insider_clusters"}:
+        from _event_admission import artifact_binding, write_event_admission
+        if Path(REPORTS).resolve() != uni_path.resolve().parent:
+            ap.error("Event screening must write to the discovery run directory")
+        event_binding = artifact_binding(uni_path)
+    cand = uni.copy() if is_json else uni[uni["smallcap_candidate"] == True].copy()
+    # Parsing and structural validation finish before provider initialization.
+    if not cand.empty:
+        init_edgar()
+    cand = resolve_ceiling(cand, args.max_mcap)
+    selected_count = len(cand)
+    eligible_bands = cand["band"].to_dict()
     if args.limit:
         cand = cand.sort_values("mktcap").head(args.limit)
+    decisions = {}
+    for source_index, row in uni.iterrows():
+        input_band = row.get("band")
+        if not isinstance(input_band, str) or not input_band:
+            input_band = "unknown"
+        if not is_json and not row["smallcap_candidate"]:
+            decision = "excluded_existing_candidate_flag"
+        elif source_index not in eligible_bands:
+            decision = "excluded_existing_large_band"
+        elif source_index not in cand.index:
+            decision = "not_processed_limit"
+        else:
+            decision = "pending"
+        decisions[str(source_index)] = {
+            "input_index": int(source_index), "cik": row["cik"], "ticker": row["ticker"],
+            "band": eligible_bands.get(source_index, "large" if
+                decision == "excluded_existing_large_band" else input_band),
+            "screening_decision": decision}
     print(f"对 {len(cand)} 家小盘候选做机械体检...", file=sys.stderr)
 
-    rows = []
-    for i, (_, r) in enumerate(cand.iterrows()):
-        rows.append(health_check(r))
+    rows, work, scored_indices = [], [], []
+    for i, (source_index, r) in enumerate(cand.iterrows()):
+        identity = f"{r['cik']}:{r['ticker']}"
+        try:
+            result = health_check(r)
+        except Exception:
+            item = stage_work("cheap_health", identity, status="unavailable", reason="health_check_failed")
+            decisions[str(source_index)]["screening_decision"] = "unavailable"
+        else:
+            result.update(input_index=int(source_index), cik=str(r["cik"]))
+            rows.append(result)
+            scored_indices.append(source_index)
+            complete = (bool(result.get("kf_scanned"))
+                        and not result.get("disclosure_review_required", True)
+                        and all(pd.notna(result.get(key)) for key in
+                                ("cash", "net_income", "ocf_latest", "revenue")))
+            item = stage_work("cheap_health", identity,
+                              status="complete" if complete else "unavailable",
+                              reason="" if complete else "missing_health_evidence")
+        item["band"] = r.get("band", "unknown")
+        item["input_index"] = int(source_index)
+        decisions[str(source_index)]["evidence_complete"] = item["status"] == "complete"
+        work.append(item)
         if (i + 1) % 10 == 0:
             print(f"  体检 {i+1}/{len(cand)}", file=sys.stderr)
     df = pd.DataFrame(rows)
     df = score(df)
+    for score_index, scored in df.iterrows():
+        decisions[str(scored_indices[score_index])]["screening_decision"] = (
+            "rejected_existing_policy" if scored["rejected"] else "retained")
     df = df.sort_values(["rejected", "health_score"], ascending=[True, False])
 
     date = today()
     tag = f"{args.out_slug}_" if args.out_slug else ""
-    out = REPORTS / f"cheappass_{tag}{date}.csv"
+    out = prepare_stage_output(REPORTS / f"cheappass_{tag}{date}.csv")
     df.to_csv(out, index=False)
+    reasons = ["limit_truncated"] if len(cand) < selected_count else []
+    completion = stage_completion("cheap_pass", len(df), work=work,
+                                  upstream=[upstream], reasons=reasons)
+    completion["selected_count"] = selected_count
+    completion["input_count"] = len(uni)
+    completion["input_artifact"] = str(uni_path.resolve())
+    completion["attempted_count"] = len(cand)
+    completion["scored_count"] = len(df)
+    completion["decisions"] = list(decisions.values())
+    if event_binding is not None:
+        if artifact_binding(uni_path) != event_binding:
+            raise ValueError("Event discovery changed during screening")
+        completion["input"] = event_binding
+    write_stage_receipt(out, completion)
+    event_completion = None
+    if event_binding is not None:
+        admitted, event_completion = write_event_admission(uni_path, out)
+        print(f"Event admission: {admitted}; status: {event_completion['status']}")
 
     survivors = df[~df["rejected"]]
     print(f"\n=== Cheap pass 结果 ===")
@@ -760,7 +837,10 @@ def main():
     for _, r in df[df["rejected"]].head(12).iterrows():
         print(f"  {r['ticker']:8} kill-flag {int(r['killflag_count'])}  {r['name'][:36]}")
     print(f"\n清单: {out}")
+    print(f"Stage status: {completion['status']}")
+    return 0 if (completion["status"] == "complete"
+                 and (event_completion is None or event_completion["status"] == "complete")) else 2
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

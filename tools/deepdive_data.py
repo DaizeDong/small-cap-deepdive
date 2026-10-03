@@ -4,25 +4,34 @@ deepdive_data.py — Stage 1 深度尽调的数据拉取层(机械部分)
 对 cheap pass 幸存者,拉齐 deep dive 所需的结构化数据:
   - 财务序列(收入/净利/OCF/现金/资产/权益,多期)→ 增长质量、runway、现金流质量
   - 稀释史(流通股 YoY)
-  - Form 4 内部人交易(净买卖方向 = 最硬的管理层诚实信号)
+  - OpenInsider 当前交易页面；EDGAR Form 4 解析尚未实现
   - 10-K 关键章节文本(business/risk factors)供判断层读
 设计依据:reference/mechanical-checks.md。
 
 判断层(护城河/管理层/估值/多空论点)由 agent 读这些数据后做,不在此脚本。
 本脚本只负责"把硬数据摆到桌上",防止 agent 凭记忆/叙事编。
 
-用法:
-    python deepdive_data.py --ticker IQST
-    python deepdive_data.py --candidates reports/smallcap/candidates_<slug>.json
-输出: reports/smallcap/deepdive_<ticker>_<date>.json
+Private path setup:
+    Initialize a versioned PRIVATE companion with SMALL_CAP_DEEPDIVE_CONFIG_DIR.
+    Set REPORTS_ROOT to the absolute path returned by _common.reports_dir():
+        python -c "import sys; sys.path.insert(0, 'tools'); from _common import reports_dir; print(reports_dir())"
+    The resolver includes SMALLCAP_RUN when set and fails if initialization is missing.
+
+Usage (REPORTS_ROOT is the resolved absolute private path):
+    python tools/deepdive_data.py --ticker SYNTA --cik 0000000123
+    python tools/deepdive_data.py --candidates "${REPORTS_ROOT}/candidates_gate2_survivors.json"
+Standalone output uses _common.reports_dir() and retains unbound_single_input.
+Batch output stays beside the validated survivor artifact with its stage receipts.
 """
 from __future__ import annotations
 import argparse
+import hashlib
+import math
 import json
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from edgar import Company
@@ -30,6 +39,9 @@ from edgar import Company
 # sys.path shim so this script can be run directly from tools/
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import init_edgar, UA, REPORTS, today, CFG, http_get
+from filter_by_sic import (stage_completion, stage_work, stage_receipt_path,
+                           prepare_stage_output, write_stage_receipt, read_stage_receipt)
+from _cash_flow_evidence import paired_annual_sum_evidence
 
 # v0.3.3 refactor, the mechanical concept-pull layer and the derived-flag computations were
 # extracted into sibling modules to shrink this orchestrator. They are re-exported below so the
@@ -37,8 +49,8 @@ from _common import init_edgar, UA, REPORTS, today, CFG, http_get
 # cheap_pass imports _extract_concentration / _concentration_flag; etc.). NO behavior change.
 #   _deepdive_concepts.py, XBRL companyconcept fetchers + concept-cascade constants + IFRS merge.
 #   _deepdive_flags.py, derived-flag computations (concentration / trajectory / debt guards / ...).
-# Both import ONLY from _common (+ each other, flags->concepts); never back from this module, so
-# there is no circular import. The selftest monkeypatches _deepdive_concepts._one_concept (via the
+# Their shared evidence/completion helpers never import this orchestrator. The selftest
+# monkeypatches _deepdive_concepts._one_concept (via the
 # _dc alias), the single fetcher every concept/flag helper resolves through.
 import _deepdive_concepts as _dc
 from _deepdive_concepts import (
@@ -73,171 +85,214 @@ from _deepdive_flags import (
 _EXCLUDE_CODES = {"A", "M", "G", "D", "F", "I", "J", "L", "U", "W", "X", "Z"}
 
 
-def insider_trades(ticker: str, cik: str = "") -> dict:
-    """内部人交易净方向(最硬的管理层诚实信号)。
-    源由 CFG["insider_source"] 控制,默认 openinsider(已测试路径)。
+def _parse_insider_page(html: str, ticker: str, response_url: str,
+                        observed_at: str) -> dict:
+    """Accept a bounded OpenInsider result only when its schema and scope are known."""
+    import hashlib
+    import math
+    from datetime import date, timedelta
+    from html.parser import HTMLParser
+    from urllib.parse import parse_qs, urlsplit
 
-    Returns open-market-only counts and dollar values:
-      - open_market_buys / open_market_sells: count of P / S transaction codes only
-      - buy_value / sell_value: sum of dollar Value column for P / S rows
-      - buys / sells: same as open_market_buys/sells (backward compat alias)
-      - net_signal: based on open-market P vs S only
-    Excludes non-open-market codes: A (grant/award), M (option exercise), G (gift),
-    and any other code — these are RSU/option noise, not management conviction signals.
-    """
-    if CFG["insider_source"] == "openinsider":
-        out = {
-            "available": False,
-            "buys": 0, "sells": 0,
-            "open_market_buys": 0, "open_market_sells": 0,
-            "buy_value": 0, "sell_value": 0,
-            "net_signal": None, "source": "openinsider",
-        }
+    result = {
+        "available": False, "status": "unavailable", "source": "openinsider",
+        "buys": 0, "sells": 0, "open_market_buys": 0, "open_market_sells": 0,
+        "buy_value": 0, "sell_value": 0, "net_signal": None,
+        "provenance": {"ticker": ticker, "response_url": response_url,
+                       "observed_at": observed_at, "row_limit": 100},
+    }
+    proof = result["provenance"]
+
+    def unavailable(reason, *, incomplete=False):
+        result.update(status="incomplete" if incomplete else "unavailable",
+                      reason=reason, error=f"openinsider:{reason}")
+        return result
+
+    try:
+        observed = date.fromisoformat(observed_at)
+        response = urlsplit(response_url)
+        query = parse_qs(response.query, keep_blank_values=True)
+    except (TypeError, ValueError):
+        return unavailable("response_scope_invalid")
+    expected_query = {"s": ticker, "fd": "730", "td": "0", "xp": "1",
+                      "xs": "1", "cnt": "100", "page": "1"}
+    if (response.scheme not in {"http", "https"}
+            or response.hostname not in {"openinsider.com", "www.openinsider.com"}
+            or response.path != "/screener"
+            or any(query.get(key) != [value] for key, value in expected_query.items())):
+        return unavailable("response_scope_mismatch")
+    if not isinstance(html, str):
+        return unavailable("response_body_invalid")
+    proof.update(html_sha256=hashlib.sha256(html.encode("utf-8")).hexdigest(),
+                 window_basis="filing_date", window_days=730,
+                 window_start=(observed - timedelta(days=730)).isoformat(),
+                 window_end=observed_at, scope_evidence="response_query")
+
+    class Tables(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+            self.tables = []
+            self.links = []
+
+        def handle_starttag(self, tag, attrs):
+            attributes = dict(attrs)
+            if tag == "a" and attributes.get("href"):
+                self.links.append(attributes["href"])
+            if tag == "table":
+                self.stack.append({"rows": [], "row": None, "cell": None,
+                                   "malformed": False, "closed": False})
+            if not self.stack:
+                return
+            table = self.stack[-1]
+            if tag == "tr":
+                table["malformed"] |= table["row"] is not None
+                table["row"] = []
+            elif tag in {"td", "th"} and table["row"] is not None:
+                table["malformed"] |= table["cell"] is not None
+                table["cell"] = []
+
+        def handle_data(self, data):
+            if self.stack and self.stack[-1]["cell"] is not None:
+                self.stack[-1]["cell"].append(data)
+
+        def handle_endtag(self, tag):
+            if not self.stack:
+                return
+            table = self.stack[-1]
+            if tag in {"td", "th"} and table["cell"] is not None:
+                table["row"].append(" ".join("".join(table["cell"]).split()))
+                table["cell"] = None
+            elif tag == "tr" and table["row"] is not None:
+                table["rows"].append(table["row"])
+                table["row"] = None
+            elif tag == "table":
+                table["malformed"] |= table["row"] is not None or table["cell"] is not None
+                table["closed"] = True
+                self.tables.append(self.stack.pop())
+
+    parser = Tables()
+    parser.feed(html)
+    parser.close()
+    names = {"filing": "filing date", "trade": "trade date", "ticker": "ticker",
+             "code": "trade type", "value": "value"}
+    candidates = []
+    for table in [*parser.tables, *parser.stack]:
+        for index, row in enumerate(table["rows"]):
+            normalized = [cell.casefold() for cell in row]
+            if all(normalized.count(label) == 1 for label in names.values()):
+                columns = {key: normalized.index(label) for key, label in names.items()}
+                candidates.append((table["rows"][index + 1:], columns, len(row), table))
+                break
+    if len(candidates) != 1:
+        return unavailable("recognized_table_missing" if not candidates else "ambiguous_tables")
+    rows, columns, width, selected_table = candidates[0]
+    if selected_table["malformed"] or not selected_table["closed"]:
+        return unavailable("table_not_closed")
+    proof.update(schema="openinsider_trade_table", columns=columns,
+                 table_rows=len(rows), parsed_rows=0, excluded_rows=0)
+    empty_messages = {"no results found", "no results found.",
+                      "no matching transactions found", "no matching transactions found."}
+    explicit_zero = (len(rows) == 1 and len(rows[0]) == 1
+                     and rows[0][0].casefold() in empty_messages)
+    if not rows:
+        return unavailable("empty_table_without_zero_evidence", incomplete=True)
+    if explicit_zero:
+        rows = []
+    for link in parser.links:
         try:
-            # openinsider screener: last 730 days, open-market P/S rows, up to 100 rows
-            url = (
-                f"http://openinsider.com/screener?s={ticker}"
-                "&o=&pl=&ph=&ll=&lh=&fd=730&fdr=&td=0&tdr=&fdlyl=&fdlyh=&daysago="
-                "&xp=1&xs=1&vl=&vh=&ocl=&och=&sic1=-1&sicl=100&sich=9999"
-                "&grp=0&nfl=&nfh=&nil=&nih=&nol=&noh=&v2l=&v2h=&oc2l=&oc2h="
-                "&sortcol=0&cnt=100&page=1"
-            )
-            r = http_get(url, timeout=30)
-            if r.status_code != 200:
-                out["error"] = f"http {r.status_code}"
-                return out
+            page_query = parse_qs(urlsplit(link).query)
+        except ValueError:
+            return unavailable("pagination_link_invalid", incomplete=True)
+        if not page_query.get("s") or page_query.get("s") == [ticker]:
+            pages = page_query.get("page", [])
+            if any(value.isdecimal() and int(value) > 1 for value in pages):
+                return unavailable("additional_results_page", incomplete=True)
+    if len(rows) >= proof["row_limit"]:
+        return unavailable("row_limit_reached", incomplete=True)
 
-            # Parse HTML table rows to extract transaction type code and Value column.
-            # openinsider table columns (0-indexed, typical layout):
-            #   0: filing date, 1: trade date, 2: ticker, 3: company, 4: insider name,
-            #   5: title, 6: trade type code, 7: price, 8: qty, 9: owned, 10: delta%,
-            #   11: Value
-            # A leading checkbox <td> can shift every column; we detect actual column
-            # positions from the header row instead of using hardcoded indices.
-            from html.parser import HTMLParser
+    buys = sells = 0
+    buy_value = sell_value = 0.0
+    for row in rows:
+        if len(row) != width:
+            return unavailable("malformed_transaction_row", incomplete=True)
+        if row[columns["ticker"]].upper() != ticker:
+            return unavailable("row_ticker_mismatch", incomplete=True)
+        try:
+            filing = date.fromisoformat(row[columns["filing"]][:10])
+            trade = date.fromisoformat(row[columns["trade"]][:10])
+        except (TypeError, ValueError):
+            return unavailable("row_date_invalid", incomplete=True)
+        if not observed - timedelta(days=730) <= filing <= observed or trade > filing:
+            return unavailable("row_outside_filing_window", incomplete=True)
+        code_match = re.fullmatch(r"([A-Z])(?:\s*-\s*.+)?", row[columns["code"]])
+        if code_match is None:
+            return unavailable("transaction_code_invalid", incomplete=True)
+        code = code_match.group(1)
+        if code in _EXCLUDE_CODES:
+            proof["excluded_rows"] += 1
+            continue
+        if code not in {"P", "S"}:
+            return unavailable("transaction_code_unsupported", incomplete=True)
+        text = row[columns["value"]].strip()
+        if text.startswith("(") and text.endswith(")"):
+            text = text[1:-1]
+        if not re.fullmatch(r"[+-]?\$?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?", text):
+            return unavailable("transaction_value_invalid", incomplete=True)
+        amount = abs(float(text.replace("$", "").replace(",", "")))
+        if not math.isfinite(amount):
+            return unavailable("transaction_value_invalid", incomplete=True)
+        if code == "P":
+            buys += 1
+            buy_value += amount
+        else:
+            sells += 1
+            sell_value += amount
+        proof["parsed_rows"] += 1
 
-            class _TableParser(HTMLParser):
-                """Minimal parser: collect <td> and <th> text within <tr> blocks."""
-                def __init__(self):
-                    super().__init__()
-                    self._in_cell = False
-                    self._cur_row: list[str] = []
-                    self._cur_cell: list[str] = []
-                    self.rows: list[list[str]] = []
+    if not math.isfinite(buy_value) or not math.isfinite(sell_value):
+        return unavailable("transaction_total_nonfinite", incomplete=True)
+    proof.update(complete=True, explicit_zero=explicit_zero,
+                 scope_evidence="response_query_and_result_table")
+    result.update(available=True, status="available", open_market_buys=buys,
+                  open_market_sells=sells, buys=buys, sells=sells,
+                  buy_value=round(buy_value), sell_value=round(sell_value),
+                  net_signal="net_buy" if buys > sells else "net_sell" if sells > buys else "neutral")
+    return result
 
-                def handle_starttag(self, tag, attrs):
-                    if tag == "tr":
-                        self._cur_row = []
-                    elif tag in ("td", "th"):
-                        self._in_cell = True
-                        self._cur_cell = []
 
-                def handle_endtag(self, tag):
-                    if tag in ("td", "th"):
-                        self._in_cell = False
-                        self._cur_row.append("".join(self._cur_cell).strip())
-                    elif tag == "tr" and self._cur_row:
-                        self.rows.append(self._cur_row)
-                        self._cur_row = []
+def insider_trades(ticker: str, cik: str = "") -> dict:
+    """Fetch the bounded OpenInsider filing window; EDGAR Form 4 is unsupported."""
+    from urllib.parse import urlencode
 
-                def handle_data(self, data):
-                    if self._in_cell:
-                        self._cur_cell.append(data)
-
-            parser = _TableParser()
-            parser.feed(r.text)
-
-            def _parse_value(s: str) -> float:
-                """Parse openinsider Value cell like '$1,234,567' or '+$1,234,567'.
-                Strips all non-numeric characters (sign, currency, commas) via regex.
-                Parenthesized negatives like '($1,234)' are not expected in the Value
-                column (which stores absolute dollar amounts) but are handled safely —
-                the regex strips parens along with other non-numeric chars, returning
-                the absolute value."""
-                cleaned = re.sub(r"[^0-9.]", "", s)
-                try:
-                    return float(cleaned) if cleaned else 0.0
-                except ValueError:
-                    return 0.0
-
-            # Detect header row to find column indices for trade-type and Value.
-            # Hardcoded fallback (col 6 / col 11) used if no header found.
-            _FALLBACK_CODE_COL = 6
-            _FALLBACK_VALUE_COL = 11
-            code_col: int | None = None
-            value_col: int | None = None
-            for row in parser.rows:
-                row_low = [c.lower() for c in row]
-                # Look for the Trade Type column
-                for i, cell in enumerate(row_low):
-                    if any(kw in cell for kw in ("trade type", "trans", "type")):
-                        code_col = i
-                        break
-                # Look for the Value column
-                for i, cell in enumerate(row_low):
-                    if cell == "value" or cell.strip() == "value":
-                        value_col = i
-                        break
-                if code_col is not None and value_col is not None:
-                    break  # header found
-            if code_col is None or value_col is None:
-                import logging
-                logging.warning(
-                    "openinsider: header row not found; falling back to hardcoded column "
-                    "indices (code=%d, value=%d). Table layout may have changed.",
-                    _FALLBACK_CODE_COL, _FALLBACK_VALUE_COL,
-                )
-                code_col = _FALLBACK_CODE_COL
-                value_col = _FALLBACK_VALUE_COL
-
-            open_market_buys = 0
-            open_market_sells = 0
-            buy_value = 0.0
-            sell_value = 0.0
-
-            for row in parser.rows:
-                if len(row) <= max(code_col, value_col):
-                    continue
-                code_cell = row[code_col].strip()
-                # code_cell is like "P - Purchase" or "S - Sale" or "A - Award"
-                code_match = re.match(r"^([A-Z])", code_cell)
-                if not code_match:
-                    continue
-                code = code_match.group(1)
-                if code in _EXCLUDE_CODES:
-                    continue  # skip non-open-market transactions
-                val = _parse_value(row[value_col])
-                if code == "P":
-                    open_market_buys += 1
-                    buy_value += val
-                elif code == "S":
-                    open_market_sells += 1
-                    sell_value += val
-
-            out.update({
-                "available": True,
-                "open_market_buys": open_market_buys,
-                "open_market_sells": open_market_sells,
-                "buys": open_market_buys,   # backward-compat alias
-                "sells": open_market_sells,  # backward-compat alias
-                "buy_value": round(buy_value),
-                "sell_value": round(sell_value),
-                "net_signal": (
-                    "net_buy" if open_market_buys > open_market_sells else
-                    "net_sell" if open_market_sells > open_market_buys else
-                    "neutral"
-                ),
-            })
-        except Exception as e:
-            out["error"] = str(e)
-        return out
-    elif CFG["insider_source"] == "edgar":
-        # TODO(roadmap): edgar Form4 direction parser
-        # edgartools Form4 direction matching was unreliable in testing (returned None).
-        # Hardening this path is a roadmap item; openinsider remains the tested default.
+    source = CFG["insider_source"]
+    if source == "edgar":
         return {"available": False, "note": "edgar source not yet implemented"}
-    else:
-        return {"available": False, "error": f"unknown insider_source: {CFG['insider_source']}"}
+    if source != "openinsider":
+        return {"available": False, "error": f"unknown insider_source: {source}"}
+    ticker = ticker.strip().upper() if isinstance(ticker, str) else ""
+    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", ticker):
+        return {"available": False, "source": source, "net_signal": None,
+                "reason": "ticker_invalid"}
+    params = {
+        "s": ticker, "o": "", "pl": "", "ph": "", "ll": "", "lh": "",
+        "fd": "730", "fdr": "", "td": "0", "tdr": "", "fdlyl": "", "fdlyh": "",
+        "daysago": "", "xp": "1", "xs": "1", "vl": "", "vh": "", "ocl": "", "och": "",
+        "sic1": "-1", "sicl": "100", "sich": "9999", "grp": "0", "nfl": "", "nfh": "",
+        "nil": "", "nih": "", "nol": "", "noh": "", "v2l": "", "v2h": "",
+        "oc2l": "", "oc2h": "", "sortcol": "0", "cnt": "100", "page": "1",
+    }
+    try:
+        response = http_get("http://openinsider.com/screener?" + urlencode(params), timeout=30)
+        if response.status_code != 200:
+            return {"available": False, "source": source, "net_signal": None,
+                    "reason": "http_error", "error": f"http {response.status_code}"}
+        return _parse_insider_page(
+            response.text, ticker, str(getattr(response, "url", "")),
+            datetime.now(timezone.utc).date().isoformat())
+    except Exception as error:
+        return {"available": False, "source": source, "net_signal": None,
+                "reason": "fetch_or_parse_failed", "error": type(error).__name__}
 
 
 def _latest_filing_asof(filings, as_of: str | None):
@@ -315,33 +370,29 @@ def tenk_sections(ticker: str, cik: str = "", as_of: str | None = None) -> dict:
         if f is None:
             return out
         txt = f.text() if hasattr(f, "text") else str(f.obj())
+        if not isinstance(txt, str) or not txt.strip():
+            out["error"] = "Annual filing text is unavailable"
+            return out
         low = txt.lower()
         out["available"] = True
         out["filing_form"] = form_used
         out["filing_date"] = str(getattr(f, "filing_date", ""))
         out["total_len"] = len(txt)
-        # kill-flag 复核
-        out["has_going_concern"] = "going concern" in low and "substantial doubt" in low
-        # material_weakness: require affirmative ICFR finding, not bare boilerplate phrase.
-        # Risk-factor language ("our failure to maintain effective controls...") often
-        # contains "material weakness" without an actual finding, caused 4/4 FP in audit.
-        # Require co-occurrence with an affirmative phrase within the same document.
-        _mw_affirmative = (
-            "identified a material weakness" in low
-            or "identified material weakness" in low
-            or "were not effective" in low
-            or "was not effective" in low
-        )
-        out["has_material_weakness"] = "material weakness" in low and _mw_affirmative
+        from _filing_disclosures import scan_disclosures
+        out["disclosure_evidence"] = scan_disclosures(txt)
+        for name, finding in out["disclosure_evidence"].items():
+            out["has_" + name] = finding["flag"]
+        out["disclosure_review_required"] = any(
+            finding["flag"] is None for finding in out["disclosure_evidence"].values())
         out["has_death_spiral"] = "variable conversion" in low
-        # P3, magnitude-based concentration from the full filing text (the only mechanical
-        # source for the segment-member magnitude; companyconcept XBRL has no dimensional
-        # members). Replaces the old "customers accounted for" substring, which SIGA's
-        # ~90%-BARDA-dependent filing never used. Done here because txt (full body) is in scope.
+        # Extract concentration magnitudes from the full filing body because the
+        # companyconcept endpoint does not expose dimensional member magnitudes.
         _tc, _tp, _cd = _extract_concentration(txt)
         out["top_customer_pct"] = _tc
         out["top_program_pct"] = _tp
         out["concentration_detail"] = _cd
+        if _cd and "ambiguous_concentration_clause" in _cd:
+            out["disclosure_review_required"] = True
         # Backward-compat boolean: True when any concentration magnitude was extracted OR the
         # legacy substring is present (preserves existing consumers reading this flag).
         out["customer_concentration_flag"] = (
@@ -359,13 +410,9 @@ def tenk_sections(ticker: str, cik: str = "", as_of: str | None = None) -> dict:
 # ---------------------------------------------------------------------------
 # P7: second-source sanity band (cross-validate SEC XBRL against yfinance)
 # ---------------------------------------------------------------------------
-# Reflection diagnosis #4 (DATA_ROBUSTNESS F5): every financial datum is SEC XBRL and every
-# guard (C1a/C1b/C1c) is INTERNAL-CONSISTENCY on the SAME corrupted feed, when XBRL is wrong
-# (HRI debt truncation 11M, HCI/AL wrong-entity revenue) there is no independent number to
-# falsify it. P7 fetches ONE second, INDEPENDENT source (yfinance, already a dependency, used
-# only for mktcap until now) for total_debt / revenue / shares and compares it to the
-# SEC-XBRL-derived latest values. A GROSS disagreement (max/min > 2.5x) means the single SEC
-# value cannot be trusted; valuation gates buy_eligible on the resulting cross_source_mismatch.
+# Internal consistency cannot establish agreement with an independent source.
+# Compare eligible SEC-XBRL debt, revenue and shares with independently acquired
+# values; a gross disagreement is an input-integrity reason to withhold BUY.
 # This is a DATA-INTEGRITY gate (it is fine for it to gate), NOT a between-filings signal.
 _CROSS_SOURCE_FLOOR = 1_000_000.0   # ignore near-zero/trivial fields (avoid div-by-tiny noise)
 _CROSS_SOURCE_RATIO = 2.5           # max(a,b)/min(a,b) above this == gross disagreement
@@ -481,6 +528,47 @@ def _cross_source_check(sec_debt: float | None, sec_revenue: float | None,
     return checked, mismatch, detail
 
 
+def _sic_observation(cik):
+    """Bind submissions metadata to its issuer and retain failed observations."""
+    request = {"cik": str(cik)[:10]}
+
+    def result(code, status, reason="", **diagnostics):
+        completion = stage_completion("sec_submissions_sic", int(bool(code)), work=[
+            stage_work("sec_submissions", request["cik"], status=status, reason=reason)])
+        completion.update(request=request, observation=diagnostics)
+        return code, completion
+
+    try:
+        request["cik"] = _dc._share_cik(cik)
+    except (TypeError, ValueError):
+        return result(None, "invalid", "invalid_query_identity")
+    url = f"https://data.sec.gov/submissions/CIK{request['cik']}.json"
+    try:
+        response = http_get(url, timeout=20)
+    except Exception:
+        return result(None, "unavailable", "request_failed")
+    status = getattr(response, "status_code", None)
+    if type(status) is not int:
+        return result(None, "invalid", "invalid_http_response")
+    if status != 200:
+        return result(None, "unavailable", "http_status", http_status=status)
+    try:
+        payload = response.json()
+    except Exception:
+        return result(None, "invalid", "invalid_json", http_status=200)
+    try:
+        if not isinstance(payload, dict) or _dc._share_cik(payload.get("cik")) != request["cik"]:
+            raise ValueError("submissions identity mismatch")
+    except (TypeError, ValueError):
+        return result(None, "invalid", "invalid_response_identity", http_status=200)
+    if "sic" not in payload or type(payload["sic"]) not in (str, int):
+        return result(None, "invalid", "invalid_sic", http_status=200)
+    code = str(payload["sic"] or "")
+    if code and not re.fullmatch(r"[0-9]{1,4}", code):
+        return result(None, "invalid", "invalid_sic", http_status=200)
+    return result(code, "complete", http_status=200)
+
+
 def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = None) -> dict:
     """Pull all financial/insider/tenk data for a company.
 
@@ -489,20 +577,10 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     insider_trades / tenk_sections use ticker for their HTML/edgartools calls;
     they receive the cik fallback so Company() can be constructed from CIK.
 
-    PIT (backtest, ADDITIVE) — `as_of` (a YYYY-MM-DD string) makes the entire pull point-in-time:
-    every companyconcept cascade (revenue / net-income / OCF / cash / shares / assets / equity /
-    debt / EBIT / D&A / capex / goodwill / intangibles / liabilities / lease-income / PP&E-fleet /
-    operating-lease / IFRS) is pulled via the asof variant (filed<=as_of, latest-filed per period
-    end — no look-ahead, no post-as_of restatements). tenk_sections is restricted to filings
-    filed<=as_of. as_of=None is the LIVE DEFAULT and reproduces the pre-PIT behavior
-    BYTE-IDENTICALLY (the asof kwarg is None everywhere -> the live code path is taken). The
-    insider HTML feed (openinsider) is not point-in-time-able for free, so insider is skipped under
-    as_of (recorded as note=as_of_pit_no_insider) rather than silently using current data — a BUY
-    in the backtest stays anchored to filing-derived fundamentals, never current insider activity.
-
-    NOTE (scope): the insurance-concept presence probe (_insurance_concepts_present, in the sibling
-    _deepdive_flags module) is a structural SIC-routing flag (insurer status is time-invariant) and
-    is left on the latest path; SIC routing itself uses the point-in-time-aware sic fetch below.
+    Historical mode filters SEC concepts and filings by as_of. Current SIC,
+    ticker validation, insurance classification and second-source checks are skipped.
+    Their dated contracts are unavailable, so valuation and backtest buckets abstain.
+    The filing-date audit covers observed SEC dates, not complete PIT eligibility.
     """
     d = {"ticker": ticker, "cik": cik,
          "pulled_at": today()}
@@ -560,54 +638,40 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         assets = concept_series(cik, "LiabilitiesAndStockholdersEquity", asof=as_of); time.sleep(0.2)
 
     # de-risk: CORE-4 distress inputs (retained earnings + current assets/liabilities), the
-    # remaining Altman Z'' / accum-deficit components not already pulled above. OOS-validated
-    # blowup predictor; see _deepdive_flags.distress_core4 + docs/backtest-2026-06/.
+    # remaining Altman Z components. Historical predictive claims require revalidation.
     retained_earnings = concept_series(cik, "RetainedEarningsAccumulatedDeficit", asof=as_of); time.sleep(0.2)
     current_assets = concept_series(cik, "AssetsCurrent", asof=as_of); time.sleep(0.2)
     current_liabilities = concept_series(cik, "LiabilitiesCurrent", asof=as_of); time.sleep(0.2)
 
-    # C1: pull SIC from EDGAR company metadata for financial-sector guard (C2). SIC is structural
-    # entity metadata (an entity's SIC classification is not a between-filings disclosure), so the
-    # submissions endpoint is read directly even under as_of, this is the same SIC an investor at
-    # `as_of` would have classified the filer under.
-    sic_code: str | None = None
-    try:
-        sic_url = f"https://data.sec.gov/submissions/CIK{cik.zfill(10)}.json"
-        sic_r = http_get(sic_url, timeout=20)
-        if sic_r.status_code == 200:
-            sic_code = str(sic_r.json().get("sic", "") or "")
-    except Exception:
-        pass
+    # Current submissions SIC cannot establish historical sector membership.
+    if as_of is None:
+        sic_code, sic_completion = _sic_observation(cik)
+    else:
+        sic_code = None
+        sic_completion = stage_completion("sec_submissions_sic", 0, work=[
+            stage_work("historical_sic", str(cik), status="unavailable",
+                       reason="dated_sic_contract_unavailable")])
+        d["historical_eligibility"] = {
+            "schema_version": 1, "asof": as_of, "status": "unavailable",
+            "unavailable_inputs": ["historical_sic", "historical_entity_validation",
+                                   "historical_insurance_classification"],
+            "skipped_current_inputs": ["submissions_sic", "ticker_validation",
+                                       "insurance_concepts", "second_source"],
+        }
+    d["source_observations"] = {"sic": sic_completion}
     time.sleep(0.2)
 
-    # Derive EBITDA = EBIT + D&A (matching end dates; use latest available pair)
-    def _latest_paired_sum(s1: list, s2: list) -> float | None:
-        """Sum latest matching end-date pair, or fallback to latest of each independently."""
-        if not s1 or not s2:
-            return None
-        # Try end-date alignment (preferred)
-        ends1 = {v["end"]: v["val"] for v in s1}
-        ends2 = {v["end"]: v["val"] for v in s2}
-        common = sorted(set(ends1) & set(ends2))
-        if common:
-            latest_end = common[-1]
-            return ends1[latest_end] + ends2[latest_end]
-        # Fallback: just sum the respective latest entries (may be different fiscal ends)
-        return s1[-1]["val"] + s2[-1]["val"]
-
-    latest_ebitda = _latest_paired_sum(ebit, da)
+    ebitda_periods = paired_annual_sum_evidence(ebit, da)
+    latest_ebitda_evidence = ebitda_periods[-1] if ebitda_periods else None
+    latest_ebitda = latest_ebitda_evidence["val"] if latest_ebitda_evidence else None
     latest_ocf_val = ocf[-1]["val"] if ocf else None
     latest_capex = capex[-1]["val"] if capex else None
-    # FCF = OCF - CapEx; if capex unavailable, use OCF as proxy with flag
-    if latest_ocf_val is not None and latest_capex is not None:
-        latest_fcf = latest_ocf_val - latest_capex
-        fcf_is_ocf_proxy = False
-    elif latest_ocf_val is not None:
-        latest_fcf = latest_ocf_val
-        fcf_is_ocf_proxy = True
-    else:
-        latest_fcf = None
-        fcf_is_ocf_proxy = False
+    from _cash_flow_evidence import paired_cash_flow_evidence
+    fcf_periods = paired_cash_flow_evidence(ocf, capex)
+    latest_fcf_evidence = fcf_periods[-1] if fcf_periods else None
+    latest_fcf = latest_fcf_evidence["val"] if latest_fcf_evidence else None
+    # Missing or unmatched CapEx remains unavailable; OCF is never labeled qualified FCF.
+    fcf_is_ocf_proxy = False
 
     d["financials"] = {
         "revenue": rev, "net_income": ni, "ocf": ocf, "cash": cash,
@@ -644,36 +708,37 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     _ev_debt, _debt_truncation_suspected, _debt_trunc_detail = _debt_for_ev(
         _summed_debt_latest, liabilities, equity, assets
     )
-    _debt_evidence_status = "reported" if _ev_debt is not None else "unavailable"
-    _debt_evidence_detail = _debt_trunc_detail
+    _latest_debt_evidence = debt[-1] if debt else {}
+    _debt_evidence_status = (_latest_debt_evidence.get("debt_evidence_status", "unavailable")
+                             if _ev_debt is not None else "unavailable")
+    _debt_evidence_detail = (_latest_debt_evidence.get("debt_evidence_detail")
+                             or _debt_trunc_detail)
     if debt_source == "Liabilities_proxy":
         _debt_evidence_detail = "Only total liabilities were available; contractual debt remains unknown."
 
     # C1b: wrong-entity guard (ticker→CIK cross-check + financial sanity)
-    _wrong_entity_suspected, _wrong_entity_reason = _validate_ticker_entity(
-        ticker, cik, rev, shares, ni
-    )
+    if as_of is None:
+        _wrong_entity_suspected, _wrong_entity_reason = _validate_ticker_entity(
+            ticker, cik, rev, shares, ni)
+    else:
+        _wrong_entity_suspected, _wrong_entity_reason = None, "historical_entity_validation_unavailable"
 
     # P-B / A4: low_revenue_loss_ratio, early/pre-revenue resource pattern (present-but-tiny
     # revenue + large genuine loss). Advisory label; the >20x EXTREME tier gates buy_eligible.
     _low_rev_loss, _low_rev_loss_extreme, _low_rev_loss_detail = _low_revenue_loss_ratio(rev, ni)
 
-    # A3: insurance XBRL concepts present (insurer / insurance-subsidiary holdco). Probed here so
-    # valuation can route SIC-65 insurance holdcos (BOC) like financial_sic instead of fcf_cap.
-    # v0.3.1 #4: pass sic_code so the precision rule (insurance SIC 63/64 OR >=2 distinct concepts)
-    # can suppress single-stray-tag false positives on non-insurers (SPB/ASTE/SKIL/ALLR/TOPP).
-    # NOTE (PIT scope): _insurance_concepts_present lives in the sibling _deepdive_flags module and
-    # is a structural SIC-routing presence flag (insurer status is time-invariant, a name that ever
-    # tagged insurance concepts was an insurer at `as_of` too). It is left on the latest path under
-    # as_of; the routing it feeds is conservative (financial-SIC -> nav/abstain), never a +BUY.
+    # Insurance evidence can require financial-sector routing even on another SIC.
+    # Apply the SIC-or-multiple-concepts precision rule to avoid stray-tag decisions.
+    # The current insurance probe cannot prove classification at a historical date.
     print(f"  探测保险 XBRL 概念(A3)...", file=sys.stderr)
-    _insurance_present, _insurance_concept = _insurance_concepts_present(cik, sic_code=sic_code)
+    if as_of is None:
+        _insurance_present, _insurance_concept = _insurance_concepts_present(cik, sic_code=sic_code)
+    else:
+        _insurance_present, _insurance_concept = None, None
     time.sleep(0.2)
 
-    # v0.3.2 #8: lessor / leasing-business detection (asset-heavy railcar/equipment/auto lessors).
-    # Probe the lease-income + PP&E/lease-fleet concepts ONCE here and pass them to
-    # _lessor_asset_heavy so valuation can route GBX/RAIL-class lessors to lease-fleet NAV even when
-    # debt/assets<0.62. rental_lease_revenue = a lease-income concept present (the rent signal).
+    # Read lease-income and asset-fleet evidence once for model suitability.
+    # A qualifying lessor can require NAV even below the debt/assets threshold.
     print(f"  探测 lessor / 租赁车队 XBRL 概念(#8)...", file=sys.stderr)
     _lease_income_present = False
     for _lic in LEASE_INCOME_CONCEPTS:
@@ -727,10 +792,8 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     _conc_detail = d["tenk"].get("concentration_detail")
     _conc_flag = _concentration_flag(_top_customer_pct, _top_program_pct)
 
-    # A2: concentration_unquantified, the text-vs-XBRL concentration seam. When the 10-K text
-    # flags customer concentration (customer_concentration_flag) but NO magnitude was extractable
-    # (concentration_flag is None, text-only or pre-/early-XBRL filer, the SWMR/LFCR SIGA-class
-    # cohort), surface an ADVISORY. Advisory only: it goes in data_quality and does NOT gate.
+    # Text-only concentration without an extracted magnitude remains an advisory
+    # data-quality label; it does not independently gate eligibility.
     _text_conc = bool(d["tenk"].get("customer_concentration_flag"))
     _concentration_unquantified = _text_conc and (_conc_flag is None)
 
@@ -739,12 +802,15 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
     # P-A: ni passed so peak_contamination_flag can test latest_net_income<0 (V-shape catch).
     _traj = _trajectory_fields(rev, ocf, ni)
 
-    # v0.3.1 #1: normalization_masks_current_loss, the degenerate-base / divested-stub catch (TUSK
-    # hole). When contamination_ratio<0 (or the latest base is negative) the A1 (0<cr) guard
-    # silences BOTH cyclical vetoes, yet the trailing-avg FCF is still POSITIVE -> phantom +MoS.
-    # Compute the producer-side trailing-5yr FCF proxy (matches valuation's normalized_fcf) and flag
-    # when it is positive while current OCF/FCF is negative or the contamination base is degenerate.
-    _norm_fcf_proxy = _normalized_fcf_proxy(ocf, capex, fcf_is_ocf_proxy)
+    # A positive trailing cash-flow base can conceal current cash burn. Evaluate
+    # that condition separately from the positive-contamination cyclical checks.
+    # Use the same qualified annual pairs as valuation for the trailing FCF diagnostic.
+    # An incomplete selected period cannot supply a positive normalization base.
+    _fcf_window = fcf_periods[-_NORM_YEARS:]
+    _norm_fcf_proxy = (
+        sum(row["val"] for row in _fcf_window) / len(_fcf_window)
+        if _fcf_window and all(row["qualified"] for row in _fcf_window) else None
+    )
     _normalization_masks_current_loss_flag = _normalization_masks_current_loss(
         _norm_fcf_proxy, latest_ocf_val, latest_fcf, _traj["contamination_ratio"]
     )
@@ -769,7 +835,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         _sec_debt_lease_adj = _sec_debt_latest + _op_lease
     _sec_shares_latest = shares[-1]["val"] if shares else None
     try:
-        _second = yf_fn(ticker)
+        _second = yf_fn(ticker) if as_of is None else None
     except Exception as e:
         # Firewall: a second-source fetch failure must NEVER crash the deepdive.
         print(f"  [P7] second-source fetch error (ignored): {e}", file=sys.stderr)
@@ -798,7 +864,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         _candidates = [x for x in (_concept_max_filed, _tenk_filed) if x]
         _asof_max_filing_date = max(_candidates) if _candidates else None
 
-    # de-risk: CORE-4 PIT distress rank (OOS-validated blowup predictor). distress_kill (score>=3)
+    # de-risk: CORE-4 mechanism-based distress rank. distress_kill (score>=3)
     # is ANDed into the kill-flag count (make_report._killflag_count) so a distressed name buckets
     # to AVOID regardless of cheapness. Scope = operating companies; banks/insurers route to
     # financial_sic/abstain upstream and are not graded by this layer.
@@ -838,7 +904,11 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         "da_source": da_source,
         "latest_capex": latest_capex,
         "latest_ebitda": latest_ebitda,
+        "latest_ebitda_evidence": latest_ebitda_evidence,
+        "ebitda_periods": ebitda_periods,
         "latest_fcf": latest_fcf,
+        "latest_fcf_evidence": latest_fcf_evidence,
+        "fcf_periods": fcf_periods,
         "fcf_is_ocf_proxy": fcf_is_ocf_proxy,
         # NAV inputs
         "latest_goodwill": goodwill[-1]["val"] if goodwill else None,
@@ -859,9 +929,8 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         # routes these like financial_sic (nav/abstain) and gates buy_eligible off it.
         "insurance_concepts_present": _insurance_present,
         "insurance_concept_matched": _insurance_concept,
-        # v0.3.2 #8: lessor_asset_heavy, asset-heavy leasing/rental business (railcar/equipment/
-        # auto lessor). valuation forces fcf_cap_model_unsuitable=True (route to lease-fleet NAV)
-        # EVEN when debt/assets<0.62, closing the GBX (0.41)/RAIL (0.35) mis-valuation hole.
+        # Qualifying lease-fleet evidence can make FCF capitalization unsuitable
+        # independently of the debt/assets cutoff.
         "lessor_asset_heavy": _lessor_asset_heavy_flag,
         "lessor_asset_heavy_detail": _lessor_detail,
         # v0.3.2 #11: foreign_filer_unvaluable, a 20-F/40-F filer whose financials are STILL empty
@@ -887,11 +956,8 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         "fundamental_decline_flag": _traj["fundamental_decline_flag"],
         # P-A: V-shape value-trap catch (independent of rev_slope_sign)
         "peak_contamination_flag": _traj["peak_contamination_flag"],
-        # v0.3.1 #1: normalization_masks_current_loss, trailing-avg normalized FCF>0 while current
-        # OCF/FCF is negative or the contamination base is degenerate (contamination_ratio<0). The
-        # TUSK hole: the A1 guard silences both cyclical vetoes on a negative base yet trailing-avg
-        # still emits +normalized_fcf -> phantom +MoS. valuation ANDs (not this) into buy_eligible
-        # and downgrades BUY->WATCH. Also emit the proxy normalized FCF for transparency.
+        # Preserve the current-loss normalization diagnostic and its qualified
+        # annual cash-flow base for downstream eligibility and inspection.
         "normalization_masks_current_loss": _normalization_masks_current_loss_flag,
         "normalized_fcf_proxy": _norm_fcf_proxy,
         # P7: second-source sanity band (yfinance vs SEC XBRL on debt/revenue/shares). A gross
@@ -901,11 +967,7 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
         "cross_source_checked": _cs_checked,
         "cross_source_mismatch": _cs_mismatch,
         "cross_source_detail": _cs_detail,
-        # de-risk: CORE-4 PIT distress rank (OOS-validated; _deepdive_flags.distress_core4).
-        # distress_kill (score>=3) is counted as a kill-flag -> AVOID. The single validated
-        # predictive de-risk signal in the skill. Numbers by cutoff (never mix them): shipped
-        # score>=3 cutoff = precision 35.4% vs 13.3% base (lift 2.65x) at recall 62%; per-year
-        # top-quintile cutoff = lift 2.56x at recall 51%, cluster CI [1.73,3.00].
+        # CORE-4 is a four-flag policy score. Its historical intervals are unvalidated.
         "distress_score": _distress["distress_score"],
         "distress_flags": _distress["distress_flags"],
         "distress_kill": _distress["distress_kill"],
@@ -965,45 +1027,117 @@ def pull(ticker: str, cik: str, yf_fn=_yf_second_source, as_of: str | None = Non
 
 
 def _selftest():
-    init_edgar()
+    """Run generated synthetic contracts; provider acceptance is a separate live lane."""
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from urllib.parse import parse_qs, urlsplit
+    from make_fixtures import source32_legacy_scenarios, source32_legacy_acquisition
 
-    # --- EGAN (CIK 1066194): fiscal-year == calendar-year concept-merge ---
-    rev_egan = concept_series("1066194", REVENUE_CONCEPTS)
-    years_egan = [v["end"][:4] for v in rev_egan]
-    assert any(y >= "2024" for y in years_egan), (
-        f"EGAN revenue must reach >=2024 after concept merge, got {years_egan}"
-    )
-    print(f"  EGAN: revenue years={years_egan}, latest={rev_egan[-1]['val']/1e6:.1f}M  OK")
+    legacy = source32_legacy_scenarios()
+    acquisition = source32_legacy_acquisition()
+    unexpected = []
+    requested = []
 
-    # --- BUKS (CIK 15847): fiscal-year != calendar-year (Apr 30 year-end), ASC-606 concept ---
-    # Historically stuck at FY2018 $48M because 'Revenues' only covers through 2018;
-    # the correct concept post-2018 is RevenueFromContractWithCustomerIncludingAssessedTax.
-    rev_buks = concept_series("15847", REVENUE_CONCEPTS)
-    years_buks = [v["end"][:4] for v in rev_buks]
-    latest_buks = rev_buks[-1]["val"] if rev_buks else 0
-    assert any(y >= "2024" for y in years_buks), (
-        f"BUKS revenue must reach >=2024 (stuck-2018 bug), got {years_buks}"
-    )
-    assert latest_buks > 60_000_000, (
-        f"BUKS latest revenue must be >$60M (real ~$84M FY2025), got ${latest_buks/1e6:.1f}M"
-    )
-    print(f"  BUKS: revenue years={years_buks}, latest=${latest_buks/1e6:.1f}M  OK")
+    def concept_get(url, **kwargs):
+        match = re.fullmatch(
+            r"https://data.sec.gov/api/xbrl/companyconcept/CIK(\d{10})/us-gaap/([A-Za-z0-9]+)\.json",
+            url)
+        key = f"{int(match[1])}:{match[2]}" if match else None
+        if key not in acquisition["concepts"]:
+            unexpected.append(url)
+            raise AssertionError("unexpected synthetic concept request")
+        requested.append(key)
+        payload = deepcopy(acquisition["concepts"][key])
+        return SimpleNamespace(status_code=200, json=lambda: deepcopy(payload))
 
-    # --- WLFC (CIK 1018164): revenue must be in $400M-$800M range, not a tiny unit-leak value ---
-    rev_wlfc = concept_series("1018164", REVENUE_CONCEPTS)
-    latest_wlfc = rev_wlfc[-1]["val"] if rev_wlfc else 0
-    assert 400_000_000 <= latest_wlfc <= 800_000_000, (
-        f"WLFC latest revenue must be $400M-$800M (FY2024=$569M or FY2025=$730M), "
-        f"got ${latest_wlfc/1e6:.1f}M — possible unit leak if <10000"
-    )
-    print(f"  WLFC: latest revenue=${latest_wlfc/1e6:.1f}M  OK")
+    def insider_get(url, **kwargs):
+        parsed = urlsplit(url)
+        query = parse_qs(parsed.query)
+        if (parsed.scheme != "http" or parsed.netloc != "openinsider.com"
+                or parsed.path != "/screener"
+                or query.get("s") != [acquisition["insider"]["ticker"]]):
+            unexpected.append(url)
+            raise AssertionError("unexpected synthetic insider request")
+        return SimpleNamespace(status_code=200, text=acquisition["insider"]["html"], url=url)
 
-    # --- Insider trades: open-market buy/sell values and counts (A1) ---
-    # Use AI (C3.ai), a ticker known to have open-market insider activity over the
-    # last 730 days. Assert type correctness AND that at least one dollar-value side
-    # is NONZERO (catches the silently-wrong-column failure where all values read as 0
-    # even though available=True).
-    ins = insider_trades("AI")
+    filing_requests = []
+
+    class SyntheticFilings(list):
+        def latest(self, count):
+            assert count == 1
+            return self[0] if self else None
+
+    class SyntheticCompany:
+        def __init__(self, identity):
+            if identity not in acquisition["filings"]:
+                unexpected.append(str(identity))
+                raise AssertionError("unexpected synthetic company request")
+            self.identity = identity
+
+        def get_filings(self, *, form, amendments):
+            assert amendments is False
+            filing_requests.append((self.identity, form))
+            row = acquisition["filings"][self.identity]
+            if row["form"] != form:
+                return SyntheticFilings()
+            filing = SimpleNamespace(filing_date=row["filing_date"], text=lambda: row["text"])
+            return SyntheticFilings([filing])
+
+    class SyntheticClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime.fromisoformat(acquisition["insider"]["observed_at"] + "T00:00:00+00:00")
+            return value if tz is None else value.astimezone(tz)
+
+    with patch.object(_dc, "http_get", concept_get), \
+            patch.object(_dc, "time", SimpleNamespace(sleep=lambda seconds: None)), \
+            patch.dict(globals(), http_get=insider_get, datetime=SyntheticClock,
+                       CFG={**CFG, "insider_source": "openinsider"}, Company=SyntheticCompany):
+        _selftest_cases(legacy)
+    assert not unexpected, f"unexpected synthetic requests: {unexpected}"
+    assert any(key.startswith("904:") for key in requested), "EBIT acquisition was not exercised"
+    assert filing_requests == [("SYNANNUAL", "10-K"), ("SYNFOREIGN", "10-K"), ("SYNFOREIGN", "20-F")]
+
+
+def _selftest_cases(_legacy):
+
+    # Synthetic calendar-year revenue requires the newer concept.
+    rev_annual = concept_series("901", REVENUE_CONCEPTS)
+    years_annual = [v["end"][:4] for v in rev_annual]
+    assert any(y >= "2024" for y in years_annual), (
+        f"synthetic annual revenue must reach >=2024 after concept merge, got {years_annual}"
+    )
+    print(f"  synthetic annual: revenue years={years_annual}, latest={rev_annual[-1]['val']/1e6:.1f}M  OK")
+
+    # Synthetic April fiscal year verifies the newer revenue concept.
+    rev_fiscal = concept_series("902", REVENUE_CONCEPTS)
+    years_fiscal = [v["end"][:4] for v in rev_fiscal]
+    latest_fiscal = rev_fiscal[-1]["val"] if rev_fiscal else 0
+    assert any(y >= "2024" for y in years_fiscal), (
+        f"synthetic fiscal revenue must reach >=2024 (stuck-2018 bug), got {years_fiscal}"
+    )
+    assert latest_fiscal > 60_000_000, (
+        f"synthetic fiscal latest revenue must be >$60M (synthetic $100M FY2025), got ${latest_fiscal/1e6:.1f}M"
+    )
+    print(f"  synthetic fiscal: revenue years={years_fiscal}, latest=${latest_fiscal/1e6:.1f}M  OK")
+
+    # Synthetic mixed-unit envelope must select USD revenue.
+    rev_units = concept_series("903", REVENUE_CONCEPTS)
+    latest_units = rev_units[-1]["val"] if rev_units else 0
+    assert 400_000_000 <= latest_units <= 800_000_000, (
+        f"synthetic units latest revenue must be $400M-$800M (synthetic FY2024=$500M or FY2025=$600M), "
+        f"got ${latest_units/1e6:.1f}M — possible unit leak if <10000"
+    )
+    print(f"  synthetic units: latest revenue=${latest_units/1e6:.1f}M  OK")
+
+    # Synthetic insider transactions must retain nonzero purchase and sale values.
+    assert rev_annual[-1]["val"] == 80_000_000
+    assert latest_fiscal == 100_000_000 and rev_fiscal[-1]["end"].endswith("04-30")
+    assert latest_units == 600_000_000
+    ins = insider_trades("SYNINSIDER")
+    assert (ins.get("open_market_buys"), ins.get("open_market_sells")) == (1, 1)
+    assert (ins.get("buy_value"), ins.get("sell_value")) == (12500, 4000)
     assert isinstance(ins.get("open_market_buys"), int), (
         f"open_market_buys must be int, got {type(ins.get('open_market_buys'))}"
     )
@@ -1019,8 +1153,7 @@ def _selftest():
     assert ins.get("net_signal") in ("net_buy", "net_sell", "neutral", None), (
         f"net_signal unexpected value: {ins.get('net_signal')!r}"
     )
-    # Hard-assert at least one side is nonzero, catches column-misread silently returning 0.
-    # C3.ai has documented insider purchases; if both sides are 0 the column parsing is broken.
+    # Synthetic insider transactions must retain nonzero purchase and sale values.
     assert ins.get("available") and (ins.get("buy_value", 0) > 0 or ins.get("sell_value", 0) > 0), (
         f"AI insider: buy_value and sell_value are BOTH zero with available=True — "
         f"column parsing is broken (wrong column indices). "
@@ -1070,30 +1203,26 @@ def _selftest():
     assert not _we2, "C1b: wrong_entity_suspected must NOT fire for normal shares count"
     print(f"  C1b wrong_entity_suspected: does NOT fire for normal company  OK")
 
-    # --- P3: concentration extraction (magnitude-based, replaces substring) ---
-    # SIGA-like footnote: single counterparty (U.S. Government) at 75% → top_customer_pct.
-    _siga_text = (
-        "Note 9. At December 31, 2025 and 2024, 75% and 45%, respectively, of accounts "
-        "receivable represent receivables from the U.S. Government. Substantially all of "
-        "our product revenue is derived from contracts with BARDA."
+    # Synthetic receivables concentration identifies one customer at 83%.
+    _decline_case_text = (
+        _legacy['concentration_receivables']
     )
-    _tc, _tp, _cd = _extract_concentration(_siga_text)
-    assert _tc is not None and _tc >= 75.0, (
-        f"P3: SIGA-like single-counterparty 75% must be captured as top_customer_pct, got {_tc}"
+    _tc, _tp, _cd = _extract_concentration(_decline_case_text)
+    assert _tc is not None and _tc == 83.0, (
+        f"P3: synthetic single-counterparty 83% must be captured as top_customer_pct, got {_tc}"
     )
     assert _cd is not None and "top_customer" in _cd, f"P3: detail must describe customer, got {_cd!r}"
     assert _concentration_flag(_tc, _tp) == "kill", (
         f"P3: top_customer_pct>40 must yield kill, got {_concentration_flag(_tc, _tp)}"
     )
-    print(f"  P3 concentration: SIGA-like top_customer={_tc:.0f}% -> kill  OK")
+    print(f"  P3 concentration: synthetic top_customer={_tc:.0f}% -> kill  OK")
 
     # Program concentration >60% → kill; revenue-share phrasing.
     _prog_text = (
-        "Our lead product accounted for approximately 82% of total revenue for the year. "
-        "No single customer represented more than 10% of net sales."
+        _legacy['concentration_program']
     )
     _tc2, _tp2, _cd2 = _extract_concentration(_prog_text)
-    assert _tp2 is not None and _tp2 >= 82.0, f"P3: program 82% must be captured, got {_tp2}"
+    assert _tp2 is not None and _tp2 == 84.0, f"P3: program 84% must be captured, got {_tp2}"
     assert _concentration_flag(_tc2, _tp2) == "kill", (
         f"P3: top_program_pct>60 must yield kill, got {_concentration_flag(_tc2, _tp2)}"
     )
@@ -1120,34 +1249,20 @@ def _selftest():
     assert _ebit0 == [] and _src0 is None, f"P9: unrecoverable EBIT must yield ([], None), got {_src0}"
     print(f"  P9 ebit_source: OperatingIncomeLoss path + unrecoverable path tagged correctly  OK")
 
-    # Live cascade: ASIX (CIK 1739104) and BBW (CIK 1113809) do NOT tag OperatingIncomeLoss
-    # (the ~47% null-EV/EBITDA case). The cascade must recover a non-empty EBIT series tagged
-    # as a pretax fallback so EV/EBITDA can compute.
-    _op_asix = concept_series("1739104", EBIT_PRIMARY_CONCEPT)
-    _ebit_asix, _src_asix = _ebit_with_source("1739104", _op_asix)
-    assert not _op_asix, "P9: ASIX must NOT tag OperatingIncomeLoss (cascade precondition)"
-    assert _ebit_asix and _src_asix in ("pretax+interest_addback", "pretax_proxy"), (
-        f"P9: ASIX EBIT must recover via pretax cascade, got source={_src_asix} n={len(_ebit_asix)}"
+    # Synthetic missing operating income must recover through pretax and interest concepts.
+    _op_fallback = concept_series("904", EBIT_PRIMARY_CONCEPT)
+    _ebit_fallback, _src_fallback = _ebit_with_source("904", _op_fallback)
+    assert _ebit_fallback[-1]["val"] == 45_000_000
+    assert not _op_fallback, "P9: synthetic fallback must NOT tag OperatingIncomeLoss (cascade precondition)"
+    assert _ebit_fallback and _src_fallback in ("pretax+interest_addback", "pretax_proxy"), (
+        f"P9: synthetic fallback EBIT must recover via pretax cascade, got source={_src_fallback} n={len(_ebit_fallback)}"
     )
-    print(f"  P9 ebit_source: ASIX recovers via {_src_asix} (n={len(_ebit_asix)})  OK")
+    print(f"  P9 ebit_source: synthetic fallback recovers via {_src_fallback} (n={len(_ebit_fallback)})  OK")
 
-    # --- P6: trajectory + contamination derived fields ---
-    # Declining revenue + lumpy OCF with a BARDA-style peak (SIGA contamination ~0.68).
-    _rev_decline = [
-        {"end": "2021-12-31", "val": 130_000_000},
-        {"end": "2022-12-31", "val": 120_000_000},
-        {"end": "2023-12-31", "val": 110_000_000},
-        {"end": "2024-12-31", "val": 95_000_000},
-        {"end": "2025-12-31", "val": 89_000_000},
-    ]
-    # OCF base: peak year (94.8) inflates the 5yr-avg so latest (43.5) is contaminated.
-    _ocf_lumpy = [
-        {"end": "2021-12-31", "val": 11_500_000},
-        {"end": "2022-12-31", "val": 41_600_000},
-        {"end": "2023-12-31", "val": 94_800_000},
-        {"end": "2024-12-31", "val": 48_800_000},
-        {"end": "2025-12-31", "val": 43_500_000},
-    ]
+    # Synthetic declining revenue and a cash-flow peak exercise contamination.
+    _rev_decline = _legacy['deepdive_clean_decline_revenue']
+    # Synthetic peak 108M raises the average to 48M; latest cash flow is 36M.
+    _ocf_lumpy = _legacy['deepdive_lumpy_ocf']
     _t = _trajectory_fields(_rev_decline, _ocf_lumpy)
     assert _t["rev_slope_sign"] == -1, f"P6: declining revenue must give slope_sign -1, got {_t['rev_slope_sign']}"
     assert isinstance(_t["rev_accel_sign"], int) and _t["rev_accel_sign"] in (-1, 0, 1), (
@@ -1158,9 +1273,9 @@ def _selftest():
         f"P6: contamination_ratio (latest/5yr-avg) must be <1.0 for the lumpy series, "
         f"got {_t['contamination_ratio']}"
     )
-    # latest 43.5 / 5yr-avg(11.5,41.6,94.8,48.8,43.5)=48.04 = 0.9055 per the contract formula.
-    assert abs(_t["contamination_ratio"] - 0.9055) < 0.001, (
-        f"P6: contamination_ratio must equal latest/5yr-avg=0.9055, got {_t['contamination_ratio']}"
+    # The independently specified expected ratio is 36M / 48M = 0.75.
+    assert abs(_t["contamination_ratio"] - _legacy["deepdive_lumpy_ratio"]) < 0.001, (
+        f"P6: contamination_ratio must equal latest/5yr-avg=0.75, got {_t['contamination_ratio']}"
     )
     assert _t["fundamental_decline_flag"] is True, (
         "P6: fundamental_decline_flag must fire when slope<0 AND contamination<1 AND latest_below_avg"
@@ -1168,29 +1283,17 @@ def _selftest():
     print(f"  P6 trajectory: slope=-1 accel={_t['rev_accel_sign']} "
           f"contamination={_t['contamination_ratio']} decline_flag=True  OK")
 
-    # P6 regression: the REAL SIGA revenue series is contaminated at the front by a 9-month stub
-    # and a duplicate-year mislabel; the raw all-time slope is +1, masking the decline. The
-    # annualize + trailing-5 cleaning must recover slope=-1 so the veto fires (this is the bug the
-    # phase-1 reviewer caught that the hand-cleaned _rev_decline crystal above could not surface).
-    _rev_siga = [
-        {"end": "2019-09-30", "val": 8_111_000},     # 9-month stub
-        {"end": "2019-12-31", "val": 26_742_085},    # mislabeled FY, same calendar year as stub
-        {"end": "2020-12-31", "val": 124_959_304},
-        {"end": "2021-12-31", "val": 133_670_454},
-        {"end": "2022-12-31", "val": 110_775_610},
-        {"end": "2023-12-31", "val": 139_917_220},
-        {"end": "2024-12-31", "val": 138_719_350},
-        {"end": "2025-12-31", "val": 94_574_902},     # real decline, -31.8% YoY
-    ]
-    _ts = _trajectory_fields(_rev_siga, _ocf_lumpy)
+    # A synthetic stub and duplicate year must not hide the trailing revenue decline.
+    _rev_decline_case = _legacy['deepdive_decline_revenue']
+    _ts = _trajectory_fields(_rev_decline_case, _ocf_lumpy)
     assert _ts["rev_slope_sign"] == -1, (
-        f"P6 regression: contaminated SIGA series must annualize+trail to slope -1 "
+        f"P6 regression: contaminated synthetic decline series must annualize+trail to slope -1 "
         f"(raw all-time slope was +1), got {_ts['rev_slope_sign']}"
     )
     assert _ts["fundamental_decline_flag"] is True, (
-        "P6 regression: SIGA must fire fundamental_decline_flag after series cleaning"
+        "P6 regression: synthetic decline must fire fundamental_decline_flag after series cleaning"
     )
-    print("  P6 regression: contaminated SIGA series -> slope=-1, decline_flag=True  OK")
+    print("  P6 regression: contaminated synthetic decline series -> slope=-1, decline_flag=True  OK")
 
     # Healthy grower: rising revenue, stable/rising OCF → no decline flag.
     _rev_grow = [
@@ -1228,48 +1331,28 @@ def _selftest():
     assert _short["peak_contamination_flag"] is False, "P-A: single-point must not fire peak flag"
     print(f"  P6 trajectory: short-series safe defaults  OK")
 
-    # --- P-A: peak_contamination_flag, V-shape value trap, independent of rev_slope_sign ---
-    # Regression crystal feeding NRP's REAL V-shape revenue series: trough 2020 ~120M -> peak
-    # 2022 ~307M -> rolling over to 2024 ~232M. The whole-window linear fit is UPWARD so
-    # rev_slope_sign=+1 and fundamental_decline_flag stays False, peak_contamination_flag is the
-    # independent catch. OCF normalization base is past-peak-contaminated (<0.8) and latest NI<0.
-    _rev_nrp = [
-        {"end": "2020-12-31", "val": 120_000_000},   # trough
-        {"end": "2021-12-31", "val": 240_000_000},
-        {"end": "2022-12-31", "val": 307_000_000},   # peak
-        {"end": "2023-12-31", "val": 270_000_000},
-        {"end": "2024-12-31", "val": 232_000_000},   # rolling over, but still > 2020 trough
-    ]
-    # OCF base contaminated by the 2022 peak; latest 2024 base well below the 5yr-avg ->
-    # contamination_ratio < 0.8 (here ~0.73, in NRP's documented ~0.7445 band).
-    _ocf_nrp = [
-        {"end": "2020-12-31", "val": 90_000_000},
-        {"end": "2021-12-31", "val": 200_000_000},
-        {"end": "2022-12-31", "val": 260_000_000},   # peak inflates the 5yr-avg
-        {"end": "2023-12-31", "val": 150_000_000},
-        {"end": "2024-12-31", "val": 119_120_000},   # latest, contaminated
-    ]
-    _ni_nrp = [
-        {"end": "2023-12-31", "val": 40_000_000},
-        {"end": "2024-12-31", "val": -84_800_000},   # NRP real latest NI = -84.8M
-    ]
-    _tn = _trajectory_fields(_rev_nrp, _ocf_nrp, _ni_nrp)
+    # The synthetic peak has a rising whole-window slope, contaminated cash flow and a current loss.
+    _rev_peak_case = _legacy['deepdive_peak_revenue']
+    # The synthetic peak has a rising whole-window slope, contaminated cash flow and a current loss.
+    _ocf_peak_case = _legacy['deepdive_peak_ocf']
+    _ni_peak_case = _legacy['deepdive_peak_income']
+    _tn = _trajectory_fields(_rev_peak_case, _ocf_peak_case, _ni_peak_case)
     assert _tn["rev_slope_sign"] == 1, (
-        f"P-A: NRP V-shape whole-window slope must be +1 (upward fit), got {_tn['rev_slope_sign']}"
+        f"P-A: synthetic peak V-shape whole-window slope must be +1 (upward fit), got {_tn['rev_slope_sign']}"
     )
     assert _tn["fundamental_decline_flag"] is False, (
         "P-A: fundamental_decline_flag must stay False on the V-shape (slope is +1) — "
         "peak_contamination_flag is the independent catch"
     )
     assert _tn["contamination_ratio"] is not None and _tn["contamination_ratio"] < 0.8, (
-        f"P-A: NRP contamination_ratio must be <0.8, got {_tn['contamination_ratio']}"
+        f"P-A: synthetic peak contamination_ratio must be <0.8, got {_tn['contamination_ratio']}"
     )
-    assert _tn["latest_below_avg"] is True, "P-A: NRP latest OCF base must be below trailing avg"
+    assert _tn["latest_below_avg"] is True, "P-A: synthetic peak latest OCF base must be below trailing avg"
     assert _tn["peak_contamination_flag"] is True, (
-        "P-A: peak_contamination_flag MUST fire on NRP V-shape (cr<0.8 AND latest_below_avg "
+        "P-A: peak_contamination_flag MUST fire on synthetic peak V-shape (cr<0.8 AND latest_below_avg "
         f"AND latest_NI<0), got {_tn['peak_contamination_flag']} (cr={_tn['contamination_ratio']})"
     )
-    print(f"  P-A peak_contamination: NRP V-shape slope=+1 decline_flag=False "
+    print(f"  P-A peak_contamination: synthetic peak V-shape slope=+1 decline_flag=False "
           f"peak_flag=True (cr={_tn['contamination_ratio']})  OK")
 
     # P-A negatives: must NOT fire when any of the three conditions is absent.
@@ -1281,18 +1364,18 @@ def _selftest():
         {"end": "2024-12-31", "val": 98_000_000},
         {"end": "2025-12-31", "val": 95_000_000},   # latest/5yr-avg ~0.92 (>0.8)
     ]
-    _tn2 = _trajectory_fields(_rev_nrp, _ocf_mild, _ni_nrp)
+    _tn2 = _trajectory_fields(_rev_peak_case, _ocf_mild, _ni_peak_case)
     assert _tn2["peak_contamination_flag"] is False, (
         f"P-A: peak flag must NOT fire when contamination>=0.8 (got cr={_tn2['contamination_ratio']})"
     )
     #  (2) deeply contaminated base but latest NI positive -> no peak flag
     _ni_pos = [{"end": "2024-12-31", "val": 30_000_000}]
-    _tn3 = _trajectory_fields(_rev_nrp, _ocf_nrp, _ni_pos)
+    _tn3 = _trajectory_fields(_rev_peak_case, _ocf_peak_case, _ni_pos)
     assert _tn3["peak_contamination_flag"] is False, (
         "P-A: peak flag must NOT fire when latest net income is positive"
     )
     #  (3) no ni_series passed (default) -> peak flag stays False
-    _tn4 = _trajectory_fields(_rev_nrp, _ocf_nrp)
+    _tn4 = _trajectory_fields(_rev_peak_case, _ocf_peak_case)
     assert _tn4["peak_contamination_flag"] is False, (
         "P-A: peak flag must stay False when net income unavailable (ni_series omitted)"
     )
@@ -1300,14 +1383,7 @@ def _selftest():
     assert _tg["peak_contamination_flag"] is False, "P-A: grower must not fire peak flag"
     print("  P-A peak_contamination: negatives (cr>=0.8 / NI>=0 / no-NI / grower) all False  OK")
 
-    # --- A1: degenerate-base guard, a NEGATIVE contamination_ratio must trip NEITHER flag. ---
-    # BWIN fired at cr=-2.4618: the 5yr-avg OCF base was NEGATIVE, so latest/avg5 < 0. With the old
-    # cr<0.8 / cr<1.0 tests that passed TRIVIALLY for any negative number. The 0< lower bound must
-    # now keep BOTH flags False even though latest_below_avg=True AND latest_NI<0.
-    # Build a base series with a POSITIVE 5yr-avg but a NEGATIVE latest (opposite signs ->
-    # contamination_ratio < 0), and latest below the positive trailing avg (latest_below_avg=True).
-    # prior4 avg = +40M; latest = -30M (< 40M, so below_avg). avg5 = (160-30)/5 = +26M.
-    # cr = -30/26 ~= -1.15 (< 0). This is the BWIN-class degenerate negative ratio.
+    # A negative latest cash flow and positive average create a negative contamination ratio.
     _ocf_neg2 = [
         {"end": "2020-12-31", "val":  40_000_000},
         {"end": "2021-12-31", "val":  40_000_000},
@@ -1315,8 +1391,8 @@ def _selftest():
         {"end": "2023-12-31", "val":  40_000_000},
         {"end": "2024-12-31", "val": -30_000_000},  # latest negative -> cr < 0, below positive avg
     ]
-    _ni_neg = [{"end": "2024-12-31", "val": -84_800_000}]  # loss-making, like NRP
-    _t_neg = _trajectory_fields(_rev_nrp, _ocf_neg2, _ni_neg)
+    _ni_neg = _legacy['deepdive_negative_income']
+    _t_neg = _trajectory_fields(_rev_peak_case, _ocf_neg2, _ni_neg)
     assert _t_neg["contamination_ratio"] is not None and _t_neg["contamination_ratio"] < 0, (
         f"A1: crystal must produce a NEGATIVE contamination_ratio, got {_t_neg['contamination_ratio']}"
     )
@@ -1332,10 +1408,7 @@ def _selftest():
     print(f"  A1 degenerate-base: cr={_t_neg['contamination_ratio']} (<0) + below_avg + NI<0 -> "
           f"BOTH flags False  OK")
 
-    # --- A2: concentration_unquantified, text-conc True AND magnitude null -> True (advisory). ---
-    # SWMR/LFCR cohort: the 10-K text flags customer concentration but no machine-readable
-    # magnitude exists (pre-/early-XBRL or narrative-only). The advisory must surface; it does NOT
-    # gate. Reuse the contract: customer_concentration_flag=True, concentration_flag=None.
+    # Narrative concentration without a quantified magnitude remains advisory.
     _a2_text_conc = True
     _a2_mag = None  # _concentration_flag(None, None) is None
     _a2_unquant = _a2_text_conc and (_a2_mag is None)
@@ -1366,23 +1439,20 @@ def _selftest():
     )
     print(f"  A3 insurance_concepts_present: insurer-like set matches '{_ins_match}', non-insurer None  OK")
 
-    # --- P-B / A4: low_revenue_loss_ratio (tiered) + refined wrong_entity_suspected ---
-    # Early/pre-revenue resource pattern: present-but-tiny revenue + large genuine loss.
-    # URG-like: revenue ~$45M, net loss ~$120M -> |NI|/rev=2.67 (>2.0, <20).
-    # MUST set low_revenue_loss_ratio=True, extreme=False, wrong_entity=False (it IS the right entity).
-    _urg_rev = [{"end": "2024-12-31", "val": 45_000_000}]
-    _urg_ni = [{"end": "2024-12-31", "val": -120_000_000}]
-    _urg_shares = [{"end": "2024-12-31", "val": 350_000_000}]
-    _lrl, _lrl_ext, _lrl_detail = _low_revenue_loss_ratio(_urg_rev, _urg_ni)
+    # Synthetic revenue of 60M and loss of 180M exercise the ordinary 3x loss band.
+    _early_case_rev = _legacy['deepdive_early_revenue']
+    _early_case_ni = _legacy['deepdive_early_income']
+    _early_case_shares = _legacy['deepdive_early_shares']
+    _lrl, _lrl_ext, _lrl_detail = _low_revenue_loss_ratio(_early_case_rev, _early_case_ni)
     assert _lrl is True and _lrl_ext is False, (
-        f"P-B: low_revenue_loss_ratio must fire (extreme=False) for URG-like (2.67x), detail={_lrl_detail}"
+        f"P-B: low_revenue_loss_ratio must fire (extreme=False) for synthetic (3.0x), detail={_lrl_detail}"
     )
-    _we_urg, _we_urg_reason = _validate_ticker_entity("", "0000000002", _urg_rev, _urg_shares, _urg_ni)
-    assert _we_urg is False, (
+    _we_early_case, _we_early_case_reason = _validate_ticker_entity("", "0000000002", _early_case_rev, _early_case_shares, _early_case_ni)
+    assert _we_early_case is False, (
         f"P-B: wrong_entity_suspected must NOT fire for the early-revenue resource pattern "
-        f"(|NI|/rev=2.67, not a unit anomaly), got reason={_we_urg_reason}"
+        f"(|NI|/rev=3.0, not a unit anomaly), got reason={_we_early_case_reason}"
     )
-    print(f"  P-B low_revenue_loss_ratio: URG-like tiny-rev+large-loss -> True, extreme=False, "
+    print(f"  P-B low_revenue_loss_ratio: synthetic tiny-rev+large-loss -> True, extreme=False, "
           f"wrong_entity=False  OK")
 
     # --- A4: wrong_entity_suspected fires ONLY on shares<1000 / ticker-absent / CIK-mismatch /
@@ -1450,39 +1520,26 @@ def _selftest():
     assert _zero_quality == (False, False, None)
     print("  Debt evidence: reported zero is preserved  OK")
 
-    # --- P-G: form_used provenance is set by tenk_sections (10-K/20-F/40-F) ---
-    # Live: EGAN (CIK 1066194) is a domestic 10-K filer -> form_used must be "10-K".
-    _tenk_egan = tenk_sections("EGAN", cik="1066194")
-    assert _tenk_egan.get("available"), "P-G: EGAN tenk must be available for form provenance check"
-    assert _tenk_egan.get("filing_form") in ("10-K", "20-F", "40-F"), (
-        f"P-G: form_used must be one of 10-K/20-F/40-F, got {_tenk_egan.get('filing_form')!r}"
+    # Synthetic calendar-year revenue requires the newer concept.
+    _tenk_annual = tenk_sections("SYNANNUAL", cik="901")
+    assert _tenk_annual.get("available"), "P-G: synthetic annual tenk must be available for form provenance check"
+    assert _tenk_annual.get("filing_form") in ("10-K", "20-F", "40-F"), (
+        f"P-G: form_used must be one of 10-K/20-F/40-F, got {_tenk_annual.get('filing_form')!r}"
     )
-    assert _tenk_egan.get("filing_form") == "10-K", (
-        f"P-G: EGAN is a domestic filer -> form_used must be 10-K, got {_tenk_egan.get('filing_form')!r}"
+    assert _tenk_annual.get("filing_form") == "10-K", (
+        f"P-G: synthetic annual is a domestic filer -> form_used must be 10-K, got {_tenk_annual.get('filing_form')!r}"
     )
-    print(f"  P-G form_used: EGAN -> {_tenk_egan.get('filing_form')}  OK")
+    print(f"  P-G form_used: synthetic annual -> {_tenk_annual.get('filing_form')}  OK")
 
-    # --- P-G (foreign): form_used must be populated (NOT None) for a FOREIGN 20-F/40-F filer ---
-    # SHIP (CIK 1377936, Seaspan/Atlas) is a foreign-domiciled filer that files 20-F, not 10-K.
-    # The 10-K branch finds nothing and the 20-F fallback in tenk_sections must set filing_form,
-    # so derived.form_used is never None for foreign filers (the trust-banner provenance gap).
-    _tenk_ship = tenk_sections("SHIP", cik="1377936")
-    if _tenk_ship.get("available"):
-        assert _tenk_ship.get("filing_form") in ("20-F", "40-F"), (
-            f"P-G foreign: a foreign filer's form_used must be 20-F/40-F (not None/10-K), "
-            f"got {_tenk_ship.get('filing_form')!r}"
-        )
-        assert _tenk_ship.get("filing_form") is not None, (
-            "P-G foreign: form_used must NOT be None for a 20-F/40-F filer"
-        )
-        print(f"  P-G foreign form_used: SHIP -> {_tenk_ship.get('filing_form')} (not None)  OK")
-    else:
-        # Network/availability fallback: prove the foreign-filer branch sets form_used via the
-        # offline contract (the 20-F fallback assigns filing_form before returning) so the test
-        # is deterministic even when EDGAR is unreachable.
-        print("  P-G foreign form_used: SHIP unavailable (network); asserting branch contract offline")
-        assert "20-F" in ("20-F", "40-F") and "40-F" in ("20-F", "40-F"), "P-G foreign: branch contract"
-        print("  P-G foreign form_used: 20-F/40-F fallback branch present in tenk_sections  OK")
+    # Synthetic foreign filing requires the 20-F fallback after an empty 10-K collection.
+    _tenk_foreign_case = tenk_sections("SYNFOREIGN", cik="905")
+    assert _tenk_foreign_case.get("available"), "P-G foreign: generated annual filing must be available"
+    assert _tenk_foreign_case.get("filing_form") in ("20-F", "40-F"), (
+        f"P-G foreign: form_used must be 20-F/40-F, got {_tenk_foreign_case.get('filing_form')!r}"
+    )
+    assert _tenk_foreign_case.get("filing_form") is not None, "P-G foreign: form_used must not be None"
+    assert _tenk_foreign_case.get("filing_form") == "20-F", "P-G foreign: generated fallback must select 20-F"
+    print(f"  P-G foreign form_used: synthetic foreign -> {_tenk_foreign_case.get('filing_form')}  OK")
 
     # --- iter4 firewall: "signals" is a TOP-LEVEL key (sibling of derived), NEVER inside derived ---
     # The between-filings side-channel is DIAGNOSTIC-ONLY. valuation/buy_eligible/the BUY trigger
@@ -1525,93 +1582,39 @@ def _selftest():
           "diagnostic_only=True, never_affects_buy=True  OK")
 
     # --- P-D: error artifact writer produces an auditable JSON on a simulated crash ---
-    _err_path = _write_error_artifact("ZZTESTONLY", "ZZTESTONLY", "9999999999",
-                                      RuntimeError("simulated rate-limit / pull crash"))
-    assert _err_path.exists(), f"P-D: error artifact must be written to {_err_path}"
-    _err_doc = json.loads(_err_path.read_text(encoding="utf-8"))
-    assert _err_doc.get("status") == "ERROR" and _err_doc.get("error_type") == "RuntimeError", (
-        f"P-D: error artifact must record status=ERROR + error_type, got {_err_doc}"
-    )
-    assert "simulated rate-limit" in _err_doc.get("error", ""), "P-D: error message must be recorded"
-    # verify the run-level errors log got the audited one-liner, then clean up both test artifacts
-    # so the synthetic ZZTESTONLY entry never pollutes a live run dir / audit log.
-    _err_log = REPORTS / "deepdive_errors.log"
-    if _err_log.exists():
-        _log_txt = _err_log.read_text(encoding="utf-8")
-        assert "ZZTESTONLY" in _log_txt, "P-D: errors log must record the crashed name"
-        _kept = [ln for ln in _log_txt.splitlines() if "ZZTESTONLY" not in ln]
-        if _kept:
-            _err_log.write_text("\n".join(_kept) + "\n", encoding="utf-8")
-        else:
-            try:
-                _err_log.unlink()
-            except Exception:
-                pass
-    try:
-        _err_path.unlink()
-    except Exception:
-        pass
+    _selftest_error_artifact()
     print(f"  P-D error artifact: simulated crash -> auditable ERROR JSON written + parsed  OK")
 
-    # --- P7: second-source sanity band, cross_source_check crystals (network-free) ---
-    # The comparator is pure: SEC-XBRL latest values vs a second-source dict (yfinance-shaped).
-    # All four crystals are offline (no yf_fn / no network) so they are deterministic.
-    #  (i) HRI truncation class: SEC debt 11M vs yf 4B -> mismatch True, detail names debt + ratio.
-    #      This is the exact F5 case the internal-only C1a heuristic could miss without a 2nd source.
-    _p7_chk, _p7_mis, _p7_det = _cross_source_check(
-        11_000_000, 200_000_000, 50_000_000,
-        {"total_debt": 4_000_000_000, "revenue": 210_000_000, "shares_outstanding": 50_000_000},
-    )
-    assert _p7_chk is True, "P7(i): both sources present -> cross_source_checked must be True"
-    assert _p7_mis is True, (
-        f"P7(i): SEC debt 11M vs yf 4B (363x) must set cross_source_mismatch=True, detail={_p7_det}"
-    )
+    # Generated independent-source controls preserve mismatch, agreement and floor branches.
+    from make_fixtures import source34_scenarios
+    _p7 = source34_scenarios()["cross_source"]
+    _p7_chk, _p7_mis, _p7_det = _cross_source_check(*_p7["debt_mismatch"])
+    assert _p7_chk is True, "P7(i): two comparable sources must be checked"
+    assert _p7_mis is True, f"P7(i): gross debt disagreement must be detected: {_p7_det}"
     assert "total_debt" in _p7_det and "ratio" in _p7_det, (
-        f"P7(i): detail must name the disagreeing field + ratio, got {_p7_det!r}"
-    )
-    print(f"  P7(i) debt 11M vs 4B: mismatch=True, detail names debt+ratio  OK")
+        f"P7(i): detail must identify debt and ratio: {_p7_det!r}")
+    print("  P7(i): generated debt mismatch  OK")
 
-    #  (ii) within 2.5x on every comparable field -> mismatch False (no false block on agreement).
-    _p7b_chk, _p7b_mis, _p7b_det = _cross_source_check(
-        100_000_000, 250_000_000, 40_000_000,
-        {"total_debt": 110_000_000, "revenue": 240_000_000, "shares_outstanding": 41_000_000},
-    )
+    _p7b_chk, _p7b_mis, _p7b_det = _cross_source_check(*_p7["agreement"])
     assert _p7b_chk is True and _p7b_mis is False, (
-        f"P7(ii): SEC and yf within 2.5x must set mismatch=False, got mis={_p7b_mis} ({_p7b_det})"
-    )
-    print(f"  P7(ii) all fields within 2.5x: checked=True, mismatch=False  OK")
+        f"P7(ii): comparable agreement must not block: {_p7b_det}")
+    print("  P7(ii): generated agreement  OK")
 
-    #  (iii) yf unavailable (None second source) -> checked False, mismatch False (NEVER a false block).
-    _p7c_chk, _p7c_mis, _p7c_det = _cross_source_check(11_000_000, 200_000_000, 50_000_000, None)
+    _p7c_chk, _p7c_mis, _p7c_det = _cross_source_check(*_p7["unavailable"])
     assert _p7c_chk is False and _p7c_mis is False, (
-        f"P7(iii): absent second source must set checked=False AND mismatch=False (no false block), "
-        f"got checked={_p7c_chk} mis={_p7c_mis}"
-    )
-    print(f"  P7(iii) yf unavailable (None): checked=False, mismatch=False (no false block)  OK")
+        f"P7(iii): unavailable second source cannot establish a mismatch: {_p7c_det}")
+    print("  P7(iii): unavailable second source  OK")
 
-    #  (iv) revenue gross disagreement (HCI/AL wrong-entity class): SEC rev 331M vs yf 2.7B ->
-    #       mismatch True naming revenue. debt/shares agree; ANY field gross disagreement trips it.
-    _p7d_chk, _p7d_mis, _p7d_det = _cross_source_check(
-        300_000_000, 331_000_000, 112_000_000,
-        {"total_debt": 320_000_000, "revenue": 2_700_000_000, "shares_outstanding": 113_000_000},
-    )
+    _p7d_chk, _p7d_mis, _p7d_det = _cross_source_check(*_p7["revenue_mismatch"])
     assert _p7d_chk is True and _p7d_mis is True, (
-        f"P7(iv): revenue 331M vs 2.7B (8.2x) must set mismatch=True, got mis={_p7d_mis} ({_p7d_det})"
-    )
-    assert "revenue" in _p7d_det, f"P7(iv): detail must name the revenue field, got {_p7d_det!r}"
-    print(f"  P7(iv) revenue 331M vs 2.7B (HCI/AL class): mismatch=True, names revenue  OK")
+        f"P7(iv): gross revenue disagreement must be detected: {_p7d_det}")
+    assert "revenue" in _p7d_det, f"P7(iv): detail must identify revenue: {_p7d_det!r}"
+    print("  P7(iv): generated revenue mismatch  OK")
 
-    #  (v) floor guard, a trivially-small field on either side must NOT manufacture a mismatch,
-    #      and a field present on only one side must NOT count toward checked.
-    _p7e_chk, _p7e_mis, _p7e_det = _cross_source_check(
-        500_000, 250_000_000, None,                                   # SEC debt 0.5M (<floor); shares None
-        {"total_debt": 5_000_000_000, "revenue": 240_000_000, "shares_outstanding": 40_000_000},
-    )
-    assert _p7e_chk is True, "P7(v): revenue (both present, non-trivial) must set checked=True"
-    assert _p7e_mis is False, (
-        f"P7(v): sub-floor debt must NOT manufacture a mismatch, got mis={_p7e_mis} ({_p7e_det})"
-    )
-    print(f"  P7(v) floor guard: sub-floor field skipped, one-sided field not counted  OK")
+    _p7e_chk, _p7e_mis, _p7e_det = _cross_source_check(*_p7["floor"])
+    assert _p7e_chk is True, "P7(v): comparable revenue must be checked"
+    assert _p7e_mis is False, f"P7(v): sub-floor or one-sided values cannot block: {_p7e_det}"
+    print("  P7(v): comparison floor and one-sided fields  OK")
 
     #  (vi) default fetch _yf_second_source guards on empty ticker (no network, returns None).
     assert _yf_second_source("") is None, (
@@ -1622,7 +1625,7 @@ def _selftest():
     #  (vii) pull() emits the three P7 fields via an injected offline yf_fn (network-free path).
     #       A mismatching second source must surface checked=True / mismatch=True in derived.
     _p7_yf = lambda t: {"total_debt": 4_000_000_000, "revenue": None, "shares_outstanding": None}
-    _p7_chk2, _p7_mis2, _p7_det2 = _cross_source_check(11_000_000, None, None, _p7_yf("EGAN"))
+    _p7_chk2, _p7_mis2, _p7_det2 = _cross_source_check(11_000_000, None, None, _p7_yf("SYNANNUAL"))
     assert _p7_chk2 is True and _p7_mis2 is True, (
         "P7(vii): injected yf_fn debt-only mismatch must yield checked=True, mismatch=True"
     )
@@ -1640,34 +1643,26 @@ def _selftest():
     )
     print(f"  P7(vii) pull-level: injected yf_fn mismatch surfaces; raising fn degrades to no-block  OK")
 
-    # --- v0.3.1 #1: normalization_masks_current_loss, the TUSK degenerate-base / divested-stub hole ---
-    # TUSK: latest_ocf=-18.6M, latest_fcf=-89.1M, contamination_ratio<0, but the trailing-avg
-    # normalized_fcf is POSITIVE -> phantom +55.1% MoS. The flag MUST fire so valuation downgrades.
-    _tusk_ocf = [
-        {"end": "2020-12-31", "val":  50_000_000},
-        {"end": "2021-12-31", "val":  60_000_000},
-        {"end": "2022-12-31", "val":  40_000_000},
-        {"end": "2023-12-31", "val":  30_000_000},
-        {"end": "2024-12-31", "val": -18_600_000},   # latest OCF negative (current burn)
-    ]
-    _tusk_norm = _normalized_fcf_proxy(_tusk_ocf, [], True)  # proxy mode (no capex) -> avg OCF
-    assert _tusk_norm is not None and _tusk_norm > 0, (
-        f"#1: TUSK trailing-avg normalized_fcf must be POSITIVE (the masking), got {_tusk_norm}"
+    # A positive normalized cash-flow base must not conceal a synthetic current loss.
+    _masked_case_ocf = _legacy['deepdive_masked_ocf']
+    _masked_case_norm = _normalized_fcf_proxy(_masked_case_ocf, [], True)  # proxy mode (no capex) -> avg OCF
+    assert _masked_case_norm is not None and _masked_case_norm > 0, (
+        f"#1: synthetic current-loss trailing-avg normalized_fcf must be POSITIVE (the masking), got {_masked_case_norm}"
     )
     # cr<0 path (the A1-silenced degenerate base), flag must fire.
-    assert _normalization_masks_current_loss(_tusk_norm, -18_600_000, -89_100_000, -2.4618) is True, (
+    assert _normalization_masks_current_loss(_masked_case_norm, *_legacy["masked_loss_inputs"]) is True, (
         "#1: normalization_masks_current_loss must fire when normalized_fcf>0 AND contamination<0 "
-        "(TUSK degenerate-base hole)"
+        "(synthetic current-loss degenerate-base hole)"
     )
     # latest_ocf<0 alone (positive cr) must also fire (current cash burn masked by the average).
-    assert _normalization_masks_current_loss(_tusk_norm, -18_600_000, 5_000_000, 1.1) is True, (
+    assert _normalization_masks_current_loss(_masked_case_norm, _legacy["masked_loss_inputs"][0], 5_000_000, 1.1) is True, (
         "#1: must fire when normalized_fcf>0 AND latest_ocf<0 (current burn masked)"
     )
     # latest_fcf<0 alone (positive cr, positive ocf) must fire.
-    assert _normalization_masks_current_loss(_tusk_norm, 10_000_000, -89_100_000, 1.1) is True, (
+    assert _normalization_masks_current_loss(_masked_case_norm, 10_000_000, _legacy["masked_loss_inputs"][1], 1.1) is True, (
         "#1: must fire when normalized_fcf>0 AND latest_fcf<0"
     )
-    print(f"  #1 normalization_masks_current_loss: TUSK-like (norm_fcf={_tusk_norm/1e6:.1f}M>0, "
+    print(f"  #1 normalization_masks_current_loss: synthetic (norm_fcf={_masked_case_norm/1e6:.1f}M>0, "
           f"latest_ocf<0) -> True  OK")
 
     # Clean grower: positive normalized_fcf AND positive current OCF/FCF AND positive cr -> False.
@@ -1753,7 +1748,7 @@ def _selftest():
         return _stub
 
     try:
-        # (a) SINGLE stray insurance tag on a NON-insurance SIC (3690, SPB-like) -> False (the FP fix).
+        # Synthetic insurance evidence must respect the SIC and concept-count thresholds.
         _dc._one_concept = _make_stub({"PremiumsEarnedNet"})
         _ins_a, _ins_a_c = _insurance_concepts_present("0000000001", sic_code="3690")
         assert _ins_a is False, (
@@ -1779,7 +1774,7 @@ def _selftest():
         _dc._one_concept = _make_stub({"Revenues", "Assets"})
         _ins_d, _ = _insurance_concepts_present("0000000001", sic_code="6311")
         assert _ins_d is False, "#4: no insurance concepts present must yield False even on insurer SIC"
-        # (e) single tag, SIC absent/None (the BOC SIC-65 routing must still need 2 concepts) -> False.
+        # Synthetic insurance evidence must respect the SIC and concept-count thresholds.
         _dc._one_concept = _make_stub({"PremiumsEarnedNet"})
         _ins_e, _ = _insurance_concepts_present("0000000001", sic_code=None)
         assert _ins_e is False, "#4: single tag with no SIC must NOT fire (needs >=2 concepts)"
@@ -1788,84 +1783,66 @@ def _selftest():
     print("  #4 insurance_concepts_present: single tag on SIC 3690 False; 2 concepts True; "
           "single tag on SIC 6311/6411 True; none False  OK")
 
-    # --- v0.3.1 #7: segment-vs-customer concentration guard ---
-    # DSGR: "100% of [Canada Branch Division] revenue" is a SEGMENT disclosure, not a single
-    # customer. top_customer_pct must NOT be set (the FP that killed a real $1.32B distributor).
-    _dsgr_text = (
-        "Note 12. Segment information. Our Canada Branch Division generated 100% of "
-        "[Canada Branch Division] revenue from sales within Canada during fiscal 2024."
+    # A segment revenue percentage must not become a customer concentration percentage.
+    _segment_case_text = (
+        _legacy['concentration_bracket_segment']
     )
-    _dsgr_tc, _dsgr_tp, _dsgr_cd = _extract_concentration(_dsgr_text)
-    assert _dsgr_tc is None, (
+    _segment_case_tc, _segment_case_tp, _segment_case_cd = _extract_concentration(_segment_case_text)
+    assert _segment_case_tc is None, (
         f"#7: 'X% of [Division] revenue' is a segment disclosure -> top_customer_pct must be None, "
-        f"got {_dsgr_tc} (detail={_dsgr_cd})"
+        f"got {_segment_case_tc} (detail={_segment_case_cd})"
     )
-    # LOAD-BEARING regression (v0.3.1 verifier): the REAL DSGR filing text (a) sits a single-customer
-    # phrase ("largest customer") within the 180-char window of the 100% so cust_d is NOT None, AND
-    # (b) has whitespace COLLAPSED ("100% ofCanada", "Approximately100%") with a curly apostrophe
-    # ("Division’s"). The earlier guard required `of\s+` + ASCII-only and silently no-opped on this
-    # exact shape, re-setting top_customer_pct=100 and re-killing DSGR. The guard MUST suppress it.
-    _dsgr_real = (
-        "Our largest customer accounted for approximately 5% of consolidated revenue. "
-        "Approximately100% ofCanada Branch Division’s revenue from sales within Canada "
-        "during fiscal 2024."
+    # Collapsed whitespace must preserve the earlier 5% customer and exclude the later segment figure.
+    _segment_case_real = (
+        _legacy['concentration_collapsed_segment']
     )
-    _dr_tc, _dr_tp, _dr_cd = _extract_concentration(_dsgr_real)
-    assert _dr_tc is None, (
-        f"#7 LOAD-BEARING: collapsed-whitespace + curly-apostrophe '100% ofCanada Branch "
-        f"Division’s revenue' must be guarded as a SEGMENT disclosure even with a customer "
-        f"phrase in-window -> top_customer_pct must be None, got {_dr_tc} (detail={_dr_cd})"
+    _dr_tc, _dr_tp, _dr_cd = _extract_concentration(_segment_case_real)
+    assert _dr_tc == 5.0, (
+        f"#7: retain the earlier 5% customer disclosure while excluding the later "
+        f"collapsed-whitespace segment percentage, got {_dr_tc} (detail={_dr_cd})"
     )
-    assert _CONC_SEGMENT_CTX.search("100% ofcanada branch division’s revenue") is not None, (
+    assert _CONC_SEGMENT_CTX.search(_legacy["concentration_patterns"]["collapsed"]) is not None, (
         "#7: _CONC_SEGMENT_CTX must match collapsed-whitespace/curly-apostrophe segment phrasing"
     )
-    # LOAD-BEARING regression #2 (real DSGR 92% shape): "X% of <ProperNoun>’s revenue" is a segment
-    # breakdown (Lawson Products is a DSGR segment) with NO segment keyword, and an UNRELATED
-    # "our largest customer ... <5%" sentence sits in the same 180-char window. The possessive guard
-    # must suppress it so the 92% is NOT bound to the customer class (which re-killed DSGR).
-    _dsgr_poss = (
-        "In 2024 the Lawson segment accounted for approximately 4% of Lawson’s revenue. "
-        "In 2025, approximately 92% of Lawson’s revenue was generated by repair products. "
-        "Our largest customer accounted for less than 5% of consolidated revenue."
+    # An 87% possessive segment figure must not attach to the nearby 5% customer statement.
+    _segment_case_poss = (
+        _legacy['concentration_possessive_segment']
     )
-    _dp_tc, _dp_tp, _dp_cd = _extract_concentration(_dsgr_poss)
-    # The 92% segment figure must NOT be bound to a customer (that was the re-kill). A genuine,
+    _dp_tc, _dp_tp, _dp_cd = _extract_concentration(_segment_case_poss)
+    # The 87% segment figure must NOT be bound to a customer (that was the re-kill). A genuine,
     # in-window "largest customer ... less than 5%" mention legitimately yields 5%, harmless,
     # well below the 40% kill band. The load-bearing requirement is that no KILL-grade customer
-    # percentage (>40) is manufactured from the 92% segment figure.
+    # percentage (>40) is manufactured from the 87% segment figure.
     assert _dp_tc is None or _dp_tc < 40, (
-        f"#7 LOAD-BEARING: '92% of Lawson’s revenue' (possessive proper-noun segment) must NOT bind "
+        f"#7 LOAD-BEARING: '87% of AcmeCorp Retail’s revenue' (possessive proper-noun segment) must NOT bind "
         f"to a kill-grade customer pct -> top_customer_pct must be None or <40, "
         f"got {_dp_tc} (detail={_dp_cd})"
     )
     assert _concentration_flag(_dp_tc, _dp_tp) != "kill", (
-        f"#7 LOAD-BEARING: the DSGR possessive-segment shape must NOT yield a kill flag, "
+        f"#7 LOAD-BEARING: the synthetic segment possessive-segment shape must NOT yield a kill flag, "
         f"got flag for tc={_dp_tc}"
     )
     # Possessive guard must NOT swallow a GENUINE customer stated against a generic denominator.
     assert _CONC_SEGMENT_POSSESSIVE.search("65% of total revenue") is None, (
         "#7: possessive guard must NOT match generic-denominator 'X% of total revenue'"
     )
-    assert _CONC_SEGMENT_POSSESSIVE.search("92% of Lawson’s revenue") is not None, (
+    assert _CONC_SEGMENT_POSSESSIVE.search(_legacy["concentration_patterns"]["possessive"]) is not None, (
         "#7: possessive guard must match 'X% of <ProperNoun>’s revenue' segment phrasing"
     )
-    assert _CONC_SEGMENT_POSSESSIVE.search("83% of Gexpro Services’ 2025 total revenue") is not None, (
+    assert _CONC_SEGMENT_POSSESSIVE.search(_legacy["concentration_patterns"]["plural"]) is not None, (
         "#7: possessive guard must match PLURAL possessive + intervening qualifier "
         "('Services’ 2025 total revenue')"
     )
-    # LOAD-BEARING regression #3 (real DSGR 83% shape): "the top 20 customers represented ~83% of
-    # Gexpro Services’ total revenue" is BOTH a diversified base (top N customers, not one) AND a
-    # possessive proper-noun segment, must NOT yield a single-customer kill.
-    _dsgr_div = (
-        "In fiscal 2025 the top 20 customers represented approximately 83% of Gexpro "
-        "Services’ 2025 total revenue, reflecting a broad and diversified customer base."
+    # Diversified customers and a possessive segment denominator must not imply one customer.
+    _segment_case_div = (
+        _legacy['concentration_diversified']
     )
-    _dv_tc, _dv_tp, _dv_cd = _extract_concentration(_dsgr_div)
+    _dv_tc, _dv_tp, _dv_cd = _extract_concentration(_segment_case_div)
     assert _concentration_flag(_dv_tc, _dv_tp) != "kill", (
-        f"#7 LOAD-BEARING: 'top 20 customers ... 83% of Gexpro Services’ revenue' (diversified + "
+        f"#7 LOAD-BEARING: 'top 18 customers ... 81% of AcmeCorp Services’ revenue' (diversified + "
         f"segment) must NOT yield a kill, got tc={_dv_tc} tp={_dv_tp} (detail={_dv_cd})"
     )
-    assert _CONC_DIVERSIFIED_CUSTOMERS.search("the top 20 customers represented 83%") is not None, (
+    assert _CONC_DIVERSIFIED_CUSTOMERS.search(_legacy["concentration_patterns"]["diversified"]) is not None, (
         "#7: diversification guard must match 'top N customers'"
     )
     assert _CONC_DIVERSIFIED_CUSTOMERS.search("our largest customer accounted for 65%") is None, (
@@ -1881,53 +1858,50 @@ def _selftest():
     # CRITICAL non-regression: a GENUINE single-customer concentration must STILL be captured ,
     # the guard must only suppress segment phrasing, not real customer dependence.
     _real_cust = (
-        "Our largest customer accounted for 65% of total revenue in fiscal 2024; no other "
-        "customer exceeded 10%."
+        _legacy['concentration_customer']
     )
     _rc_tc, _rc_tp, _ = _extract_concentration(_real_cust)
-    assert _rc_tc is not None and _rc_tc >= 65.0, (
-        f"#7 non-regression: a genuine 'largest customer ... 65% of total revenue' must STILL set "
+    assert _rc_tc is not None and _rc_tc == 68.0, (
+        f"#7 non-regression: a genuine 'largest customer ... 68% of total revenue' must STILL set "
         f"top_customer_pct, got {_rc_tc}"
     )
     assert _concentration_flag(_rc_tc, _rc_tp) == "kill", (
-        "#7 non-regression: genuine 65% customer concentration must still yield kill"
+        "#7 non-regression: genuine 68% customer concentration must still yield kill"
     )
-    print(f"  #7 concentration: DSGR '100% of [Division] revenue' -> top_customer_pct None; "
-          f"genuine 65% customer still captured (kill)  OK")
+    print(f"  #7 concentration: synthetic segment '100% of [Division] revenue' -> top_customer_pct None; "
+          f"genuine 68% customer still captured (kill)  OK")
 
-    # --- v0.3.1 #13(NI): absurd net-income unit-mistag data_quality_warn ---
-    # JILL (27,900M NI vs tiny revenue) and REAL (41,799M NI) are XBRL unit mis-tags: |NI|>rev*50.
+    # Synthetic net-income ratios exercise the strict 50x anomaly threshold.
     def _ni_warn(ni_val, rev_val):
         if ni_val is not None and rev_val is not None and rev_val != 0 and abs(ni_val) > abs(rev_val) * 50:
             return f"absurd NI flagged"
         return None
-    # JILL: $27,900M NI is implausible against a ~$600M apparel revenue (47x... use stronger case) ,
-    # the contract is |NI| > revenue*50. Use JILL's documented mistag (27,900M) vs a small revenue.
-    assert _ni_warn(27_900_000_000, 500_000_000) is not None, (
-        "#13(NI): JILL-like 27,900M NI vs 500M revenue (55.8x) must flag data_quality_warn"
+    # Synthetic net-income ratios exercise the strict 50x anomaly threshold.
+    assert _ni_warn(*_legacy["ni_anomaly_cases"][0]) is not None, (
+        "#13(NI): synthetic 30,000M NI vs 400M revenue (75x) must flag data_quality_warn"
     )
-    # REAL: 41,799M NI vs ~500M revenue -> 83.6x -> flag.
-    assert _ni_warn(41_799_000_000, 500_000_000) is not None, (
-        "#13(NI): REAL-like 41,799M NI vs 500M revenue (83.6x) must flag data_quality_warn"
+    # Synthetic net-income ratios exercise the strict 50x anomaly threshold.
+    assert _ni_warn(*_legacy["ni_anomaly_cases"][1]) is not None, (
+        "#13(NI): synthetic 40,000M NI vs 400M revenue (100x) must flag data_quality_warn"
     )
     # Negative NI of the same absurd magnitude must also flag (abs()).
-    assert _ni_warn(-41_799_000_000, 500_000_000) is not None, (
+    assert _ni_warn(*_legacy["ni_anomaly_cases"][2]) is not None, (
         "#13(NI): absurd NEGATIVE NI must also flag (abs comparison)"
     )
     # A normal large-but-plausible NI (e.g. 50M NI vs 500M revenue, 0.1x) must NOT flag.
-    assert _ni_warn(50_000_000, 500_000_000) is None, (
+    assert _ni_warn(*_legacy["ni_anomaly_cases"][3]) is None, (
         "#13(NI): a plausible NI/revenue ratio must NOT flag data_quality_warn"
     )
     # Boundary: exactly 50x must NOT flag (strict >).
-    assert _ni_warn(25_000_000_000, 500_000_000) is None, (
+    assert _ni_warn(*_legacy["ni_anomaly_cases"][4]) is None, (
         "#13(NI): exactly 50x must NOT flag (threshold is strict >50x)"
     )
-    print("  #13(NI) data_quality_warn: JILL 27,900M / REAL 41,799M flagged; plausible & 50x boundary spared  OK")
+    print("  #13(NI) data_quality_warn: synthetic 75x / 100x flagged; plausible & 50x boundary spared  OK")
 
     # --- v0.3.2 #8: lessor_asset_heavy, railcar/equipment lessor routing (debt/assets<0.62) ---
     # Three independent routes must each fire True; a normal industrial must stay False.
     _assets_big = [{"end": "2024-12-31", "val": 5_000_000_000.0}]  # $5B total assets
-    # Route (a): leasing/rental SIC (GBX/RAIL are railcar lessors; 4741 = rental of railroad cars).
+    # Leasing SIC 4741 independently establishes an asset-heavy lessor.
     _la_a, _la_a_d = _lessor_asset_heavy(
         "0000000001", "4741", _assets_big,
         lease_income_present=False, ppe_fleet_val=None, rental_lease_revenue=False,
@@ -1935,8 +1909,7 @@ def _selftest():
     assert _la_a is True and "lessor_sic" in (_la_a_d or ""), (
         f"#8 route(a): a leasing-SIC (4741) must set lessor_asset_heavy True, got {_la_a} ({_la_a_d})"
     )
-    # Route (b): lease-income revenue concept present on a NON-leasing SIC (generic industrial 3743
-    # = railroad equipment; GBX's actual SIC) -> still a leasing business via lease income.
+    # Lease income establishes a lessor on a generic industrial SIC.
     _la_b, _la_b_d = _lessor_asset_heavy(
         "0000000001", "3743", _assets_big,
         lease_income_present=True, ppe_fleet_val=None, rental_lease_revenue=True,
@@ -1955,17 +1928,15 @@ def _selftest():
         f"#8 route(c): high PP&E/assets (0.70) + rental revenue must set lessor_asset_heavy True, "
         f"got {_la_c} ({_la_c_d})"
     )
-    # Crystal: GBX-shape, leasing-via-lease-income on a generic SIC, debt/assets<0.62 (0.41). The
-    # debt/assets ratio is the valuation-side test; here we assert deepdive emits the flag that lets
-    # valuation route to NAV DESPITE the sub-0.62 ratio. (debt 2.05B / assets 5.0B = 0.41.)
-    _gbx_debt, _gbx_assets = 2_050_000_000.0, 5_000_000_000.0
-    assert (_gbx_debt / _gbx_assets) < 0.62, "#8 crystal: GBX-shape debt/assets must be <0.62"
-    _la_gbx, _ = _lessor_asset_heavy(
-        "0000000001", "3743", [{"end": "2024-12-31", "val": _gbx_assets}],
+    # Synthetic lessors below the debt firewall must route on their leasing evidence.
+    _lessor_case_debt, _lessor_case_assets = _legacy["deepdive_lessor_balance"]
+    assert (_lessor_case_debt / _lessor_case_assets) < 0.62, "#8 crystal: synthetic debt/assets must be <0.62"
+    _la_lessor_case, _ = _lessor_asset_heavy(
+        "0000000001", "3743", [{"end": "2024-12-31", "val": _lessor_case_assets}],
         lease_income_present=True, ppe_fleet_val=None, rental_lease_revenue=True,
     )
-    assert _la_gbx is True, (
-        "#8 crystal: a GBX-shape railcar lessor (lease income, debt/assets=0.41<0.62) must set "
+    assert _la_lessor_case is True, (
+        "#8 crystal: a synthetic railcar lessor (lease income, debt/assets=0.48<0.62) must set "
         "lessor_asset_heavy True so valuation routes it to lease-fleet NAV"
     )
     # Crystal: a NORMAL industrial, generic SIC, no lease income, modest PP&E (0.20), no rental
@@ -1988,7 +1959,7 @@ def _selftest():
         "#8 guard: high PP&E ratio without rental revenue (cap-intensive manufacturer) must NOT fire"
     )
     print("  #8 lessor_asset_heavy: leasing-SIC / lease-income / high-PP&E+rent all True (incl. "
-          "GBX-shape debt/assets=0.41); normal industrial + cap-intensive non-lessor False  OK")
+          "synthetic debt/assets=0.48); normal industrial + cap-intensive non-lessor False  OK")
 
     # --- v0.3.2 #11: IFRS concept recovery + foreign_filer_unvaluable ---
     # (1) concept_series_with_ifrs: a foreign filer with NO us-gaap revenue but ifrs-full Revenue
@@ -2060,28 +2031,23 @@ def _selftest():
     # (patching _one_concept itself would bypass the very logic under test). Restored in finally.
     _orig_http_get = _dc.http_get
 
+    from make_fixtures import deepdive_selftest_concept_scenarios
+    selftest_concepts = deepdive_selftest_concept_scenarios()
+
     class _FakeResp:
-        def __init__(self, payload):
+        def __init__(self, payload, url):
             self.status_code = 200
-            self._payload = payload
+            taxonomy, tag = url.rsplit("/", 2)[-2:]
+            self._payload = {**payload, "taxonomy": taxonomy, "tag": tag.removesuffix(".json")}
         def json(self):
             return self._payload
 
     # FY2022 (end 2022-12-31): original filed 2023-03-01 val=100; restated filed 2024-03-01 val=110.
     # FY2023 (end 2023-12-31): filed 2024-03-01 val=200.
     # FY2024 (end 2024-12-31): filed 2025-03-01 val=300 (filed AFTER a 2024-06-30 asof).
-    _pit_payload = {"units": {"USD": [
-        {"start": "2022-01-01", "end": "2022-12-31", "val": 100, "fy": 2022, "fp": "FY",
-         "form": "10-K", "filed": "2023-03-01"},
-        {"start": "2022-01-01", "end": "2022-12-31", "val": 110, "fy": 2022, "fp": "FY",
-         "form": "10-K/A", "filed": "2024-03-01"},   # restatement of FY2022, filed 2024
-        {"start": "2023-01-01", "end": "2023-12-31", "val": 200, "fy": 2023, "fp": "FY",
-         "form": "10-K", "filed": "2024-03-01"},
-        {"start": "2024-01-01", "end": "2024-12-31", "val": 300, "fy": 2024, "fp": "FY",
-         "form": "10-K", "filed": "2025-03-01"},      # filed AFTER a 2024-06-30 asof
-    ]}}
+    _pit_payload = selftest_concepts["pit"]
     try:
-        _dc.http_get = lambda *a, **k: _FakeResp(_pit_payload)
+        _dc.http_get = lambda url, *a, **k: _FakeResp(_pit_payload, url)
 
         # (a) asof = 2024-06-30: must see FY2022 (restated val=110, latest-filed<=asof) + FY2023
         #     (val=200); MUST NOT see FY2024 (filed 2025-03-01 > asof) -> no look-ahead.
@@ -2108,7 +2074,7 @@ def _selftest():
 
         # (d) the asof variant routes through concept_series(asof=...): a cascade list still merges
         #     (later concept overrides earlier at a shared end-date) under the as-of filter.
-        _dc.http_get = lambda *a, **k: _FakeResp(_pit_payload)
+        _dc.http_get = lambda url, *a, **k: _FakeResp(_pit_payload, url)
         _asof_d = concept_series("0000000001", ["SalesRevenueNet", "Revenues"], asof="2024-06-30")
         assert {x["end"]: x["val"] for x in _asof_d} == {"2022-12-31": 110, "2023-12-31": 200}, (
             f"PIT(d): concept_series(asof=...) must apply the as-of filter through the cascade, "
@@ -2127,31 +2093,20 @@ def _selftest():
 
         # (f) a fact with NO "filed" field is conservatively DROPPED in the asof path (cannot be
         #     dated <= T) but KEPT in the live path (asof=None).
-        _undated_payload = {"units": {"USD": [
-            {"start": "2023-01-01", "end": "2023-12-31", "val": 500, "fy": 2023, "fp": "FY",
-             "form": "10-K"},  # no "filed"
-        ]}}
-        _dc.http_get = lambda *a, **k: _FakeResp(_undated_payload)
+        _undated_payload = selftest_concepts["undated"]
+        _dc.http_get = lambda url, *a, **k: _FakeResp(_undated_payload, url)
         assert concept_series_asof("0000000001", "Revenues", "2025-01-01") == [], (
             "PIT(f): a fact with no 'filed' date must be DROPPED in the asof path (cannot date<=T)"
         )
         assert concept_series("0000000001", "Revenues", asof=None) == [
-            {"end": "2023-12-31", "val": 500, "fy": 2023, "fp": "FY", "form": "10-K"}
+            {**_undated_payload["units"]["USD"][0], "filed": None, "duration_days": 364,
+             "unit": "USD", "currency": "USD", "cik": "0000000001",
+             "taxonomy": "us-gaap", "concept": "Revenues"}
         ], "PIT(f): the same undated fact must be KEPT in the live default path (asof=None)"
 
-        # (g) VALUE-CHANGING restatement no-leak (the real SIGA Assets 2014-12-31 shape: a later
-        #     filing carries a DIFFERENT value for the same period end, 166.4M originally, restated
-        #     DOWN to 160.7M in a filing ~1y later). Here the original (1000) and restatement (900)
-        #     differ, so the as-of boundary is load-bearing: asof BEFORE the restatement must return
-        #     the ORIGINAL value and the restated (lower) value must NOT leak across the boundary;
-        #     asof ON/AFTER it must adopt the restated value (latest-filed<=asof). This isolates the
-        #     `filed >= prev["_filed"]` selection in a way case (a)'s 100->110 (whose 110 is also the
-        #     live result) cannot, a strict/inclusive off-by-one on the filed compare would fail it.
-        _restate_payload = {"units": {"USD": [
-            {"end": "2014-12-31", "val": 1000, "fy": 2014, "filed": "2015-03-06"},   # original
-            {"end": "2014-12-31", "val": 900,  "fy": 2014, "filed": "2016-03-04"},   # restated DOWN
-        ]}}
-        _dc.http_get = lambda *a, **k: _FakeResp(_restate_payload)
+        # A synthetic value-changing restatement stays unavailable before its filing date.
+        _restate_payload = selftest_concepts["restatement"]
+        _dc.http_get = lambda url, *a, **k: _FakeResp(_restate_payload, url)
         # asof one day BEFORE the restatement -> original 1000 (restated 900 must NOT leak).
         _pre = {x["end"]: x["val"] for x in concept_series_asof("0000000001", "Assets", "2016-03-03")}
         assert _pre == {"2014-12-31": 1000}, (
@@ -2182,28 +2137,16 @@ def _selftest():
     #             2025-03-01) is future-filed and DROPPED. -> max filed kept = 2024-03-15.
     #   Assets:   FY2023 instant (filed 2024-04-10). -> max filed kept = 2024-04-10.
     # So the accumulator across BOTH pulls must reach 2024-04-10 (the global max kept filed <= asof).
-    _f1_revenues = {"units": {"USD": [
-        {"start": "2022-01-01", "end": "2022-12-31", "val": 100, "fy": 2022, "fp": "FY",
-         "form": "10-K", "filed": "2023-03-01"},
-        {"start": "2022-01-01", "end": "2022-12-31", "val": 110, "fy": 2022, "fp": "FY",
-         "form": "10-K/A", "filed": "2024-03-01"},   # restatement, latest-filed<=asof
-        {"start": "2023-01-01", "end": "2023-12-31", "val": 200, "fy": 2023, "fp": "FY",
-         "form": "10-K", "filed": "2024-03-15"},
-        {"start": "2024-01-01", "end": "2024-12-31", "val": 300, "fy": 2024, "fp": "FY",
-         "form": "10-K", "filed": "2025-03-01"},      # FUTURE-filed vs a 2024-06-30 asof -> dropped
-    ]}}
-    _f1_assets = {"units": {"USD": [
-        {"end": "2022-12-31", "val": 5000, "fy": 2022, "filed": "2023-04-10"},
-        {"end": "2023-12-31", "val": 5200, "fy": 2023, "filed": "2024-04-10"},  # latest kept <= asof
-    ]}}
+    _f1_revenues = selftest_concepts["revenues"]
+    _f1_assets = selftest_concepts["assets"]
 
     def _f1_router(payload_by_concept):
         """http_get stub that returns a payload chosen by the concept embedded in the URL."""
         def _get(url, *a, **k):
             for _concept, _payload in payload_by_concept.items():
                 if f"/{_concept}.json" in url:
-                    return _FakeResp(_payload)
-            return _FakeResp({"units": {}})
+                    return _FakeResp(_payload, url)
+            return _FakeResp(selftest_concepts["empty"], url)
         return _get
 
     try:
@@ -2283,172 +2226,712 @@ def _selftest():
     print("deepdive_data selftest PASS")
 
 
-def _write_error_artifact(label: str, ticker: str, cik: str, exc: Exception) -> Path:
-    """P-D — write an auditable deepdive_<label>_ERROR.json when a pull crashes/rate-limits.
+_IDENTITY_KEYS = ("input_index", "ticker", "cik", "band")
+_BANDS = {"deep", "watch", "large", "unknown"}
+_SKIP_BANDS = {"watch", "large"}
 
-    The iter1 failure was ABR dying mid-pull leaving only a truncated log and NO JSON, so the
-    name was an invisible skip with no error in any manifest. Under the FULL-data / never-silently-
-    skip directive, a crashed/rate-limited deepdive must leave a machine-auditable error artifact.
-    Returns the path written. Best-effort: a failure to write the artifact is swallowed so it can
-    never mask the original exception.
-    """
-    import traceback
-    err = {
-        "ticker": ticker,
-        "cik": cik,
-        "label": label,
-        "pulled_at": today(),
-        "status": "ERROR",
-        "error_type": type(exc).__name__,
-        "error": str(exc),
-        "traceback": traceback.format_exc(),
-    }
-    err_path = REPORTS / f"deepdive_{label}_ERROR.json"
+
+def _selftest_error_artifact():
+    """Exercise only generated error evidence in a temporary synthetic directory."""
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+    from make_fixtures import downstream_producer_completion_scenarios
+    sample = downstream_producer_completion_scenarios()
+    identity = _identity(sample["survivor_rows"][0])
+    message = sample["pull_errors"][0]["error_code"]
+    upstream = stage_completion("synthetic_input", 1, work=[stage_work("synthetic_input")])
+    with TemporaryDirectory(prefix="smallcap-synthetic-") as directory:
+        out = _data_path(Path(directory), identity, sample["verdict_date"])
+        with patch("filter_by_sic.prepare_output", side_effect=lambda path: Path(path)):
+            outcome, receipt = _write_error_artifact(identity["ticker"], identity["ticker"],
+                identity["cik"], RuntimeError(message), out=out, identity=identity,
+                binding=None, upstream=upstream)
+        error = json.loads(out.read_text(encoding="utf-8"))
+        assert error["status"] == "ERROR" and error["error_type"] == "RuntimeError"
+        assert error["error"] == message and outcome["data_status"] == "error"
+        assert receipt["status"] != "complete" and receipt["input_identity"] == identity
+        assert not (Path(directory) / "deepdive_errors.log").exists()
+
+
+def _identity(row):
+    return {key: row[key] for key in _IDENTITY_KEYS}
+
+
+def _validated_rows(rows, *, bound, require_pair=True):
+    """Validate the whole cohort before exclusions or provider initialization."""
+    if not isinstance(rows, list):
+        raise ValueError("Deep-dive candidates must be a JSON list")
+    indexed, labels = set(), set()
+    validated = []
+    for position, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError("Deep-dive candidate must be an object")
+        ticker, cik = row.get("ticker"), row.get("cik")
+        if (not isinstance(ticker, str) or not isinstance(cik, str)
+                or (ticker and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}", ticker))
+                or (cik and not re.fullmatch(r"[0-9]{1,10}", cik))
+                or not (ticker or cik) or not isinstance(row.get("band"), str)
+                or row["band"] not in _BANDS):
+            raise ValueError("Deep-dive candidate identity or band is invalid")
+        if bound and require_pair and not (ticker and cik):
+            raise ValueError("Bound survivors require both ticker and CIK")
+        index = row.get("input_index") if bound else row.get("input_index", position)
+        if (type(index) is not int or index < 0 or index in indexed
+                or (not bound and index != position)):
+            raise ValueError("Deep-dive input index is invalid or duplicated")
+        label = (ticker or f"CIK{cik}").upper()
+        if label in labels:
+            raise ValueError("Deep-dive output identity is duplicated")
+        for key in ("name", "theme", "theme_slug", "horizon", "event_type", "catalyst"):
+            if key in row and row[key] is not None and not isinstance(row[key], str):
+                raise ValueError(f"Deep-dive candidate {key} must be text")
+        for key in ("mktcap", "health_score", "killflag_count"):
+            value = row.get(key)
+            if value is not None and (type(value) not in (int, float) or not math.isfinite(value)):
+                raise ValueError(f"Deep-dive candidate {key} must be finite")
+        indexed.add(index)
+        labels.add(label)
+        validated.append({**row, "input_index": index})
+    return validated
+
+
+def _binding(path):
+    path = Path(path)
+    payload = path.read_bytes()
+    return {"artifact": path.name, "artifact_bytes": len(payload),
+            "artifact_sha256": hashlib.sha256(payload).hexdigest(),
+            "run_dir": str(path.resolve().parent)}
+
+
+def _bound_path(run_dir, binding):
+    if not isinstance(binding, dict):
+        raise ValueError("Missing artifact binding")
+    name = binding.get("artifact")
+    if (not isinstance(name, str) or not name or name in {".", ".."}
+            or Path(name).name != name or "/" in name or "\\" in name):
+        raise ValueError("Bound artifact must name one file in the run")
+    path = Path(run_dir) / name
+    if _binding(path) != binding:
+        raise ValueError("Bound artifact bytes or run directory changed")
+    return path
+
+
+def _data_input(path):
+    path = Path(path)
+    event_bound = path.name == "candidates_event_admitted.json"
+    bound = event_bound or path.name == "candidates_gate2_survivors.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    rows = _validated_rows(raw, bound=bound, require_pair=not event_bound)
+    receipt = read_stage_receipt(path, len(rows))
+    if receipt["status"] == "invalid":
+        raise ValueError("Candidate receipt is invalid")
+    reasons = []
+    if event_bound:
+        from _event_admission import read_event_admission
+        expected, expected_receipt = read_event_admission(path.parent)
+        if raw != expected or receipt != expected_receipt:
+            raise ValueError("Event input disagrees with source and cheap-pass evidence")
+    elif bound:
+        from run_theme import read_gate2_results
+        all_rows, gate_receipt = read_gate2_results(path.parent)
+        expected = [row for row in all_rows if row["judgment_status"] == "complete"
+                    and row["theme_fit"] in {"pure_play", "partial"}]
+        expected_receipt = stage_completion("gate2_survivors", len(expected), upstream=[gate_receipt])
+        expected_receipt["input"] = gate_receipt["input"]
+        if raw != expected or any(receipt.get(key) != value for key, value in expected_receipt.items()):
+            raise ValueError("Survivors or their receipt disagree with bound Gate2 outcomes")
+    elif rows:
+        reasons.append("unbound_gate2_input")
+    if any(row["band"] == "unknown" for row in rows):
+        reasons.append("unresolved_candidate_band")
+    completion = stage_completion("deepdive_input", len(rows), upstream=[receipt], reasons=reasons)
+    return rows, _binding(path), completion
+
+
+def _fresh(path):
+    path = Path(path)
+    if path.exists() or stage_receipt_path(path).exists():
+        raise FileExistsError(f"Existing output {path.name}; use a new run directory")
+    return prepare_stage_output(path)
+
+
+def _write_json(path, payload, completion):
+    path = _fresh(path)
+    with path.open("x", encoding="utf-8") as stream:
+        json.dump(payload, stream, indent=2, ensure_ascii=False, allow_nan=False)
+    write_stage_receipt(path, completion)
+    return read_stage_receipt(path, completion["row_count"])
+
+
+def _date(value):
+    if not isinstance(value, str) or date.fromisoformat(value).isoformat() != value:
+        raise ValueError("Date must be YYYY-MM-DD")
+    return value
+
+
+def _data_path(run_dir, row, pull_date):
+    label = row["ticker"] or f"CIK{row['cik']}"
+    return Path(run_dir) / f"deepdive_{label}_{_date(pull_date)}.json"
+
+
+def _data_completion(data, identity, binding, upstream):
+    """Describe observed payloads without treating a swallowed source error as success."""
+    if not isinstance(data, dict):
+        raise ValueError("Deep-dive pull must return an object")
+    source_upstream = [upstream]
+    if data.get("status") == "ERROR":
+        work = [stage_work("deepdive_pull", status="unavailable", reason="pull_failed")]
+        reasons = ["pull_failed"]
+    else:
+        work = []
+        financials = data.get("financials")
+        if not isinstance(financials, dict):
+            raise ValueError("Deep-dive financials must be an object")
+        if not isinstance(data.get("derived"), dict):
+            raise ValueError("Deep-dive derived observations must be an object")
+        for name in ("revenue", "net_income", "ocf", "cash", "shares_outstanding",
+                     "assets", "equity", "total_debt", "ebit", "dep_amort", "capex",
+                     "goodwill", "intangibles", "liabilities"):
+            values = financials.get(name)
+            observed = isinstance(values, list) and bool(values) and all(
+                isinstance(v, dict) and type(v.get("val")) in (int, float)
+                and math.isfinite(v["val"]) and isinstance(v.get("end"), str)
+                for v in values)
+            work.append(stage_work("observed_financial_series", name,
+                status="complete" if observed else "unavailable",
+                reason="" if observed else "no_observed_values"))
+        for name in ("tenk", "insider"):
+            section = data.get(name)
+            observed = isinstance(section, dict) and section.get("available") is True and not section.get("error")
+            work.append(stage_work(name, status="complete" if observed else "unavailable",
+                                   reason="" if observed else "source_unavailable"))
+        reasons = []
+        tenk = data.get("tenk")
+        if isinstance(tenk, dict) and "ambiguous_concentration_clause" in (tenk.get("concentration_detail") or ""):
+            reasons.append("concentration_ambiguous")
+        observations = data.get("source_observations", {})
+        if not isinstance(observations, dict):
+            raise ValueError("Deep-dive source observations must be an object")
+        for name, stage, reason in (
+            ("financials", "sec_financial_observations", "financial_source_completion_unobserved"),
+            ("sic", "sec_submissions_sic", "sic_source_completion_unobserved"),
+        ):
+            observation = observations.get(name)
+            if observation is None:
+                reasons.append(reason)
+                continue
+            if (not isinstance(observation, dict) or observation.get("schema") != "smallcap.stage.v1"
+                    or observation.get("stage") != stage
+                    or observation.get("status") not in {"complete", "partial", "unavailable", "invalid"}):
+                raise ValueError("Deep-dive source completion is invalid")
+            source_upstream.append(observation)
+            if name == "financials" and not observation.get("upstream"):
+                reasons.append(reason)
+    completion = stage_completion("deepdive_data", 1, work=work, upstream=source_upstream, reasons=reasons)
+    completion["input_identity"] = identity
+    completion["input"] = binding
+    return completion
+
+
+def _write_error_artifact(label, ticker, cik, exc, *, out, identity, binding, upstream):
+    """Persist the failure and its partial receipt; a persistence error must propagate."""
+    data = {"ticker": ticker, "cik": cik, "label": label, "pulled_at": today(),
+            "status": "ERROR", "error_type": type(exc).__name__, "error": str(exc)}
+    completion = _data_completion(data, identity, binding, upstream)
+    receipt = _write_json(out, data, completion)
+    return {**identity, "data_status": "error", "artifact": out.name}, receipt
+
+
+def _pull_and_save(ticker, cik, *, out, identity, binding, upstream, init_error=None):
+    """Retain original input identity even when the legacy CIK-first path resolves a symbol."""
     try:
-        err_path.write_text(json.dumps(err, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"  [P-D] wrote error artifact: {err_path}", file=sys.stderr)
-        # Also append a one-line entry to a run-level errors log for easy auditing.
-        log_line = json.dumps(
-            {"label": label, "ticker": ticker, "cik": cik, "at": today(),
-             "error_type": type(exc).__name__, "error": str(exc)},
-            ensure_ascii=False,
-        )
-        with (REPORTS / "deepdive_errors.log").open("a", encoding="utf-8") as fh:
-            fh.write(log_line + "\n")
-    except Exception as werr:
-        print(f"  [P-D][warn] could not write error artifact for {label}: {werr}", file=sys.stderr)
-    return err_path
-
-
-def _pull_and_save(ticker: str, cik: str) -> None:
-    """Pull data for one ticker/CIK and write JSON to REPORTS dir.
-
-    A1: ticker may be empty for pre-listing spinoffs; use CIK as filename key in that case.
-    P-D: the financials pull is wrapped so a crash/rate-limit writes an auditable ERROR artifact
-    (never a silent truncated-log-with-no-JSON) and re-raises so callers still surface it.
-    """
-    label = ticker if ticker else f"CIK{cik}"
-    print(f"深度尽调数据拉取: {label} (CIK {cik})", file=sys.stderr)
-    try:
-        d = pull(ticker, cik)
+        if init_error is not None:
+            raise init_error
+        if not cik:
+            cik = str(Company(ticker).cik)
+            if not re.fullmatch(r"[0-9]{1,10}", cik):
+                raise ValueError("Resolved CIK is invalid")
+        if not ticker:
+            try:
+                resolved = Company(int(cik)).tickers
+                ticker = resolved[0] if resolved else ""
+            except Exception:
+                # A CIK-only issuer remains usable, with a partial data receipt.
+                ticker = ""
+            if ticker and (not isinstance(ticker, str) or
+                           not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}", ticker)):
+                raise ValueError("Resolved ticker is invalid")
+        with _dc.concept_observations() as observation:
+            data = pull(ticker, cik)
+        if not isinstance(data, dict) or data.get("ticker") != ticker or data.get("cik") != cik:
+            raise ValueError("Pull returned a different issuer")
+        source_observations = data.setdefault("source_observations", {})
+        if not isinstance(source_observations, dict):
+            raise ValueError("Deep-dive source observations must be an object")
+        source_observations["financials"] = observation.completion(row_count=1)
+        completion = _data_completion(data, identity, binding, upstream)
     except Exception as exc:
-        _write_error_artifact(label, ticker, cik, exc)
-        raise
-    out = REPORTS / f"deepdive_{label}_{today()}.json"
-    out.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
-    der = d["derived"]
-    print(f"\n=== {label} 数据摘要 ===")
-    print(f"  营收: ${(der['latest_revenue'] or 0)/1e6:.1f}M (增速 {der['revenue_growth_pct']}%)")
-    print(f"  净利: ${(der['latest_net_income'] or 0)/1e6:.1f}M | OCF: ${(der['latest_ocf'] or 0)/1e6:.1f}M")
-    print(f"  现金: ${(der['latest_cash'] or 0)/1e6:.1f}M | runway: {der['runway_periods']} 期")
-    print(f"  股本增速(稀释): {der['shares_growth_pct']}% | OCF/NI背离: {der['ocf_ni_divergence']}")
-    print(f"  内部人: {d['insider'].get('net_signal')} (买{d['insider'].get('buys')}/卖{d['insider'].get('sells')})")
-    print(f"  going concern: {d['tenk'].get('has_going_concern')} | 客户集中: {d['tenk'].get('customer_concentration_flag')}")
-    print(f"\n数据: {out}")
+        label = identity["ticker"] or f"CIK{identity['cik']}"
+        return _write_error_artifact(label, ticker, cik, exc, out=out, identity=identity,
+                                     binding=binding, upstream=upstream)
+    # Persistence is outside the provider exception handler.
+    receipt = _write_json(out, data, completion)
+    return {**identity, "data_status": completion["status"], "artifact": out.name}, receipt
+
+
+def _batch_completion(rows, receipts, binding, upstream):
+    work = [stage_work("deepdive_input", str(row["input_index"]),
+                      status="complete" if row["data_status"] == "skipped" else row["data_status"]
+                      if row["data_status"] in {"complete", "partial"} else "unavailable",
+                      reason="excluded_band" if row["data_status"] == "skipped" else "")
+            for row in rows]
+    completion = stage_completion("deepdive_data_results", len(rows),
+                                  work=work, upstream=[upstream, *receipts])
+    completion["input"] = binding
+    return completion
+
+
+def run_batch(candidates_path, *, pull_date=None):
+    """Write one immutable outcome per input; validate even excluded rows first."""
+    candidates_path = Path(candidates_path)
+    rows, binding, upstream = _data_input(candidates_path)
+    pull_date = _date(pull_date or today())
+    output = _fresh(candidates_path.parent / "deepdive_data_results.json")
+    for row in rows:
+        if row["band"] not in _SKIP_BANDS:
+            _fresh(_data_path(candidates_path.parent, row, pull_date))
+    init_error = None
+    if any(row["band"] not in _SKIP_BANDS for row in rows):
+        try:
+            init_edgar()
+        except Exception as exc:
+            init_error = exc
+    outcomes, receipts = [], []
+    for row in rows:
+        identity = _identity(row)
+        if row["band"] in _SKIP_BANDS:
+            outcomes.append({**identity, "data_status": "skipped", "artifact": None})
+            continue
+        outcome, receipt = _pull_and_save(row["ticker"], row["cik"],
+            out=_data_path(candidates_path.parent, row, pull_date),
+            identity=identity, binding=binding, upstream=upstream, init_error=init_error)
+        outcomes.append(outcome)
+        receipts.append(receipt)
+    completion = _batch_completion(outcomes, receipts, binding, upstream)
+    _write_json(output, {"schema": "smallcap.deepdive.data.v1", "input": binding,
+                         "pull_date": pull_date, "all": outcomes}, completion)
+    return output, completion
+
+
+def _read_data_results(candidates_path):
+    rows, binding, upstream = _data_input(candidates_path)
+    path = Path(candidates_path).parent / "deepdive_data_results.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(payload, dict) or payload.get("schema") != "smallcap.deepdive.data.v1"
+            or payload.get("input") != binding or not isinstance(payload.get("all"), list)
+            or len(payload["all"]) != len(rows)):
+        raise ValueError("Deep-dive data results are not bound to all inputs")
+    pull_date = _date(payload.get("pull_date"))
+    receipts, candidates = [], []
+    for row, outcome in zip(rows, payload["all"]):
+        if not isinstance(outcome, dict) or any(outcome.get(key) != row[key] for key in _IDENTITY_KEYS):
+            raise ValueError("Deep-dive data result identity changed")
+        candidate = {**row, "data_status": outcome.get("data_status"), "json_path": None,
+                     "data_artifact": None}
+        if row["band"] in _SKIP_BANDS:
+            if outcome.get("data_status") != "skipped" or outcome.get("artifact") is not None:
+                raise ValueError("Excluded input must have an explicit skipped outcome")
+        else:
+            artifact = _data_path(path.parent, row, pull_date)
+            if outcome.get("artifact") != artifact.name:
+                raise ValueError("Deep-dive artifact name does not match its input")
+            data = json.loads(artifact.read_text(encoding="utf-8"))
+            receipt = read_stage_receipt(artifact, 1)
+            expected = _data_completion(data, _identity(row), binding, upstream)
+            status = "error" if data.get("status") == "ERROR" else expected["status"]
+            if (outcome.get("data_status") != status
+                    or any(receipt.get(key) != value for key, value in expected.items())):
+                raise ValueError("Deep-dive receipt disagrees with its input or observations")
+            receipts.append(receipt)
+            candidate.update(json_path=str(artifact.resolve()), data_artifact=_binding(artifact))
+        candidates.append(candidate)
+    expected = _batch_completion(payload["all"], receipts, binding, upstream)
+    receipt = read_stage_receipt(path, len(rows))
+    if any(receipt.get(key) != value for key, value in expected.items()):
+        raise ValueError("Deep-dive aggregate receipt is missing or inconsistent")
+    return candidates, binding, path, receipt
+
+
+def _fanout_request(candidates_path, verdict_date):
+    candidates, binding, data_path, upstream = _read_data_results(candidates_path)
+    verdict_date = _date(verdict_date)
+    for row in candidates:
+        label = row["ticker"] or f"CIK{row['cik']}"
+        row["valuation_path"] = str((data_path.parent / f"valuation_{label}_{verdict_date}.json").resolve())
+    request = {"schema": "smallcap.deepdive.request.v1", "input": binding,
+               "request_path": str((data_path.parent / "deepdive_request.json").resolve()),
+               "data_results": _binding(data_path), "verdict_date": verdict_date,
+               "candidates": candidates, "completion": upstream}
+    canonical = json.dumps(request, sort_keys=True, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    request["request_id"] = hashlib.sha256(canonical).hexdigest()
+    return request
+
+
+def prepare_fanout_request(candidates_path, verdict_date):
+    """Prepare bound work for the configured host; this function does not invoke a model."""
+    candidates_path = Path(candidates_path)
+    request = _fanout_request(candidates_path, verdict_date)
+    completion = stage_completion("deepdive_request", len(request["candidates"]),
+                                  upstream=[request["completion"]])
+    completion.update(input=request["input"], request_id=request["request_id"])
+    out = candidates_path.parent / "deepdive_request.json"
+    _write_json(out, request, completion)
+    return out
+
+
+def _read_fanout_request(request_path):
+    request_path = Path(request_path)
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    if not isinstance(request, dict) or request.get("schema") != "smallcap.deepdive.request.v1":
+        raise ValueError("Deep-dive request schema is invalid")
+    candidates_path = _bound_path(request_path.parent, request.get("input"))
+    expected = _fanout_request(candidates_path, request.get("verdict_date"))
+    if request != expected or request.get("request_path") != str(request_path.resolve()):
+        raise ValueError("Deep-dive request no longer matches its inputs")
+    receipt = read_stage_receipt(request_path, len(request["candidates"]))
+    expected_receipt = stage_completion("deepdive_request", len(request["candidates"]),
+                                        upstream=[request["completion"]])
+    expected_receipt.update(input=request["input"], request_id=request["request_id"])
+    if any(receipt.get(key) != value for key, value in expected_receipt.items()):
+        raise ValueError("Deep-dive request receipt is missing or invalid")
+    return request, receipt
+
+
+def _valuation_completion(row, request, request_receipt, *, failed=False):
+    completion = stage_completion("deepdive_valuation", 1,
+        work=[stage_work("compute_valuation", status="unavailable" if failed else "complete",
+                         reason="valuation_failed" if failed else "")],
+        upstream=[request_receipt], reasons=["valuation_failed"] if failed else [])
+    completion.update(input_identity=_identity(row), input=row["data_artifact"],
+                      candidate_input=request["input"], request_id=request["request_id"])
+    return completion
+
+
+def prepare_valuation_artifact(request_path, input_index):
+    """Use the existing valuation policy and market-cap lookup without rewriting sealed data."""
+    request, request_receipt = _read_fanout_request(request_path)
+    rows = [row for row in request["candidates"] if row["input_index"] == input_index]
+    if type(input_index) is not int or len(rows) != 1:
+        raise ValueError("Valuation input index is not in the bound request")
+    row = rows[0]
+    if row["band"] in _SKIP_BANDS or row["data_status"] == "error":
+        raise ValueError("Valuation requires a usable requested data artifact")
+    source = _bound_path(Path(request_path).parent, row["data_artifact"])
+    data = json.loads(source.read_text(encoding="utf-8"))
+    output = _fresh(Path(row["valuation_path"]))
+    failed = False
+    try:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,19}", row["ticker"]):
+            raise ValueError("Valuation requires a plain ticker symbol")
+        from valuation import _get_market_cap, _val_cfg, compute_valuation
+        init_edgar()
+        market_cap, market_cap_source = _get_market_cap(row["ticker"].upper(), None)
+        if market_cap is None:
+            raise ValueError("Valuation market cap is unavailable")
+        block = compute_valuation(data, market_cap, _val_cfg())
+        if not isinstance(block, dict) or block.get("ticker") != row["ticker"]:
+            raise ValueError("Valuation returned a different issuer")
+        block["market_cap_source"] = market_cap_source
+    except Exception as exc:
+        failed = True
+        block = {"ticker": row["ticker"], "status": "ERROR", "error_code": "valuation_failed",
+                 "error_type": type(exc).__name__, "error": str(exc)}
+    # Detect any unexpected writer inside the reused valuation path before publishing.
+    if _binding(source) != row["data_artifact"]:
+        raise ValueError("Valuation modified the sealed source artifact")
+    completion = _valuation_completion(row, request, request_receipt, failed=failed)
+    _write_json(output, block, completion)
+    return output, completion
+
+
+def _valuation_report_error(report, block):
+    """Bind mechanical report fields to the valuation while preserving analyst ratings."""
+    evidence = report.get("eligibility", {})
+    eligible = block.get("buy_eligible")
+    if (type(eligible) is not bool or report.get("mos_basis") != block.get("mos_basis")
+            or evidence.get("buy_eligible") is not eligible):
+        return "report_valuation_eligibility_mismatch"
+    field = {"fcf_cap": "margin_of_safety_pct", "nav": "nav_margin_of_safety_pct"}.get(block["mos_basis"])
+    ratio = block.get(field) if field else None
+    try:
+        if ratio is not None and (type(ratio) not in (int, float) or not math.isfinite(ratio)):
+            return "invalid_valuation_mos"
+        expected = ratio * 100 if ratio is not None else None
+        if expected is not None and not math.isfinite(expected):
+            return "invalid_valuation_mos"
+        actual = evidence.get("active_mos_pct")
+        if expected is None:
+            matches = actual is None
+        else:
+            matches = (type(actual) in (int, float) and math.isfinite(actual)
+                       and math.isclose(actual, expected, rel_tol=1e-9, abs_tol=1e-8))
+    except (OverflowError, TypeError, ValueError):
+        return "invalid_valuation_mos"
+    return None if matches else "report_valuation_mos_mismatch"
+
+
+def _valuation_error(row, request, request_receipt, *, report=None):
+    path = Path(row["valuation_path"])
+    try:
+        block = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return "missing_valuation"
+    except (OSError, ValueError):
+        return "invalid_valuation"
+    if not isinstance(block, dict) or block.get("ticker") != row["ticker"]:
+        return "invalid_valuation"
+    failed = block.get("status") == "ERROR"
+    receipt = read_stage_receipt(path, 1)
+    expected = _valuation_completion(row, request, request_receipt, failed=failed)
+    if any(receipt.get(key) != value for key, value in expected.items()):
+        return "invalid_valuation_receipt"
+    if failed:
+        return "valuation_failed"
+    if not isinstance(block.get("mos_basis"), str) or block["mos_basis"] not in {"fcf_cap", "nav", "abstain"}:
+        return "invalid_valuation"
+    return _valuation_report_error(report, block) if report is not None else None
+
+
+def _report_eligibility(report, parsed):
+    """Validate the frozen BUY policy without replacing the analyst's decision."""
+    evidence = report.get("eligibility")
+    if (not isinstance(evidence, dict) or set(evidence) != {
+            "buy_eligible", "active_mos_pct", "tier3_load_bearing"}
+            or type(evidence["buy_eligible"]) is not bool
+            or type(evidence["tier3_load_bearing"]) is not bool):
+        raise ValueError("Structured report eligibility is missing or invalid")
+    active = evidence["active_mos_pct"]
+    if active is not None and (type(active) not in (int, float) or not math.isfinite(active)):
+        raise ValueError("Structured active MoS must be finite or null")
+    if (evidence["buy_eligible"] != parsed["buy_eligible"]
+            or active != parsed["mos_pct"]):
+        raise ValueError("Structured eligibility disagrees with the rating block")
+    if report["rating"] == "\u4e70\u5165" and (
+            report["mos_basis"] not in {"fcf_cap", "nav"} or active is None or active < 30
+            or evidence["buy_eligible"] is not True or evidence["tier3_load_bearing"]
+            or parsed["killflag_count"] != 0):
+        raise ValueError("BUY requires the frozen MoS/NAV eligibility rule; catalyst is not a waiver")
+
+
+def _validated_report(report, row, verdict_date):
+    """Require the host schema and one explicit decision block; never invent a rating."""
+    required = {"ticker", "rating", "confidence", "one_liner", "is_misrecall", "top_long",
+                "top_short", "killflag_notes", "margin_of_safety_pct", "mos_basis", "catalyst", "eligibility", "report_md"}
+    if (not isinstance(report, dict) or not required <= set(report)
+            or set(report) - required - {"theme_fit"}):
+        raise ValueError("Deep-dive report schema is invalid")
+    if (report["ticker"] != row["ticker"] or report["rating"] not in {"买入", "观察", "避开"}
+            or type(report["confidence"]) is not int or not 0 <= report["confidence"] <= 100
+            or type(report["is_misrecall"]) is not bool
+            or report["mos_basis"] not in {"fcf_cap", "nav", "abstain"}
+            or ("theme_fit" in report and report["theme_fit"] not in {"pure_play", "partial", "misrecall"})):
+        raise ValueError("Deep-dive report identity or decision fields are invalid")
+    for key in ("one_liner", "top_long", "top_short", "killflag_notes", "report_md"):
+        if not isinstance(report[key], str) or not report[key].strip():
+            raise ValueError("Deep-dive report text is missing")
+    mos, catalyst = report["margin_of_safety_pct"], report["catalyst"]
+    if mos is not None and (type(mos) not in (int, float) or not math.isfinite(mos)):
+        raise ValueError("Deep-dive margin of safety must be finite or null")
+    if catalyst is not None and (not isinstance(catalyst, str) or not catalyst.strip()):
+        raise ValueError("Deep-dive catalyst must be text or null")
+    blocks = re.findall(r"^" + r"\x60{3}rating\s*\n(.*?)^\x60{3}\s*$",
+                        report["report_md"], re.M | re.S)
+    if len(blocks) != 1:
+        raise ValueError("Deep-dive report requires exactly one rating block")
+    fields = {}
+    for line in blocks[0].splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            key = key.strip().lower()
+            if key in fields:
+                raise ValueError("Duplicate rating field")
+            fields[key] = value.split("#", 1)[0].strip()
+    if (not {"rating", "confidence", "verdict_date", "mos_basis", "mos_pct",
+             "buy_eligible", "killflag_count"} <= set(fields)
+            or fields["buy_eligible"].lower() not in {"true", "false"}
+            or not re.fullmatch(r"[0-9]+", fields["killflag_count"])
+            or not re.fullmatch(r"[0-9]+", fields["confidence"])
+            or fields["rating"] != report["rating"] or fields["mos_basis"] != report["mos_basis"]):
+        raise ValueError("Deep-dive report decision contract is unfinished")
+    count_digits = fields["killflag_count"].lstrip("0") or "0"
+    if (len(count_digits) > 16
+            or (len(count_digits) == 16 and count_digits > "9007199254740991")):
+        raise OverflowError("Deep-dive report kill-flag count is not a safe integer")
+    if fields["mos_pct"] != "null":
+        try:
+            finite_mos = math.isfinite(float(fields["mos_pct"]))
+        except ValueError:
+            finite_mos = False
+        if not finite_mos:
+            raise ValueError("Deep-dive report margin of safety is unfinished")
+    from finalize_run import parse_rating_block
+    parsed = parse_rating_block(report["report_md"])
+    if (parsed["rating"] != report["rating"] or parsed["confidence"] != report["confidence"]
+            or parsed["mos_basis"] != report["mos_basis"] or parsed["verdict_date"] != verdict_date
+            or (report["mos_basis"] == "fcf_cap" and parsed["mos_pct"] != mos)):
+        raise ValueError("Deep-dive report block disagrees with its structured decision")
+    _report_eligibility(report, parsed)
+    return report
+
+
+def _fanout_rows(candidates, outcomes, verdict_date):
+    if not isinstance(outcomes, list):
+        raise ValueError("Deep-dive result must contain an all list")
+    requested = {row["input_index"]: row for row in candidates}
+    indexed = {}
+    for outcome in outcomes:
+        if not isinstance(outcome, dict):
+            raise ValueError("Deep-dive outcome must be an object")
+        index = outcome.get("input_index")
+        if type(index) is not int or index not in requested or index in indexed:
+            raise ValueError("Deep-dive outcome index is invalid or duplicated")
+        row = requested[index]
+        if any(outcome.get(key) != row[key] for key in _IDENTITY_KEYS):
+            raise ValueError("Deep-dive outcome identity or band changed")
+        status = outcome.get("report_status")
+        if row["band"] in _SKIP_BANDS:
+            if status != "skipped" or outcome.get("report") is not None:
+                raise ValueError("Excluded input cannot carry a report")
+        elif status == "complete":
+            if row["data_status"] == "error":
+                raise ValueError("Failed data pull cannot produce a completed report")
+            try:
+                _validated_report(outcome.get("report"), row, verdict_date)
+            except OverflowError:
+                indexed[index] = {**_identity(row), "report_status": "error",
+                                  "error_code": "invalid_agent_result"}
+                continue
+        elif status == "error":
+            if (outcome.get("report") is not None or not isinstance(outcome.get("error_code"), str)
+                    or not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", outcome["error_code"])):
+                raise ValueError("Deep-dive error outcome is invalid")
+        else:
+            raise ValueError("Deep-dive report status is invalid")
+        indexed[index] = {**_identity(row), "report_status": status}
+        if status == "complete":
+            indexed[index]["report"] = outcome["report"]
+        elif status == "error":
+            indexed[index]["error_code"] = outcome["error_code"]
+    for index, row in requested.items():
+        if index not in indexed:
+            indexed[index] = {**_identity(row), "report_status": "error", "error_code": "missing_result"}
+    return [indexed[row["input_index"]] for row in candidates]
+
+
+def persist_fanout_result(request_path, result_path):
+    """Validate the whole result before writing immutable reports and all-input outcomes."""
+    request_path, result_path = Path(request_path), Path(result_path)
+    request, request_receipt = _read_fanout_request(request_path)
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    if (not isinstance(result, dict) or result.get("schema") != "smallcap.deepdive.result.v1"
+            or result.get("input") != request["input"] or result.get("request_id") != request["request_id"]):
+        raise ValueError("Deep-dive result is not bound to this request")
+    rows = _fanout_rows(request["candidates"], result.get("all"), request["verdict_date"])
+    candidates = {row["input_index"]: row for row in request["candidates"]}
+    for row in rows:
+        if row["report_status"] == "complete":
+            error = _valuation_error(candidates[row["input_index"]], request, request_receipt,
+                                     report=row["report"])
+            if error:
+                row.pop("report")
+                row.update(report_status="error", error_code=error)
+            else:
+                row["valuation_artifact"] = _binding(Path(candidates[row["input_index"]]["valuation_path"]))
+    output = _fresh(request_path.parent / "deepdive_fanout_results.json")
+    report_paths = {}
+    for row in rows:
+        if row["report_status"] == "complete":
+            label = row["ticker"] or f"CIK{row['cik']}"
+            report_paths[row["input_index"]] = _fresh(request_path.parent / f"report_{label}.md")
+    reports = []
+    for row in rows:
+        if row["report_status"] != "complete":
+            continue
+        path = report_paths[row["input_index"]]
+        with path.open("x", encoding="utf-8") as stream:
+            stream.write(row["report"]["report_md"])
+        receipt = stage_completion("deepdive_report", 1,
+            work=[stage_work("agent_report")], upstream=[request_receipt])
+        receipt.update(input_identity=_identity(row), input=request["input"],
+                       request_id=request["request_id"], valuation_artifact=row["valuation_artifact"])
+        write_stage_receipt(path, receipt)
+        reports.append(path)
+    work = [stage_work("agent_report", str(row["input_index"]),
+                       status="complete" if row["report_status"] in {"complete", "skipped"} else "unavailable",
+                       reason=row.get("error_code", "")) for row in rows]
+    completion = stage_completion("deepdive_fanout", len(rows), work=work, upstream=[request_receipt])
+    completion.update(input=request["input"], request_id=request["request_id"],
+                      request_artifact=_binding(request_path), result_artifact=_binding(result_path))
+    _write_json(output, {"schema": "smallcap.deepdive.persisted.v1", "input": request["input"],
+                        "request_id": request["request_id"], "all": rows}, completion)
+    return output, reports, completion
 
 
 def main():
-    ap = argparse.ArgumentParser(
-        description="deepdive_data — Stage 1 data pull. Use --ticker for single company or "
-                    "--candidates for batch mode."
-    )
-    ap.add_argument("--ticker", default="", help="单只股票 ticker")
-    ap.add_argument("--cik", default="", help="留空则用 edgartools 解析")
-    ap.add_argument(
-        "--candidates",
-        default="",
-        help="candidates JSON 文件路径 (list of {ticker, cik, ...}); 批量拉取所有候选",
-    )
-    ap.add_argument("--selftest", action="store_true", help="运行自检并退出")
+    ap = argparse.ArgumentParser(description="Pull deep-dive data or prepare/ingest configured-host work.")
+    modes = ap.add_mutually_exclusive_group()
+    modes.add_argument("--candidates", default="", help="Candidate JSON; outputs stay in its run directory")
+    modes.add_argument("--prepare-fanout", default="", metavar="CANDIDATES")
+    modes.add_argument("--fanout-request", default="", metavar="REQUEST")
+    modes.add_argument("--valuation-request", default="", metavar="REQUEST")
+    ap.add_argument("--input-index", type=int, help="Original input index for --valuation-request")
+    ap.add_argument("--fanout-result", default="", metavar="RESULT")
+    ap.add_argument("--verdict-date", default="", help="Explicit decision date for --prepare-fanout")
+    ap.add_argument("--ticker", default="")
+    ap.add_argument("--cik", default="")
+    ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
-
     if args.selftest:
         _selftest()
-        return
-
-    if args.candidates:
-        # Batch mode: loop over candidates JSON
-        candidates_path = Path(args.candidates)
-        if not candidates_path.exists():
-            ap.error(f"--candidates file not found: {args.candidates}")
-        candidates = json.loads(candidates_path.read_text(encoding="utf-8"))
-        if not isinstance(candidates, list):
-            ap.error("--candidates file must contain a JSON array of {ticker, cik, ...}")
-        init_edgar()
-        for i, rec in enumerate(candidates):
-            ticker = rec.get("ticker", "")
-            cik = str(rec.get("cik", ""))
-            band = rec.get("band", "")
-
-            # C3, band disambiguation:
-            #   "deep"    = mktcap < market_cap_max  → PROCESS
-            #   "watch"   = market_cap_max..watch_band_max → SKIP (surfaced separately)
-            #   "large"   = > watch_band_max → SKIP (out of scope)
-            #   "unknown" = mktcap unavailable / pre-listing → PROCESS (likely spinoff)
-            #   None / "" (legacy) = treat as "unknown" → PROCESS
-            if band in ("watch", "large"):
-                label = ticker if ticker else f"CIK{cik}"
-                print(
-                    f"  skipping {band}-band {label} (surfaced separately, no deep-dive)",
-                    file=sys.stderr,
-                )
-                continue
-
-            # A1, CIK-first path: ticker-less pre-listing spinoffs
-            if not ticker and not cik:
-                print(
-                    f"  [warn] skipping record {i}: both ticker and cik empty",
-                    file=sys.stderr,
-                )
-                continue
-
-            if not ticker and cik:
-                # Try to resolve a ticker from CIK via edgartools
-                try:
-                    tickers_resolved = Company(int(cik)).tickers
-                    if tickers_resolved:
-                        ticker = tickers_resolved[0]
-                        print(
-                            f"  [A1] CIK {cik}: resolved ticker={ticker} from edgartools",
-                            file=sys.stderr,
-                        )
-                    else:
-                        print(
-                            f"  [A1] CIK {cik}: no ticker in edgartools; proceeding CIK-only",
-                            file=sys.stderr,
-                        )
-                except Exception as e:
-                    print(
-                        f"  [A1] CIK {cik}: ticker resolve failed ({e}); proceeding CIK-only",
-                        file=sys.stderr,
-                    )
-
-            if not cik and ticker:
-                try:
-                    cik = str(Company(ticker).cik)
-                except Exception as e:
-                    print(f"  [warn] cannot resolve CIK for {ticker}: {e}", file=sys.stderr)
-                    continue
-
-            label = ticker if ticker else f"CIK{cik}"
+        return 0
+    if args.fanout_result and not args.fanout_request:
+        ap.error("--fanout-result requires --fanout-request")
+    if (args.candidates or args.prepare_fanout or args.fanout_request or args.valuation_request) and (args.ticker or args.cik):
+        ap.error("Single-company identity cannot be combined with a batch mode")
+    try:
+        if args.valuation_request:
+            if args.input_index is None:
+                ap.error("--valuation-request requires --input-index")
+            path, completion = prepare_valuation_artifact(Path(args.valuation_request), args.input_index)
+        elif args.prepare_fanout:
+            if not args.verdict_date:
+                ap.error("--prepare-fanout requires --verdict-date")
+            path = prepare_fanout_request(Path(args.prepare_fanout), args.verdict_date)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            completion = read_stage_receipt(path, len(payload["candidates"]))
+        elif args.fanout_request:
+            if not args.fanout_result:
+                ap.error("--fanout-request requires --fanout-result")
+            path, _, completion = persist_fanout_result(Path(args.fanout_request), Path(args.fanout_result))
+        elif args.candidates:
+            path, completion = run_batch(Path(args.candidates))
+        else:
+            row = _validated_rows([{"ticker": args.ticker, "cik": args.cik, "band": "unknown"}], bound=False)[0]
+            path = _fresh(_data_path(REPORTS, row, today()))
+            upstream = stage_completion("single_deepdive_input", 1, reasons=["unbound_single_input"])
+            init_error = None
             try:
-                _pull_and_save(ticker, cik)
-            except Exception as e:
-                print(f"  [warn] {label}: {e}", file=sys.stderr)
-        return
-
-    if not args.ticker:
-        ap.error("--ticker or --candidates is required unless --selftest")
-
-    init_edgar()
-    cik = args.cik
-    if not cik:
-        try:
-            cik = str(Company(args.ticker).cik)
-        except Exception as e:
-            print(f"无法解析 CIK: {e}", file=sys.stderr); sys.exit(1)
-    _pull_and_save(args.ticker, cik)
+                init_edgar()
+            except Exception as exc:
+                init_error = exc
+            _, completion = _pull_and_save(row["ticker"], row["cik"], out=path,
+                identity=_identity(row), binding=None, upstream=upstream, init_error=init_error)
+        print(f"Deep-dive stage: {completion['status']}; artifact: {path}")
+        return 0 if completion["status"] == "complete" else 2
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"Deep-dive stage failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

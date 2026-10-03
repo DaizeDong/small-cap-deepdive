@@ -12,20 +12,86 @@ gives honest CIs. Kruskal-Wallis / Mann-Whitney are reported as clustering-naive
 Run: python docs/backtest-2026-06/significance_test.py   (from repo root)
 Deterministic (seed=42), network-free, reads only the on-disk cell JSONs.
 """
-import json, glob
+import json, os, sys
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from distress_features_extract import backtest_files
+
 rng = np.random.default_rng(42)
-FILES = [f for f in glob.glob("reports/smallcap/backtest/*_*.json")
-         if "_covid" not in f and "_run" not in f]
+FILES = [f for f in backtest_files()
+         if "_covid" not in f.name and "_run" not in f.name]
 BCODE = {"buy_eligible": 0, "WATCH": 1, "AVOID": 2, "abstain": 3}
 BNAME = ["buy_eligible", "WATCH", "AVOID", "abstain"]
 
 
+def bucket_statistics(excess, labels):
+    """Return finite four-bucket statistics or an explicit unavailable result."""
+    from math import isfinite
+    from statistics import median, pvariance
+
+    if len(excess) != len(labels):
+        return {"status": "unavailable", "reason": "length_mismatch"}
+    groups = [[] for _ in range(4)]
+    for value, label in zip(excess, labels):
+        if (type(value) not in (int, float) or not isfinite(value)
+                or type(label) is not int or label not in range(4)):
+            return {"status": "unavailable", "reason": "invalid_observation"}
+        groups[label].append(value)
+    counts = [len(group) for group in groups]
+    if any(count == 0 for count in counts):
+        return {"status": "unavailable", "reason": "missing_bucket", "counts": counts}
+    medians = [median(group) for group in groups]
+    try:
+        values = [medians[2] - medians[1], medians[0] - medians[1], pvariance(medians)]
+    except (OverflowError, ValueError):
+        return {"status": "unavailable", "reason": "nonfinite_statistic", "counts": counts}
+    if any(not isfinite(value) for value in values):
+        return {"status": "unavailable", "reason": "nonfinite_statistic", "counts": counts}
+    return {"status": "complete", "counts": counts, "medians": medians,
+            "avoid_watch": values[0], "buy_watch": values[1], "omnibus": values[2]}
+
+
+def permutation_inference(excess, labels, cells, *, permutations, shuffle):
+    """Preserve within-cell label permutations and reject unavailable statistics."""
+    observed = bucket_statistics(excess, labels)
+    unavailable = {"status": "unavailable", "reason": observed.get("reason"),
+                   "observed": observed, "p_values": None, "permutations": 0}
+    if observed["status"] != "complete":
+        return unavailable
+    if len(cells) != len(labels) or type(permutations) is not int or permutations <= 0:
+        return {**unavailable, "reason": "invalid_permutation_design"}
+    indices = {}
+    for index, cell in enumerate(cells):
+        indices.setdefault(cell, []).append(index)
+    exceedances = [0, 0, 0]
+    for iteration in range(permutations):
+        permuted = list(labels)
+        for group in indices.values():
+            original = [labels[index] for index in group]
+            replacement = list(shuffle(original))
+            if sorted(replacement) != sorted(original):
+                return {**unavailable, "reason": "invalid_label_permutation",
+                        "permutations": iteration}
+            for index, label in zip(group, replacement):
+                permuted[index] = int(label)
+        sample = bucket_statistics(excess, permuted)
+        if sample["status"] != "complete":
+            return {**unavailable, "reason": "unavailable_permutation_statistic",
+                    "permutations": iteration}
+        exceedances[0] += sample["avoid_watch"] >= observed["avoid_watch"]
+        exceedances[1] += sample["buy_watch"] <= observed["buy_watch"]
+        exceedances[2] += sample["omnibus"] >= observed["omnibus"]
+    return {"status": "complete", "observed": observed, "permutations": permutations,
+            "exceedances": exceedances,
+            "p_values": [(count + 1) / (permutations + 1) for count in exceedances]}
+
+
 def num(x):
     try:
-        return float(x)
-    except Exception:
+        value = float(x)
+        return value if np.isfinite(value) else None
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -56,13 +122,19 @@ def bmed(e, l):
     return [np.median(e[l == c]) if (l == c).any() else np.nan for c in range(4)]
 
 
-obs = bmed(ex, lab)
+B = 20000
+inference = permutation_inference(ex.tolist(), lab.tolist(), cellid.tolist(),
+                                  permutations=B, shuffle=rng.permutation)
 ncount = {BNAME[c]: int((lab == c).sum()) for c in range(4)}
 print(f"N={N}  cells={len(set(cellid.tolist()))}  bucket n={ncount}")
+if inference["status"] != "complete":
+    print("[PRIMARY] unavailable: " + str(inference["reason"]) + "; no p-values computed")
+    raise SystemExit(0)
+obs = inference["observed"]["medians"]
+g_av_wa = inference["observed"]["avoid_watch"]
+g_bu_wa = inference["observed"]["buy_watch"]
+obs_omni = inference["observed"]["omnibus"]
 print("observed median excess vs IWM: " + str({BNAME[c]: round(obs[c], 4) for c in range(4)}))
-g_av_wa = obs[2] - obs[1]
-g_bu_wa = obs[0] - obs[1]
-obs_omni = float(np.var([obs[c] for c in range(4)]))
 print(f"gaps: AVOID-WATCH={g_av_wa:+.4f}  BUY-WATCH={g_bu_wa:+.4f}  omnibus var-of-medians={obs_omni:.5f}")
 
 # index list per cell
@@ -72,22 +144,7 @@ for i, c in enumerate(cellid.tolist()):
 cidx = {k: np.array(v) for k, v in cidx.items()}
 
 # ---- stratified within-cell permutation ----
-B = 20000
-ge_av = le_bu = ge_omni = 0
-for _ in range(B):
-    plab = lab.copy()
-    for idx in cidx.values():
-        plab[idx] = rng.permutation(lab[idx])
-    pm = bmed(ex, plab)
-    if (pm[2] - pm[1]) >= g_av_wa:
-        ge_av += 1
-    if (pm[0] - pm[1]) <= g_bu_wa:
-        le_bu += 1
-    if float(np.var([pm[c] for c in range(4)])) >= obs_omni:
-        ge_omni += 1
-p_av = (ge_av + 1) / (B + 1)
-p_bu = (le_bu + 1) / (B + 1)
-p_omni = (ge_omni + 1) / (B + 1)
+p_av, p_bu, p_omni = inference["p_values"]
 print(f"\n[PRIMARY] stratified within-cell permutation (B={B}), one-sided:")
 print(f"  omnibus  'any bucket structure beyond random?'  p = {p_omni:.4f}")
 print(f"  AVOID outperforms WATCH (inversion real?)        p = {p_av:.4f}")
@@ -105,6 +162,9 @@ for b in range(Bc):
 print(f"\ncluster-bootstrap 95% CI of bucket median excess (B={Bc}, resample cells):")
 for c in range(4):
     col = bs[:, c][~np.isnan(bs[:, c])]
+    if len(col) == 0 or not np.isfinite(col).all():
+        print(f"  {BNAME[c]:14} unavailable: no finite bootstrap observations")
+        continue
     lo, hi = np.percentile(col, [2.5, 97.5])
     inc0 = "includes 0" if lo <= 0 <= hi else "EXCLUDES 0"
     print(f"  {BNAME[c]:14} median={obs[c]:+.3f}  95%CI[{lo:+.3f}, {hi:+.3f}]  ({inc0})")

@@ -11,17 +11,18 @@
 
 ## Discipline 1, Base Rate First
 
-**Rule:** Before writing any claim about a specific company, state the reference class and its empirical base rates.
+**Rule:** Before writing any claim about a specific company, state the reference class. Use an empirical base rate only with a traceable source that matches the population, outcome and time window; otherwise state that the base rate is unknown.
 
 **Why:** LLMs are optimized to generate coherent, plausible narratives. Given financial data about any company, an unconstrained LLM will construct a plausible growth story, even for companies that are overwhelmingly likely to fail. Base rates are the prior that must be updated by evidence, not replaced by story.
 
 **Implementation:**
 - Choose the most specific reference class that describes this company: "pre-revenue micro-cap with AI exposure," "cash-flow-positive small-cap industrial," "de-SPAC with net cash," etc.
-- State the empirical base rates for that class (see `cognitive-priors.md` for the prior table)
-- From that prior, work toward the specific company using Tier-weighted evidence only
-- If evidence is insufficient to move the prior materially, default to the prior
+- Verify and cite the source, population, outcome definition and observation window for any empirical estimate. The historical notes in `cognitive-priors.md` are research leads, not a lookup table of validated priors.
+- If no matching evidence is available, write "base rate unknown." Label any assumed prior explicitly and explain its sensitivity.
+- Use Tier-weighted company evidence to update a supported prior or assess the case under the stated uncertainty.
+- An unsupported or assumed percentage must not become an empirical claim or an additional rating gate.
 
-**Example anchor (acceptable):** "Reference class: pre-revenue micro-cap software company with AI positioning. Base rates: approximately 60 to 70% of companies in this class fail to achieve sustainable revenue within 5 years. This prior requires T1 evidence of customer traction before moving the rating above WATCH."
+**Example anchor (acceptable, synthetic):** "Reference class: pre-revenue micro-cap software companies. Base rate unknown: no verified study matching this population, sustainable-revenue outcome and five-year window was found. Any scenario probability below is an explicit assumption. The rating follows the rubric's evidence and mechanical eligibility requirements."
 
 **Example anchor (unacceptable):** Starting the report with the growth narrative and later noting "risks include competition and execution." This is story-first, base-rate-never.
 
@@ -136,16 +137,20 @@ Falsification trigger: If OCF does not reach >$0 by Q3 2026 earnings, the bull c
 
 **Rule:** Kill-flag counts come from `cheap_pass.py` / `deepdive_data.py` output. The judgment layer counts them; it does not override them with qualitative reasoning.
 
-**Kill-flags tracked:**
-- `has_going_concern` (double-hit required per `mechanical-checks.md` Guard 3)
-- `has_material_weakness`
-- `has_death_spiral`
-- `customer_concentration_flag`
-- Secondary: restatement, auditor resignation, serial dilution, reverse split, frequent name/ticker change (these are noted in the report but not counted in the primary kill-flag total for hard-rule purposes)
+**Keep the stage-specific counts distinct:**
+- Cheap-pass counts a connected going-concern/substantial-doubt assertion, material weakness,
+  death-spiral financing, and reverse split. It rejects count ≥ 2; a connected going-concern
+  assertion, cash-burn rule, or concentration kill can also reject independently.
+- The report counts the three filing flags `has_going_concern`, `has_material_weakness`,
+  and `has_death_spiral`, plus `concentration_flag == "kill"` and `distress_kill == true`.
+  It retains the larger of this observed count and a supported explicit `killflag_count`.
+  Missing required evidence cannot establish a zero count.
+- Restatements, auditor resignations, serial dilution, and frequent name/ticker changes
+  remain additional review signals. Reverse split already contributes to the cheap-pass count.
 
 **Hard rule:** When kill-flag count ≥ 2, the default rating is AVOID. This default can be overridden only by strong T1 evidence that directly contradicts the kill-flag (e.g., going-concern mention is from a prior year and the auditor's subsequent year report contains no going-concern language). Document the override explicitly.
 
-**Hard rule:** When kill-flag count ≥ 3, the company sinks to bottom of ranking regardless of aggregate scorecard total. No scorecard aggregate overrides this.
+**Hard rule:** When the rating is AVOID or the effective kill-flag count ≥ 2, the company sinks to bottom of ranking regardless of aggregate scorecard total. No scorecard aggregate overrides this.
 
 **When to cluster-flag:** If 5 or more secondary kill-flags appear together (e.g., serial dilution + reverse split + frequent ticker change + high-concentration insider + going concern), treat as a near-certain avoidance signal and note in the pre-mortem.
 
@@ -177,10 +182,14 @@ Falsification trigger: If OCF does not reach >$0 by Q3 2026 earnings, the bull c
 
 | Field value | Meaning | What to write |
 |---|---|---|
-| `runway = null`, `runway_note = "ocf_positive"` | Company is cash-flow positive; no burn rate to compute | "Runway not computed, OCF is positive, which indicates the company is not burning cash. Verified via OCF trend." |
-| `runway = null`, `runway_note = "insufficient_data"` | Data genuinely missing | "Runway could not be computed due to missing cash flow data. This is a genuine data gap." |
+| `runway_periods = null` with observed nonnegative `ocf_latest` | No cash burn was measured in that OCF period | "Runway was not computed because the observed OCF was nonnegative. State its period and source; this alone does not establish current financial health." |
+| `runway_periods = null` with missing cash or OCF evidence | Required inputs are missing | "Runway could not be computed. Identify the missing cash or OCF observation and its source gap." |
 | `insider_trades = None` | openinsider returned no Form 4 data | "Insider trade data not retrieved. Flagged as unverified, treat management dimension as data-limited." |
 | `revenue_growth_pct` from stale XBRL | May not reflect current trajectory | "Revenue growth computed from FY[X],FY[Y] data. Verified against 10-K MD&A: [result]." |
+
+The producer does not emit `runway_note`. Inspect `cash`, `ocf_latest` and their source
+evidence before interpreting a null `runway_periods`. A numeric value is measured in the
+period covered by the OCF observation, commonly a year, rather than automatically in quarters.
 
 **The obligation:** Section 8 of the output template ("Known gaps and unverified items") must be populated. Writing "none" is acceptable only if all fields were verified against T1 sources.
 

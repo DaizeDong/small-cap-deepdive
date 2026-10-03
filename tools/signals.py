@@ -121,8 +121,7 @@ def _divergence_label(rev_slope_sign, contamination_ratio, fundamental_decline_f
                                  AND price flat/down  -> THE diffusion thesis: a real change
                                  the market hasn't priced.
       "melting_ice_cube_priced"  fundamentals declining (decline_flag OR rev_slope<0)
-                                 AND price up/elevated -> SIGA-shaped: decline already in
-                                 the tape, no edge.
+                                 AND price up/elevated; diagnostic divergence only.
       "aligned"                  trajectory and price point the same way (both up / both down).
       "unclear"                  trajectory or price unknown, or a flat/mixed configuration.
     """
@@ -143,8 +142,8 @@ def _divergence_label(rev_slope_sign, contamination_ratio, fundamental_decline_f
                 "DIAGNOSTIC ONLY: read as T2 context, never a BUY trigger.")
     if declining and price_up:
         return ("melting_ice_cube_priced",
-                "Fundamentals declining while price is up/elevated — SIGA-shaped: the decline "
-                "is already in the tape, no informational edge. DIAGNOSTIC ONLY.")
+                "Fundamentals declining while price is up/elevated. "
+                "DIAGNOSTIC ONLY: these inputs do not establish an informational edge.")
     if improving and price_up:
         return ("aligned", "Fundamentals improving and price up — trajectory and tape agree (priced in).")
     if declining and price_down_flat:
@@ -191,51 +190,95 @@ def compute_price_divergence(deepdive_derived: dict, ticker: str, price_fn=None)
 # P17, Ownership / short-interest positioning
 # ---------------------------------------------------------------------------
 
+class _OwnershipFilings(list):
+    """Observed filings plus the acquisition, parsing and pagination boundary."""
+
+    def __init__(self, rows=(), *, status, reason="", acquisition="unavailable",
+                 parsing="unavailable", pagination="unavailable", total=None,
+                 pages=0, lookback_days=540):
+        super().__init__(rows)
+        self.completion = {"status": status, "reason": reason,
+                           "acquisition": acquisition, "parsing": parsing,
+                           "pagination": pagination, "total": total,
+                           "returned": len(self), "pages": pages,
+                           "lookback_days": lookback_days}
+
+
 def _recent_13d_13g(cik, lookback_days: int = 540, http_fn=http_get) -> list[dict]:
-    """Enumerate recent SC 13D / SC 13G (and /A) filings for a SUBJECT cik via EDGAR EFTS.
-
-    Returns a list of {form, file_date, filer} newest-first, or [] on any failure. http_fn
-    is injectable for selftest. Overlaps P11's 13D catalyst category by design (same EFTS
-    enumeration). Default lookback ~18 months captures the canonical small-cap activist /
-    institutional accumulation window while staying bounded.
-
-    EFTS query shape (verified against live efts.sec.gov 2026-06): pass NO `q` param. An
-    empty quoted `q=""` makes the full-text engine require an (empty) phrase match and
-    silently returns 0 hits for EVERY cik — the same omit-`q` pattern discover_events.py
-    uses for 10-12B. Forms include the /A amendments implicitly (forms=SC 13D returns
-    SC 13D and SC 13D/A); the date window is applied via startdt/enddt.
-    """
-    if cik is None or str(cik).strip() in ("", "nan"):
-        return []
-    cik10 = str(cik).split(".")[0].strip().zfill(10)
+    """Read a bounded EFTS feed; incomplete observations never establish a zero count."""
+    cik_text = str(cik).strip() if cik is not None else ""
+    if not cik_text.isdigit() or len(cik_text) > 10 or int(cik_text) <= 0:
+        return _OwnershipFilings(status="unavailable", reason="invalid_cik",
+                                 lookback_days=lookback_days)
+    cik10 = cik_text.zfill(10)
     now = datetime.now(timezone.utc)
     startdt = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
     enddt = now.strftime("%Y-%m-%d")
-    url = (f"{EFTS}?forms=SC%2013D,SC%2013G&ciks={cik10}"
-           f"&dateRange=custom&startdt={startdt}&enddt={enddt}")
-    try:
-        r = http_fn(url, timeout=25)
-        if r.status_code != 200:
-            return []
-        hits = r.json().get("hits", {}).get("hits", [])
-    except Exception:
-        return []
+    base = (f"{EFTS}?forms=SC%2013D,SC%2013G&ciks={cik10}"
+            f"&dateRange=custom&startdt={startdt}&enddt={enddt}")
+    out, seen, total = [], set(), None
 
-    out = []
-    for h in hits:
-        s = h.get("_source", {})
-        form = s.get("form", "")
-        file_date = s.get("file_date", "")
-        # display_names[0] is the subject; the FILER (accumulator) is usually a later entry.
-        names = s.get("display_names", []) or []
-        filer = ""
-        if len(names) > 1:
-            filer = names[-1]
-        elif names:
-            filer = names[0]
-        out.append({"form": form, "file_date": file_date, "filer": filer})
-    out.sort(key=lambda x: x.get("file_date", ""), reverse=True)
-    return out
+    def result(status, reason="", *, acquisition="complete", parsing="complete",
+               pagination="partial", pages=0):
+        out.sort(key=lambda row: row["file_date"], reverse=True)
+        return _OwnershipFilings(out, status=status, reason=reason, acquisition=acquisition,
+                                 parsing=parsing, pagination=pagination, total=total,
+                                 pages=pages, lookback_days=lookback_days)
+
+    offset = 0
+    for page in range(10):
+        try:
+            response = http_fn(base + f"&from={offset}&size=100", timeout=25)
+        except Exception:
+            return result("partial" if out else "unavailable", "request_failed",
+                          acquisition="unavailable", parsing="unavailable", pages=page)
+        if getattr(response, "status_code", None) != 200:
+            return result("partial" if out else "unavailable", "http_status",
+                          acquisition="unavailable", parsing="unavailable", pages=page)
+        try:
+            payload = response.json()
+            envelope = payload["hits"]
+            hits = envelope["hits"]
+            if not isinstance(hits, list):
+                raise ValueError("invalid hits")
+            raw_total = envelope.get("total")
+            relation = "eq"
+            if isinstance(raw_total, dict):
+                relation = raw_total.get("relation")
+                raw_total = raw_total.get("value")
+            exact_total = type(raw_total) is int and raw_total >= 0 and relation == "eq"
+            if exact_total:
+                if total is not None and total != raw_total:
+                    return result("partial", "total_changed", pages=page + 1)
+                total = raw_total
+            for hit in hits:
+                source = hit["_source"]
+                form, file_date = source["form"], source["file_date"]
+                names = source.get("display_names", [])
+                if (form not in {"SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A"}
+                        or not isinstance(file_date, str)
+                        or datetime.strptime(file_date, "%Y-%m-%d").strftime("%Y-%m-%d") != file_date
+                        or not isinstance(names, list)
+                        or any(not isinstance(name, str) for name in names)):
+                    raise ValueError("invalid ownership row")
+                filer = names[-1] if names else ""
+                identity = hit.get("_id") or (form, file_date, filer)
+                if identity in seen:
+                    return result("partial", "duplicate_page_or_filing", pages=page + 1)
+                seen.add(identity)
+                out.append({"form": form, "file_date": file_date, "filer": filer})
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return result("invalid", "invalid_payload", parsing="invalid", pages=page + 1)
+        if not exact_total:
+            return result("partial", "exact_total_unavailable", pages=page + 1)
+        offset += len(hits)
+        if offset == total:
+            return result("complete", pagination="complete", pages=page + 1)
+        if offset > total:
+            return result("invalid", "total_mismatch", pagination="invalid", pages=page + 1)
+        if not hits:
+            return result("partial", "premature_empty_page", pages=page + 1)
+    return result("partial", "page_limit", pages=10)
 
 
 def _short_interest(ticker: str, si_fn=None) -> dict:
@@ -273,7 +316,8 @@ def compute_ownership(ticker: str, cik, http_fn=http_get, si_fn=None) -> dict:
     si = _short_interest(ticker, si_fn=si_fn)
     return {
         "recent_13d_13g": filings,
-        "recent_13d_13g_count": len(filings),
+        "recent_13d_13g_count": (len(filings) if filings.completion["status"] == "complete" else None),
+        "recent_13d_13g_completion": dict(filings.completion),
         "short_interest_pct": si["short_interest_pct"],
         "short_trend": si["short_trend"],
         "staleness_note": si["staleness_note"],
@@ -342,27 +386,20 @@ def compute_signals(ticker: str, cik, deepdive_derived: dict,
 def _selftest() -> None:
     """P16 divergence-label logic + P17 robustness + firewall-flag assertions (no network)."""
 
-    # ---- P16: declining fundamentals + price UP => melting_ice_cube_priced (SIGA shape) ----
-    declining_derived = {
-        "rev_slope_sign": -1,
-        "contamination_ratio": 0.85,
-        "fundamental_decline_flag": True,
-    }
-    # synthetic ascending price path spanning >12mo so both 6m and 12m anchors resolve.
-    # +30% over the full window (price up/elevated). Points at 0 / 6mo / 12mo / "now".
-    base = datetime(2025, 5, 1)
-    up_path = [(base, 10.0),                              # 0 (12mo+ ago anchor)
-               (base + timedelta(days=183), 11.0),       # ~6mo
-               (base + timedelta(days=366), 12.0),       # ~12mo
-               (base + timedelta(days=400), 13.0)]       # "now"
-    sig = compute_signals("FAKE", "0000320193", declining_derived,
+    # Generated declining fundamentals and an independently constructed rising price path.
+    from make_fixtures import source34_scenarios
+    _case = source34_scenarios()["signals"]
+    declining_derived = _case["declining"]
+    base = datetime(*_case["base_date"])
+    up_path = [(base + timedelta(days=offset), price) for offset, price in _case["price_points"]]
+    sig = compute_signals(_case["ticker"], _case["cik"], declining_derived,
                           price_fn=lambda t: up_path,
                           http_fn=lambda *a, **k: (_ for _ in ()).throw(AssertionError("net!")),
                           si_fn=None)
     # http_fn raising is caught -> ownership becomes a guarded block (not a crash)
     pd = sig["price_divergence"]
     assert pd["price_return_12m"] is not None and pd["price_return_12m"] > 0.2, (
-        f"P16: 12m return should be ~+30%, got {pd['price_return_12m']}")
+        f"P16: generated 12m return should exceed the positive threshold, got {pd['price_return_12m']}")
     assert pd["divergence_label"] == "melting_ice_cube_priced", (
         f"P16: declining fundamentals + price up must => melting_ice_cube_priced, "
         f"got {pd['divergence_label']}")
@@ -370,7 +407,7 @@ def _selftest() -> None:
     assert pd["fundamental_trajectory"]["rev_slope_sign"] == -1, "P16: must read rev_slope_sign from derived"
     assert pd["fundamental_trajectory"]["read_from"].startswith("deepdive_derived"), (
         "P16: must declare it reads trajectory from derived (no recompute)")
-    print(f"  P16: declining + price+30% -> {pd['divergence_label']}  OK")
+    print(f"  P16: declining fundamentals plus rising price -> {pd['divergence_label']}  OK")
 
     # ---- P16: improving fundamentals + price FLAT/down => unpriced_improvement (the thesis) ----
     improving_derived = {
@@ -409,18 +446,12 @@ def _selftest() -> None:
     print("  P16: aligned(both up/both down) / melting-via-slope / unclear / threshold branches  OK")
 
     # ---- P17: ownership enumeration parses EFTS hits + sorts newest-first (mocked http) ----
+    from make_fixtures import source25_ownership_success_response
     class _Resp:
         status_code = 200
         @staticmethod
         def json():
-            return {"hits": {"hits": [
-                {"_source": {"form": "SC 13G", "file_date": "2026-02-10",
-                             "display_names": ["FAKECO  (FAKE)  (CIK 0000320193)",
-                                               "VANGUARD GROUP INC  (CIK 0000102909)"]}},
-                {"_source": {"form": "SC 13D", "file_date": "2026-05-01",
-                             "display_names": ["FAKECO  (FAKE)  (CIK 0000320193)",
-                                               "ACTIVIST LP  (CIK 0001111111)"]}},
-            ]}}
+            return source25_ownership_success_response()
     own = compute_ownership("FAKE", "320193",
                             http_fn=lambda *a, **k: _Resp(),
                             si_fn=None)
@@ -472,6 +503,8 @@ def _selftest() -> None:
     assert sig3["price_divergence"]["divergence_label"] == "unclear", (
         "robustness: price fetch failure -> unclear, not a crash")
     assert sig3["ownership"]["recent_13d_13g"] == [], "robustness: ownership failure -> empty list, not crash"
+    assert sig3["ownership"]["recent_13d_13g_count"] is None
+    assert sig3["ownership"]["recent_13d_13g_completion"]["status"] != "complete"
     print("  robustness: network failure -> partial result, no raise  OK")
 
     print("signals selftest PASS (P16 divergence labels + P17 ownership/short + firewall flags + robustness)")

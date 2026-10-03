@@ -1,0 +1,105 @@
+{
+  "row": {
+    "ticker": "SYNACQUIRE",
+    "cik": "42",
+    "asof": "2000-01-01"
+  },
+  "series_names": [
+    "cash",
+    "ocf",
+    "assets",
+    "liab",
+    "equity",
+    "curassets",
+    "curliab",
+    "retearn",
+    "ebit",
+    "ni",
+    "revenue",
+    "gross",
+    "shares"
+  ],
+  "companyfacts": {
+    "facts": {
+      "us-gaap": {
+        "CashAndCashEquivalentsAtCarryingValue": {
+          "units": {
+            "USD": [
+              {
+                "end": "1999-12-31",
+                "filed": "2000-01-01",
+                "val": 30,
+                "form": "20-F",
+                "fp": "FY"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "shares": [
+    {
+      "end": "1999-12-31",
+      "val": 100
+    }
+  ],
+  "failed_companyfacts": [
+    "http_503",
+    "timeout",
+    "invalid_json",
+    "invalid_shape",
+    "empty"
+  ],
+  "resume_statuses": [
+    {
+      "name": "legacy_all_empty",
+      "empty": true,
+      "status": null,
+      "error": false,
+      "retry": true
+    },
+    {
+      "name": "empty_marked_complete",
+      "empty": true,
+      "status": "complete",
+      "error": false,
+      "retry": true
+    },
+    {
+      "name": "partial_usable",
+      "empty": false,
+      "status": "partial",
+      "error": false,
+      "retry": true
+    },
+    {
+      "name": "unavailable_usable",
+      "empty": false,
+      "status": "unavailable",
+      "error": false,
+      "retry": true
+    },
+    {
+      "name": "legacy_with_error",
+      "empty": false,
+      "status": null,
+      "error": true,
+      "retry": true
+    },
+    {
+      "name": "legacy_success",
+      "empty": false,
+      "status": null,
+      "error": false,
+      "retry": false
+    },
+    {
+      "name": "complete_usable",
+      "empty": false,
+      "status": "complete",
+      "error": false,
+      "retry": false
+    }
+  ]
+}

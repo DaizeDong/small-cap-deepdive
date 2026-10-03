@@ -24,7 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import UA, REPORTS, slug as _slug, http_get, today, CFG, resolve_mktcap, band_for
 # P8 SIC reverse-recall (the recall FLOOR): enumerate a theme's dedicated SIC and UNION
 # with FTS so a true small-cap FTS missed (low keyword density / top-1000 cap) is recalled.
-from filter_by_sic import theme_sics, sic_reverse_recall, union_recall
+from filter_by_sic import (theme_sics, sic_reverse_recall, union_recall, StageRows,
+                           stage_work, stage_completion, rows_completion,
+                           parse_fts_page, write_stage_receipt, prepare_stage_output)
 
 FTS = "https://efts.sec.gov/LATEST/search-index"
 
@@ -37,28 +39,33 @@ def _cik_to_ticker(cik: str) -> str:
     """Resolve a CIK to its primary ticker via SEC company_tickers.json (cached).
 
     SIC-reverse rows come from browse-edgar, which has no ticker column; enrich_marketcap
-    needs one. Returns "" if the CIK has no listed ticker (delisted / non-listed filer) —
-    those flow through as band='unknown' like any other ticker-less row.
+    needs one. An empty return means symbol evidence is unavailable; it does not
+    prove that the issuer is delisted or nontrading.
     """
     global _CIK_TICKER_CACHE
     if _CIK_TICKER_CACHE is None:
         _CIK_TICKER_CACHE = {}
         try:
             r = http_get(_COMPANY_TICKERS, timeout=25)
+            r.raise_for_status()
             for v in r.json().values():
                 _CIK_TICKER_CACHE[str(v["cik_str"])] = v["ticker"]
         except Exception as e:  # pragma: no cover - network guard
             print(f"  [warn] company_tickers load failed: {e}", file=sys.stderr)
     return _CIK_TICKER_CACHE.get(str(cik).strip().lstrip("0"), "")
 
-# 解析 display_names: "Apple Inc.  (AAPL)  (CIK 0000320193)"
+# Parse display_names as a company name, parenthesized symbol and parenthesized CIK.
 NAME_RE = re.compile(r"^(.*?)\s*\(([^)]+)\)\s*\(CIK\s*(\d+)\)")
 
 
 def fts_search(phrase: str, forms: str, startdt: str, enddt: str,
                max_pages: int = 10) -> list[dict]:
     """SEC 全文检索精确短语。翻页(每页100)。返回去重 hit 列表。"""
-    out, seen = [], set()
+    if not phrase.strip() or max_pages < 1:
+        raise ValueError("phrase must be nonempty and max_pages positive")
+    out, seen, work = [], set(), []
+    first_total = None
+    page_signatures = set()
     for page in range(max_pages):
         q = urllib.parse.quote(f'"{phrase}"')
         url = f"{FTS}?q={q}&forms={forms}&startdt={startdt}&enddt={enddt}&from={page*100}"
@@ -67,19 +74,33 @@ def fts_search(phrase: str, forms: str, startdt: str, enddt: str,
             r = http_get(url, timeout=25)
             r.raise_for_status()
             d = r.json()
+            hits, total, relation = parse_fts_page(d)
         except Exception as e:
             print(f"  [warn] FTS page {page} ({phrase}): {e}", file=sys.stderr)
-        if d is None:
+            work.append(stage_work("sec_fts", phrase, page, "unavailable", "request_or_schema_failed"))
             break
-        hits = d.get("hits", {}).get("hits", [])
+        if first_total is None:
+            first_total = total
+        elif total != first_total:
+            work.append(stage_work("sec_fts", phrase, page, "partial", "total_changed"))
         if not hits:
+            terminal = relation == "eq" and page * 100 >= total
+            work.append(stage_work("sec_fts", phrase, page,
+                                   "complete" if terminal else "unavailable",
+                                   "terminal_empty_page" if terminal else "missing_page"))
             break
-        total = d["hits"]["total"]["value"]
+        signature = repr(hits)
+        if signature in page_signatures:
+            work.append(stage_work("sec_fts", phrase, page, "partial", "repeated_page"))
+            break
+        page_signatures.add(signature)
+        unparsed = False
         for h in hits:
             s = h["_source"]
             for dn in s.get("display_names", []):
                 m = NAME_RE.match(dn)
                 if not m:
+                    unparsed = True
                     continue
                 name, tickers, cik = m.group(1), m.group(2), m.group(3)
                 tick = tickers.split(",")[0].strip()
@@ -92,10 +113,21 @@ def fts_search(phrase: str, forms: str, startdt: str, enddt: str,
                             "location": (s.get("biz_locations") or [""])[0],
                             "form": s.get("form"), "file_date": s.get("file_date"),
                             "matched_phrase": phrase})
+        work.append(stage_work("sec_fts", phrase, page,
+                               "partial" if unparsed else "complete",
+                               "unparsed_identity" if unparsed else ""))
         time.sleep(1.5)  # SEC 限速
-        if (page + 1) * 100 >= total:
+        if relation == "eq" and page * 100 + len(hits) >= total:
             break
-    return out
+        if len(hits) < 100:
+            work.append(stage_work("sec_fts", phrase, page + 1, "unavailable", "missing_page"))
+            break
+    else:
+        work.append(stage_work("sec_fts", phrase, max_pages, "unavailable", "page_cap"))
+    result = StageRows(out, stage="fts_search", work=work)
+    result.completion["request"] = {"phrase": phrase, "forms": forms, "startdt": startdt,
+                                    "enddt": enddt, "page_size": 100, "max_pages": max_pages}
+    return result
 
 
 def merge_sic_reverse(fts_hits: list[dict], theme: str, forms: str,
@@ -112,7 +144,8 @@ def merge_sic_reverse(fts_hits: list[dict], theme: str, forms: str,
     sics = theme_sics(theme)
     if not sics:
         # Tag the channel even on the no-floor path so the column is always present.
-        return [dict(h, recall_channel="fts") for h in fts_hits]
+        return StageRows((dict(h, recall_channel="fts") for h in fts_hits),
+                         stage="fts_recall", upstream=[rows_completion(fts_hits)])
     sic_rows = sic_reverse_recall(theme, forms=forms, fetch=fetch)
     print(f"  [P8] SIC reverse-recall (dedicated SIC {sics}): {len(sic_rows)} registrants",
           file=sys.stderr)
@@ -187,6 +220,13 @@ def enrich_marketcap(df: pd.DataFrame, max_workers: int = 8) -> pd.DataFrame:
     按位置对齐 concat)。
     """
     n = len(df)
+    if len(df) == 0:
+        df = df.copy()
+        for col in ("mktcap", "avg_dollar_vol", "price"):
+            df[col] = pd.Series(dtype="float64")
+        for col in ("exch", "mktcap_source"):
+            df[col] = pd.Series(dtype="object")
+        return df
     ciks = df["cik"].tolist() if "cik" in df.columns else [None] * n
     tickers = list(df["ticker"])
     rows: list[dict | None] = [None] * n
@@ -249,6 +289,12 @@ def apply_filters(df: pd.DataFrame, max_mcap: float, min_dollar_vol: float,
     if watch_band_max is None:
         watch_band_max = CFG.get("watch_band_max", 5_000_000_000)
     df = df.copy()
+    if len(df) == 0:
+        for col in ("flag_no_mktcap", "flag_too_big", "flag_spac", "flag_illiquid",
+                    "flag_no_price", "smallcap_candidate"):
+            df[col] = pd.Series(dtype="bool")
+        df["band"] = pd.Series(dtype="object")
+        return df
     df["flag_no_mktcap"] = df["mktcap"].isna()
     df["flag_too_big"] = df["mktcap"] > watch_band_max
     df["flag_spac"] = df["name"].str.contains(SPAC_PAT, na=False) | (df["sic"] == "6770")
@@ -274,6 +320,17 @@ def _two_years_ago() -> str:
 
 def _selftest() -> None:
     """P5: null-mktcap rows must become band='unknown' and FLOW THROUGH (not drop)."""
+    from make_fixtures import source34_scenarios
+    _cases = source34_scenarios()
+    _cap = _cases["market_cap"]
+    _cap_ticker = _cap["ticker"]
+    _union = _cases["recall_union"]
+    _r0, _r1, _r2 = _union["rows"]
+    _cik_a, _cik_b, _cik_c = _r0["cik"], _r1["cik"], _r2["cik"]
+    _name_a, _name_b = _r0["name"], _r1["name"]
+    _ticker_a, _ticker_b = _r0["ticker"], _r1["ticker"]
+    _other_cik, _other_ticker, _other_name = (
+        _union["other_cik"], _union["other_ticker"], _union["other_name"])
     max_mcap = 2_000_000_000
     watch_max = 5_000_000_000
     df = pd.DataFrame([
@@ -292,12 +349,9 @@ def _selftest() -> None:
         # null mktcap AND no price/volume, still flows as 'unknown' band, but is illiquid
         {"name": "Dark Co", "ticker": "DARK", "cik": "5", "sic": "2810",
          "mktcap": None, "price": None, "avg_dollar_vol": 0.0},
-        # P12: yfinance returned NaN, but enrich_marketcap reconstructed mktcap via SEC
-        # shares x price (mktcap_source='sec_shares_x_price'). The resolved in-band cap must
-        # land 'deep' and stay a candidate, NOT be size-excluded for being yfinance-NaN.
-        # This is the SJW/HI/MRC case: real name, fragile yfinance, recoverable via SEC.
-        {"name": "SJW-like", "ticker": "SJWX", "cik": "6", "sic": "4941",
-         "mktcap": 1.5e9, "price": 50.0, "avg_dollar_vol": 5e6,
+        # Generated SEC reconstruction retains an eligible band before size filtering.
+        {"name": _cap["name"], "ticker": _cap_ticker, "cik": _cap["cik"], "sic": "4941",
+         "mktcap": _cap["value"], "price": _cap["price"], "avg_dollar_vol": 5e6,
          "mktcap_source": "sec_shares_x_price"},
     ])
     out = apply_filters(df, max_mcap, min_dollar_vol=1e6, watch_band_max=watch_max)
@@ -325,12 +379,12 @@ def _selftest() -> None:
     assert cand["DARK"] == False, "DARK is illiquid -> not a candidate (via liquidity gate, not mktcap)"
 
     # P12: a SEC-shares x price reconstructed in-band mktcap must band 'deep' and stay a
-    # candidate, the yfinance-NaN name (SJW/HI/MRC) is recovered, NOT size-excluded.
-    assert bands["SJWX"] == "deep", (
-        f"P12: SEC-reconstructed $1.5B mktcap must band 'deep', got {bands['SJWX']}")
-    assert cand["SJWX"] == True, (
+    # candidate, the yfinance-NaN name (generated missing-cap) is recovered, NOT size-excluded.
+    assert bands[_cap_ticker] == "deep", (
+        f"P12: generated reconstructed mktcap must band 'deep', got {bands[_cap_ticker]}")
+    assert cand[_cap_ticker] == True, (
         "P12: a real name with yfinance NaN but resolvable SEC shares x price must remain "
-        "smallcap_candidate=True (not size-excluded) — the SJW fix")
+        "smallcap_candidate=True (not size-excluded) — resolution before size filtering")
 
     # -----------------------------------------------------------------------
     # P8 SIC reverse-recall wiring (merge_sic_reverse). Offline: mock fetch + mock
@@ -339,37 +393,32 @@ def _selftest() -> None:
     # -----------------------------------------------------------------------
     class _Resp:
         def __init__(self, text): self.text = text
-    # browse-edgar fixture for SIC 7200: SCI (also an FTS hit) + CSV (FTS blind spot).
-    sic_html = (
-        '<a href="x&amp;CIK=0000089089&amp;owner=include&amp;count=100&amp;type=10-K">0000089089</a></td>'
-        '<td scope="row">SERVICE CORP INTERNATIONAL</td>'
-        '<a href="x&amp;CIK=0001016281&amp;owner=include&amp;count=100&amp;type=10-K">0001016281</a></td>'
-        '<td scope="row">CARRIAGE SERVICES INC</td>'
-    )
+    # Generated issuer identities exercise parser and recall provenance.
+    sic_html = _union["html"]
     def _mock_fetch(url, params=None, timeout=25):
         return _Resp(sic_html if (params or {}).get("start", 0) == 0 else "")
     def _mock_ticker(cik):
-        return {"1016281": "CSV", "89089": "SCI"}.get(str(cik).strip().lstrip("0"), "")
+        return {_cik_b: _ticker_b, _cik_a: _ticker_a}.get(str(cik).strip().lstrip("0"), "")
 
     fts_hits = [
-        {"name": "SERVICE CORP INTERNATIONAL", "ticker": "SCI", "cik": "89089",
+        {"name": _name_a, "ticker": _ticker_a, "cik": _cik_a,
          "sic": "7200", "matched_phrase": "deathcare"},
-        {"name": "FTS Only Co", "ticker": "ZZZZ", "cik": "999999",
+        {"name": _other_name, "ticker": _other_ticker, "cik": _other_cik,
          "sic": "7200", "matched_phrase": "cremation"},
     ]
     # Mapped theme -> floor kicks in, union enumerates the SIC and merges.
     merged = merge_sic_reverse(fts_hits, "deathcare", "10-K",
                                resolve_ticker=_mock_ticker, fetch=_mock_fetch)
     by_cik = {r["cik"]: r for r in merged}
-    assert len(merged) == 3, f"P8 union must dedupe to 3 rows (SCI once), got {len(merged)}"
-    assert set(by_cik) == {"89089", "999999", "1016281"}, f"P8 union CIK set: {set(by_cik)}"
-    assert by_cik["89089"]["recall_channel"] == "both", "SCI in FTS+SIC must tag 'both'"
-    assert by_cik["999999"]["recall_channel"] == "fts", "FTS-only must tag 'fts'"
-    assert by_cik["1016281"]["recall_channel"] == "sic_reverse", (
-        "CSV is the FTS blind spot recovered by the SIC floor -> 'sic_reverse'"
+    assert len(merged) == 3, f"P8 union must dedupe to 3 rows (first synthetic member once), got {len(merged)}"
+    assert set(by_cik) == {_cik_a, _other_cik, _cik_b}, f"P8 union CIK set: {set(by_cik)}"
+    assert by_cik[_cik_a]["recall_channel"] == "both", "first synthetic member in FTS+SIC must tag 'both'"
+    assert by_cik[_other_cik]["recall_channel"] == "fts", "FTS-only must tag 'fts'"
+    assert by_cik[_cik_b]["recall_channel"] == "sic_reverse", (
+        "second synthetic member is the FTS blind spot recovered by the SIC floor -> 'sic_reverse'"
     )
-    assert by_cik["1016281"]["ticker"] == "CSV", "SIC-only row must back-fill ticker for enrichment"
-    assert by_cik["1016281"]["matched_phrase"] == "[sic_reverse]", "SIC-only provenance stamp"
+    assert by_cik[_cik_b]["ticker"] == _ticker_b, "SIC-only row must back-fill ticker for enrichment"
+    assert by_cik[_cik_b]["matched_phrase"] == "[sic_reverse]", "SIC-only provenance stamp"
     # Every row tagged so the DataFrame always has the recall_channel column.
     assert all("recall_channel" in r for r in merged), "every merged row must carry recall_channel"
     # No-op path: unmapped theme returns FTS rows tagged 'fts', no enumeration.
@@ -445,14 +494,29 @@ def main():
     args = ap.parse_args()
 
     phrases = [p.strip() for p in args.theme.split(",") if p.strip()]
+    if not phrases or args.max_pages < 1:
+        ap.error("--theme must contain a phrase and --max-pages must be positive")
+    try:
+        start = datetime.strptime(args.startdt, "%Y-%m-%d")
+        end = datetime.strptime(args.enddt, "%Y-%m-%d")
+    except ValueError:
+        ap.error("dates must use YYYY-MM-DD")
+    if start > end or not args.forms.strip():
+        ap.error("startdt must not exceed enddt and forms must be nonempty")
+    if not (0 < args.max_mcap <= args.watch_band_max < float("inf")) or not (
+            0 <= args.min_dollar_vol < float("inf")):
+        ap.error("invalid market-cap or liquidity limits")
     print(f"[1/3] SEC FTS 召回 (主题: {phrases}, forms: {args.forms})...", file=sys.stderr)
     all_hits = []
+    queries = []
     for j, ph in enumerate(phrases):
         if j > 0:
             time.sleep(3)  # 短语间隔,避免 SEC 限流
         hits = fts_search(ph, args.forms, args.startdt, args.enddt, args.max_pages)
         print(f"  '{ph}': {len(hits)} 家", file=sys.stderr)
         all_hits += hits
+        queries.append(rows_completion(hits))
+    all_hits = StageRows(all_hits, stage="fts_queries", upstream=queries)
     # P8 recall FLOOR: union FTS with the theme's dedicated-SIC enumeration (opt-in).
     # Use the out-slug (or first phrase) as the theme key for THEME_SIC lookup. Done before
     # the zero-hit guard so a SIC floor can recover candidates even on a 0-FTS-hit theme.
@@ -464,16 +528,12 @@ def main():
         else:
             print(f"  [P8] --sic-reverse set but theme '{theme_key}' has no dedicated SIC; "
                   f"FTS-only (no floor).", file=sys.stderr)
-    if not all_hits:
-        print(f"  [warn] 主题 '{phrases}' SEC FTS 零命中 — 关键词可能过严(需更自然短语)", file=sys.stderr)
-        date = today()
-        slug = args.out_slug or _slug(phrases[0])
-        # 写空 universe 占位,避免后续崩
-        pd.DataFrame(columns=["ticker", "cik", "name", "mktcap", "band", "smallcap_candidate"]
-                     ).to_csv(REPORTS / f"universe_{slug}_{date}.csv", index=False)
-        print(f"\n=== 发现结果 ===\n总召回 0 家 — 零命中,已写空占位", file=sys.stderr)
-        return
-    df = pd.DataFrame(all_hits).drop_duplicates(subset="cik").reset_index(drop=True)
+    columns = ["name", "ticker", "cik", "sic", "location", "form", "file_date",
+               "matched_phrase", "recall_channel"]
+    df = (pd.DataFrame(all_hits) if all_hits else pd.DataFrame(columns=columns))
+    if "recall_channel" not in df.columns:
+        df["recall_channel"] = "fts"
+    df = df.drop_duplicates(subset="cik").reset_index(drop=True)
     print(f"  去重后 {len(df)} 家", file=sys.stderr)
 
     print(f"[2/3] yfinance 补市值+流动性...", file=sys.stderr)
@@ -484,8 +544,17 @@ def main():
 
     date = today()
     slug = args.out_slug or _slug(phrases[0])
-    out = REPORTS / f"universe_{slug}_{date}.csv"
+    out = prepare_stage_output(REPORTS / f"universe_{slug}_{date}.csv")
     df.sort_values("mktcap", na_position="last").to_csv(out, index=False)
+    enrichment = [stage_work("market_data", str(row["cik"]), status=(
+        "complete" if all(pd.notna(row.get(col)) for col in
+                          ("mktcap", "price", "avg_dollar_vol")) else "unavailable"),
+        reason="" if all(pd.notna(row.get(col)) for col in
+                         ("mktcap", "price", "avg_dollar_vol")) else "missing_market_evidence")
+        for _, row in df.iterrows()]
+    completion = stage_completion("discovery", len(df), work=enrichment,
+                                  upstream=[rows_completion(all_hits)])
+    write_stage_receipt(out, completion)
 
     deep = df[df["band"] == "deep"]
     watch = df[df["band"] == "watch"]
@@ -504,7 +573,9 @@ def main():
             mc = f"${r['mktcap']/1e6:.0f}M" if pd.notna(r['mktcap']) else "—"
             print(f"  {r['ticker']:8} {mc:>8}  {r['name'][:40]}")
     print(f"\n清单: {out}")
+    print(f"Stage status: {completion['status']}")
+    return 0 if completion["status"] == "complete" else 2
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

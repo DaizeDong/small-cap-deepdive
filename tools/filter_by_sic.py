@@ -11,19 +11,17 @@ still recalled because it lives in the dedicated SIC. Each surviving row is tagg
 its recall_channel:
     "fts"          — recalled only by the full-text keyword search
     "sic_reverse"  — recalled only by the dedicated-SIC enumeration (the FTS blind spot)
-    "both"         — recalled by both channels (the strongest signal)
+    "both"         — recalled by both channels
 This is OPT-IN per theme (THEME_SIC must have an entry, and discover must pass
 --sic-reverse) so we don't enumerate a giant generic SIC on every run.
 
 Library functions:
   sic_classify(sic, hard_exclude) — returns "keep" | "review" | "drop".
     "keep"   — SIC is not in the hard-exclude list; include in candidates normally.
-    "review" — SIC IS in the hard-exclude list; the company will be forwarded for LLM
-               review (e.g. TITN SIC 5990, SNFCA SIC 6199).
-               IMPORTANT: "review" is safe to forward ONLY because the caller (run_theme)
-               ensures every company reaching sic_classify has already passed FTS keyword
-               filtering. sic_classify itself does NOT check theme-keyword membership.
-               If called on a pre-FTS universe, "review" would be an over-recall hole.
+    "review" — SIC IS in the hard-exclude list; forward for mandatory Gate-2 theme-fit
+               judgment. The candidate may come from FTS, SIC-only recall, or both.
+               This classification does not prove theme membership. An FTS pre-filter
+               would remove the SIC-only candidates that the recall floor is meant to retain.
     "drop"   — reserved for future explicit-drop logic; currently unused (classify never
                returns "drop").
   sic_ok(sic, hard_exclude) — legacy bool wrapper: returns True for "keep" OR "review"
@@ -32,9 +30,10 @@ Library functions:
     saying "True iff classify returns 'keep'" was incorrect after the Phase-4 tri-state
     change. run_theme.py uses sic_classify directly for tri-state tagging.
 
-CALLER CONTRACT: run_theme.py calls sic_classify on a post-FTS universe (every company
-has already matched theme keywords). Any other caller MUST apply the same FTS pre-filter
-before treating "review" as safe to forward — otherwise the over-recall hole reopens.
+CALLER CONTRACT: preserve the union of FTS and dedicated-SIC recall, including SIC-only
+rows and their recall_channel. Forward both "keep" and "review" survivors to Gate 2.
+The SIC classifier supplies a review tier; the downstream theme-fit judgment establishes
+membership. Do not require a keyword hit as a prerequisite for SIC-recalled rows.
 
 run_theme.py imports both; this file is NOT run as a standalone pipeline step.
 
@@ -44,6 +43,7 @@ Reference: reference/discovery-engine.md §Gate 1.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -52,6 +52,144 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import CFG, REPORTS, http_get, slug, prepare_output
+
+
+def stage_completion(stage, row_count, *, work=(), upstream=(), reasons=()):
+    """Describe observed work, never infer completion from an empty payload."""
+    work, upstream, reasons = list(work), list(upstream), list(reasons)
+    states = [item["status"] for item in work + upstream]
+    if "invalid" in states:
+        status = "invalid"
+    elif states and all(state == "complete" for state in states) and not reasons:
+        status = "complete"
+    elif row_count or "complete" in states or "partial" in states:
+        status = "partial"
+    else:
+        status = "unavailable"
+    return {"schema": "smallcap.stage.v1", "stage": stage, "status": status,
+            "row_count": row_count, "empty": row_count == 0,
+            "requested_work": len(work),
+            "completed_work": sum(item["status"] == "complete" for item in work),
+            "work": work, "upstream": upstream, "reasons": reasons}
+
+
+def stage_work(source, query="", page=None, status="complete", reason=""):
+    """A bounded diagnostic: source/query identity and reason code, no response body."""
+    return {"source": source, "query": str(query)[:200], "page": page,
+            "status": status, "reason": reason[:120]}
+
+
+class StageRows(list):
+    """List-compatible rows with completion evidence kept outside the row schema."""
+    def __init__(self, rows=(), *, stage, work=(), upstream=(), reasons=()):
+        super().__init__(rows)
+        self.completion = stage_completion(stage, len(self), work=work,
+                                           upstream=upstream, reasons=reasons)
+
+
+def rows_completion(rows, stage="legacy_rows"):
+    return getattr(rows, "completion", stage_completion(
+        stage, len(rows), reasons=["missing_completion_evidence"]))
+
+
+def parse_fts_page(payload):
+    """Require a source result envelope; absent fields are not zero matches."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("hits"), dict):
+        raise ValueError("missing hits envelope")
+    envelope = payload["hits"]
+    hits, total = envelope.get("hits"), envelope.get("total")
+    if not isinstance(hits, list) or not isinstance(total, dict):
+        raise ValueError("invalid hits or total")
+    value = total.get("value")
+    if type(value) is not int or value < len(hits):
+        raise ValueError("invalid total count")
+    if total.get("relation") not in {"eq", "gte"}:
+        raise ValueError("invalid total relation")
+    for hit in hits:
+        if not isinstance(hit, dict) or not isinstance(hit.get("_source"), dict):
+            raise ValueError("invalid hit source")
+        names = hit["_source"].get("display_names")
+        if not isinstance(names, list) or not names or any(not isinstance(n, str) for n in names):
+            raise ValueError("missing display names")
+        for key in ("sics", "biz_locations", "root_forms", "ciks"):
+            if key in hit["_source"] and not isinstance(hit["_source"][key], list):
+                raise ValueError("invalid source field")
+    return hits, value, total["relation"]
+
+
+def stage_receipt_path(artifact):
+    return Path(str(artifact) + ".stage.json")
+
+
+def prepare_stage_output(artifact):
+    """Reject a prior receipt before changing its paired artifact."""
+    artifact = prepare_output(Path(artifact))
+    if stage_receipt_path(artifact).exists():
+        raise FileExistsError("stage receipt already exists; use a new run output")
+    return artifact
+
+
+def write_stage_receipt(artifact, completion):
+    """Bind evidence to exact artifact bytes; preserve an existing receipt."""
+    if not _valid_completion(completion):
+        raise ValueError("invalid stage completion record")
+    artifact = Path(artifact)
+    payload = artifact.read_bytes()
+    record = {**completion, "artifact": artifact.name,
+              "run_dir": str(artifact.resolve().parent),
+              "artifact_bytes": len(payload),
+              "artifact_sha256": hashlib.sha256(payload).hexdigest()}
+    path = prepare_output(stage_receipt_path(artifact))
+    with path.open("x", encoding="utf-8") as stream:
+        json.dump(record, stream, indent=2, ensure_ascii=False)
+    return path
+
+
+def _valid_completion(record, depth=0):
+    if depth > 20 or not isinstance(record, dict):
+        return False
+    if record.get("schema") != "smallcap.stage.v1" or not isinstance(record.get("stage"), str):
+        return False
+    if type(record.get("row_count")) is not int or record["row_count"] < 0:
+        return False
+    if any(not isinstance(record.get(key), list) for key in ("work", "upstream", "reasons")):
+        return False
+    for item in record["work"]:
+        if not isinstance(item, dict) or item.get("status") not in {
+                "complete", "partial", "unavailable", "invalid"}:
+            return False
+        if not isinstance(item.get("source"), str) or not item["source"]:
+            return False
+    if any(not _valid_completion(item, depth + 1) for item in record["upstream"]):
+        return False
+    expected = stage_completion(record["stage"], record["row_count"],
+                                work=record["work"], upstream=record["upstream"],
+                                reasons=record["reasons"])
+    return all(record.get(key) == value for key, value in expected.items())
+
+
+def read_stage_receipt(artifact, row_count):
+    artifact = Path(artifact)
+    path = stage_receipt_path(artifact)
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return stage_completion("upstream", row_count, reasons=["missing_receipt"])
+    except (OSError, ValueError):
+        record = None
+    try:
+        payload = artifact.read_bytes()
+        valid = (_valid_completion(record) and record["row_count"] == row_count
+                 and record.get("artifact") == artifact.name
+                 and record.get("run_dir") == str(artifact.resolve().parent)
+                 and record.get("artifact_bytes") == len(payload)
+                 and record.get("artifact_sha256") == hashlib.sha256(payload).hexdigest())
+    except OSError:
+        valid = False
+    if not valid:
+        return stage_completion("upstream", row_count, work=[
+            stage_work("receipt", status="invalid", reason="invalid_or_mismatched_receipt")])
+    return record
 
 # 硬排除的 SIC 前缀:医药/医疗器械/医疗服务/软件/金融/保险/房产/零售/餐饮/玩具
 # Read configured exclusions when a caller runs a filter, never during import.
@@ -128,12 +266,9 @@ def sic_classify(sic: str, hard_exclude: list[str]) -> str:
     Returns:
       "keep"   — SIC is NOT in the hard-exclude list; candidate passes Gate 1 normally.
       "review" — SIC IS in the hard-exclude list; forward with sic_tier="review" for
-                 LLM gate decision. Examples: TITN (SIC 5990 retail — farm equipment
-                 dealer), SNFCA (SIC 6199 finance — real deathcare segment).
-                 IMPORTANT: this function does NOT itself check theme-keyword membership.
-                 Safety comes from the pipeline: run_theme calls sic_classify on a
-                 post-FTS universe, so every company here is already a keyword hit.
-                 A caller that skips FTS pre-filtering would get over-recall on "review".
+                 mandatory Gate-2 theme-fit judgment. FTS, SIC-only and combined recall
+                 are all valid upstream channels. This function checks the SIC tier,
+                 not theme membership, and must not impose an FTS pre-filter.
       "drop"   — explicit future use; currently unused (classify never returns "drop").
     SIC missing → "keep": defer to LLM, do not auto-exclude.
     """
@@ -143,7 +278,7 @@ def sic_classify(sic: str, hard_exclude: list[str]) -> str:
     # 按长到短匹配硬排除前缀
     for ex in sorted(hard_exclude, key=len, reverse=True):
         if sic.startswith(ex):
-            return "review"  # was a theme-keyword hit → let LLM decide
+            return "review"  # Gate 2 judges membership for every recall channel.
     return "keep"
 
 
@@ -205,22 +340,66 @@ def _parse_browse_edgar(html: str) -> list[dict]:
     return rows
 
 
+def _browse_page_observation(html: str, count: int) -> dict:
+    """Keep raw page evidence separate from the deduplicated issuer rows."""
+    table = re.search(r'<table\b[^>]*\bclass\s*=\s*[\"\x27][^\"\x27]*\btableFile2\b'
+                      r'[^\"\x27]*[\"\x27][^>]*>(.*?)</table\s*>', html, re.I | re.S)
+    source = table.group(1) if table else html
+    recognized = bool(table and re.search(r'<th\b[^>]*>\s*CIK\s*</th>', source, re.I)
+                      and re.search(r'<th\b[^>]*>\s*Company\s*</th>', source, re.I))
+    company_rows = [row for row in re.findall(r'<tr\b[^>]*>(.*?)</tr\s*>', source, re.I | re.S)
+                    if re.search(r'<td\b', row, re.I)]
+    matches = list(_SIC_ROW_RE.finditer(source))
+    raw_count = max(len(company_rows), len(matches), len(re.findall(r'CIK=', source, re.I)))
+    valid_matches = [match for match in matches
+                     if match.group(1) == match.group(2) and int(match.group(1)) > 0
+                     and match.group(3).strip()]
+    malformed = raw_count - len(valid_matches)
+    rows = _parse_browse_edgar("".join(match.group(0) for match in valid_matches))
+    challenge = bool(re.search(
+        r'request rate threshold exceeded|access denied|captcha|verification required|'
+        r'verify (?:you|your browser)|undeclared automated tool', html, re.I))
+    zero = bool(re.search(r'No (?:matching )?(?:companies|company matches|results) found', html, re.I))
+    next_page = bool(re.search(r'value\s*=\s*[\"\x27]Next\b|>\s*Next(?:\s+\d+)?\s*<', html, re.I))
+    if challenge:
+        status, reason = "unavailable", "access_challenge"
+    elif malformed:
+        status, reason = "invalid", "malformed_company_rows"
+    elif raw_count == 0:
+        status = "complete" if zero and not next_page else "unavailable"
+        reason = "explicit_zero_results" if status == "complete" else "unrecognized_empty_page"
+    elif not recognized:
+        status, reason = "partial", "unrecognized_result_envelope"
+    elif zero:
+        status, reason = "invalid", "contradictory_zero_results"
+    else:
+        status, reason = "complete", ""
+    return {"rows": rows, "raw_rows": raw_count, "parsed_rows": len(valid_matches),
+            "malformed_rows": malformed, "recognized_envelope": recognized,
+            "explicit_zero": zero, "has_next_page": next_page, "status": status,
+            "reason": reason, "terminal": raw_count < count and not next_page}
+
+
 def enumerate_sic(sic: str, forms: str = "10-K", max_pages: int = 20,
                   count: int = 100, sleep: float = 0.6,
                   fetch=None) -> list[dict]:
-    """Enumerate ALL registrants in one SIC via EDGAR browse-by-SIC. P8 recall floor.
+    """Enumerate one SIC and retain the observed browse-by-SIC coverage.
 
-    Pages through browse-edgar getcompany?SIC=<sic>&start=<n> until a short page
-    (< count rows) is returned. Each row is {cik, name, sic, recall_channel:
+    Pages through browse-edgar getcompany?SIC=<sic>&start=<n> until raw page
+    evidence indicates a short page. Each row is {cik, name, sic, recall_channel:
     "sic_reverse"}. fetch is injectable (defaults to _common.http_get) so the selftest
     can run offline with a fixture. Network errors break the loop (best-effort floor;
     we never crash the run for a recall add-on).
     """
+    if max_pages < 1 or count < 1 or sleep < 0:
+        raise ValueError("max_pages/count must be positive and sleep nonnegative")
     if fetch is None:
         fetch = http_get
     sic = str(sic).split(".")[0].strip()
     out: list[dict] = []
     seen: set[str] = set()
+    work = []
+    pages = []
     for page in range(max_pages):
         params = {
             "action": "getcompany", "SIC": sic, "type": forms,
@@ -229,11 +408,20 @@ def enumerate_sic(sic: str, forms: str = "10-K", max_pages: int = 20,
         }
         try:
             r = fetch(_BROWSE_EDGAR, params=params, timeout=25)
+            if hasattr(r, "raise_for_status"):
+                r.raise_for_status()
+            if getattr(r, "status_code", 200) != 200:
+                raise ValueError("unexpected HTTP status")
             html = r.text if hasattr(r, "text") else str(r)
         except Exception as e:  # pragma: no cover - network guard
-            print(f"  [warn] enumerate_sic({sic}) page {page}: {e}", file=sys.stderr)
+            print(f"  [warn] enumerate_sic({sic}) page {page}: {type(e).__name__}", file=sys.stderr)
+            work.append(stage_work("sec_sic", sic, page, "unavailable", "request_failed"))
             break
-        rows = _parse_browse_edgar(html)
+        observation = _browse_page_observation(html, count)
+        rows = observation.pop("rows")
+        pages.append({"page": page, **observation})
+        work.append(stage_work("sec_sic", sic, page,
+                               observation["status"], observation["reason"]))
         if not rows:
             break
         new = 0
@@ -245,10 +433,19 @@ def enumerate_sic(sic: str, forms: str = "10-K", max_pages: int = 20,
             row["recall_channel"] = "sic_reverse"
             out.append(row)
             new += 1
-        if len(rows) < count or new == 0:
+        if new == 0:
+            work.append(stage_work("sec_sic", sic, page, "partial", "repeated_page"))
+            break
+        if observation["terminal"] or observation["status"] == "unavailable":
             break
         time.sleep(sleep)
-    return out
+    else:
+        work.append(stage_work("sec_sic", sic, max_pages, "unavailable", "page_cap"))
+    result = StageRows(out, stage="sic_enumeration", work=work)
+    result.completion["request"] = {"sic": sic, "forms": forms,
+                                    "page_size": count, "max_pages": max_pages}
+    result.completion["pages"] = pages
+    return result
 
 
 def sic_reverse_recall(theme: str, forms: str = "10-K", mapping=None,
@@ -260,16 +457,20 @@ def sic_reverse_recall(theme: str, forms: str = "10-K", mapping=None,
     """
     sics = theme_sics(theme, mapping)
     if not sics:
-        return []
+        return StageRows(stage="sic_recall", work=[stage_work(
+            "sic_mapping", theme, reason="no_dedicated_sic_requested")])
     out: list[dict] = []
     seen: set[str] = set()
+    upstream = []
     for sic in sics:
-        for row in enumerate_sic(sic, forms=forms, fetch=fetch, max_pages=max_pages):
+        rows = enumerate_sic(sic, forms=forms, fetch=fetch, max_pages=max_pages)
+        upstream.append(rows_completion(rows))
+        for row in rows:
             if row["cik"] in seen:
                 continue
             seen.add(row["cik"])
             out.append(row)
-    return out
+    return StageRows(out, stage="sic_recall", upstream=upstream)
 
 
 # ---------------------------------------------------------------------------
@@ -308,8 +509,9 @@ def write_sic_floor_sidecar(theme_slug: str, sic_rows: list[dict],
     """
     path = sic_floor_sidecar_path(theme_slug, run_dir)
     payload = json.dumps(list(sic_rows), indent=2, ensure_ascii=False)
-    path = prepare_output(path)
+    path = prepare_stage_output(path)
     path.write_text(payload, encoding="utf-8")
+    write_stage_receipt(path, rows_completion(sic_rows))
     return path
 
 
@@ -346,13 +548,23 @@ def union_recall(fts_rows: list[dict], sic_rows: list[dict]) -> list[dict]:
             merged[cik] = {**row, "cik": cik, "recall_channel": channel}
             if channel == "sic_reverse":
                 merged[cik].setdefault("ticker", "")
-    return list(merged.values())
+    return StageRows(merged.values(), stage="recall_union", upstream=[
+        rows_completion(fts_rows), rows_completion(sic_rows)])
 
 
 def _selftest():
+    from make_fixtures import source34_scenarios
+    _cases = source34_scenarios()
+    _union = _cases["recall_union"]
+    _r0, _r1, _r2 = _union["rows"]
+    _cik_a, _cik_b, _cik_c = _r0["cik"], _r1["cik"], _r2["cik"]
+    _name_a, _name_b = _r0["name"], _r1["name"]
+    _ticker_a, _ticker_b = _r0["ticker"], _r1["ticker"]
+    _other_cik, _other_ticker, _other_name = (
+        _union["other_cik"], _union["other_ticker"], _union["other_name"])
     he = CFG["sic_hard_exclude"]
     # Legacy sic_ok checks (must not regress)
-    assert sic_ok("2810", he) is True, "NL/VHI 2810 must NOT be excluded"
+    assert sic_ok("2810", he) is True, "SIC 2810 must not be excluded"
     assert sic_ok("3743", he) is True, "railcar 3743 must be kept"
     assert sic_ok("", he) is True, "missing sic must be kept (defer to LLM)"
 
@@ -363,16 +575,11 @@ def _selftest():
     assert sic_classify("3743", he) == "keep", "railcar 3743 must be 'keep'"
     assert sic_classify("", he) == "keep", "missing sic must be 'keep'"
 
-    # Phase-4 recall: TITN (SIC 5990) and SNFCA (SIC 6199) must survive as "review"
-    # so the LLM gate can decide their theme membership.
+    # Review-tier SICs remain available for the theme-fit decision.
     assert sic_classify("5990", he) == "review", (
-        "TITN SIC 5990 must classify as 'review' (farm equipment dealer, theme-keyword hit); "
-        "was wrongly silently dropped in run-3."
-    )
+        "SIC 5990 must pass to theme-fit review")
     assert sic_classify("6199", he) == "review", (
-        "SNFCA SIC 6199 must classify as 'review' (real deathcare segment); "
-        "was wrongly silently dropped in run-3."
-    )
+        "SIC 6199 must pass to theme-fit review")
     # Legacy sic_ok for 5990 and 6199 must now return True (they pass to LLM)
     assert sic_ok("5990", he) is True, "sic_ok('5990') must be True after Phase-4 fix"
     assert sic_ok("6199", he) is True, "sic_ok('6199') must be True after Phase-4 fix"
@@ -419,81 +626,61 @@ def _selftest():
     assert theme_sics("cov-building-products-hvac") == ["3585", "3430", "3440"], "building-products-hvac must floor to 3585/3430/3440"
     assert theme_sics("regbank") == ["6020", "6021", "6022", "6035", "6036", "6712"], "regbank must floor to bank SICs (PIT universe was empty without this)"
 
-    # _parse_browse_edgar: pure parser on a real-shaped browse-edgar fixture.
-    fixture = (
-        '<tr><td valign="top" scope="row"><a href="/cgi-bin/browse-edgar?action=getcompany'
-        '&amp;CIK=0000089089&amp;owner=include&amp;count=100&amp;type=10-K">0000089089</a></td>'
-        '<td scope="row">SERVICE CORP INTERNATIONAL</td></tr>'
-        '<tr><td valign="top" scope="row"><a href="/cgi-bin/browse-edgar?action=getcompany'
-        '&amp;CIK=0001016281&amp;owner=include&amp;count=100&amp;type=10-K">0001016281</a></td>'
-        '<td scope="row">Carriage Services &amp; Co, Inc.</td></tr>'
-    )
+    # Generated browse-edgar HTML includes an escaped ampersand.
+    fixture = _union["html"]
     parsed = _parse_browse_edgar(fixture)
-    assert [p["cik"] for p in parsed] == ["89089", "1016281"], f"parse CIKs: {parsed}"
-    assert parsed[1]["name"] == "Carriage Services & Co, Inc.", f"HTML entity unescape: {parsed[1]}"
+    assert [p["cik"] for p in parsed] == [_cik_a, _cik_b], f"parse CIKs: {parsed}"
+    assert parsed[1]["name"] == _name_b, f"HTML entity unescape: {parsed[1]}"
 
     # enumerate_sic: paginates via injectable fetch, tags recall_channel, dedupes across pages.
     class _Resp:
         def __init__(self, text): self.text = text
-    page1 = (
-        '<a href="x&amp;CIK=0000089089&amp;owner=include&amp;count=100&amp;type=10-K">0000089089</a></td>'
-        '<td scope="row">SERVICE CORP INTERNATIONAL</td>'
-        '<a href="x&amp;CIK=0001016281&amp;owner=include&amp;count=100&amp;type=10-K">0001016281</a></td>'
-        '<td scope="row">CARRIAGE SERVICES INC</td>'
-    )
-    page2 = (  # one new + one dupe of page1 -> short page ends pagination
-        '<a href="x&amp;CIK=0000063296&amp;owner=include&amp;count=100&amp;type=10-K">0000063296</a></td>'
-        '<td scope="row">MATTHEWS INTL CORP</td>'
-        '<a href="x&amp;CIK=0001016281&amp;owner=include&amp;count=100&amp;type=10-K">0001016281</a></td>'
-        '<td scope="row">CARRIAGE SERVICES INC</td>'
-    )
+    page1 = _union["page1"]
+    page2 = _union["page2"]
     # Paginating mock (count=2): page1 full, page2 = one new + one dupe, page3 empty.
     def _paging_fetch(url, params=None, timeout=25):
         start = (params or {}).get("start", 0)
         return _Resp({0: page1, 2: page2}.get(start, ""))
     enum = enumerate_sic("7200", count=2, fetch=_paging_fetch, sleep=0)
     enum_ciks = [r["cik"] for r in enum]
-    assert enum_ciks == ["89089", "1016281", "63296"], f"enumerate_sic dedupe across pages: {enum_ciks}"
+    assert enum_ciks == [_cik_a, _cik_b, _cik_c], f"enumerate_sic dedupe across pages: {enum_ciks}"
     assert all(r["recall_channel"] == "sic_reverse" for r in enum), "enumerate_sic must tag sic_reverse"
     assert all(r["sic"] == "7200" for r in enum), "enumerate_sic must stamp the SIC on each row"
 
     # Single-page mock (all 3 distinct rows) for the default-count sic_reverse_recall path.
-    all_rows = page1 + (
-        '<a href="x&amp;CIK=0000063296&amp;owner=include&amp;count=100&amp;type=10-K">0000063296</a></td>'
-        '<td scope="row">MATTHEWS INTL CORP</td>'
-    )
+    all_rows = _union["all_rows"]
     def _onepage_fetch(url, params=None, timeout=25):
         return _Resp(all_rows if (params or {}).get("start", 0) == 0 else "")
 
     # sic_reverse_recall: no-op for an unmapped theme; full enumeration for a mapped one.
     assert sic_reverse_recall("ai agents", fetch=_onepage_fetch) == [], "unmapped theme -> no enumeration"
     rev = sic_reverse_recall("deathcare", fetch=_onepage_fetch)
-    assert {r["cik"] for r in rev} == {"89089", "1016281", "63296"}, f"reverse-recall set: {rev}"
+    assert {r["cik"] for r in rev} == {_cik_a, _cik_b, _cik_c}, f"reverse-recall set: {rev}"
 
     # union_recall: merges FTS + SIC-reverse on CIK with NO dupes, tags channel correctly.
     fts = [
-        {"cik": "89089", "ticker": "SCI", "name": "SERVICE CORP INTERNATIONAL",
+        {"cik": _cik_a, "ticker": _ticker_a, "name": _name_a,
          "sic": "7200", "matched_phrase": "deathcare"},     # in both channels -> "both"
-        {"cik": "999999", "ticker": "ZZZZ", "name": "FTS Only Co",
+        {"cik": _other_cik, "ticker": _other_ticker, "name": _other_name,
          "sic": "7200", "matched_phrase": "cremation"},      # fts only -> "fts"
     ]
     sic = [
-        {"cik": "89089", "name": "SERVICE CORP INTERNATIONAL", "sic": "7200",
+        {"cik": _cik_a, "name": _name_a, "sic": "7200",
          "recall_channel": "sic_reverse"},
-        {"cik": "1016281", "name": "CARRIAGE SERVICES INC", "sic": "7200",
+        {"cik": _cik_b, "name": _name_b, "sic": "7200",
          "recall_channel": "sic_reverse"},                   # sic only -> the FTS blind spot
     ]
     merged = union_recall(fts, sic)
     by_cik = {r["cik"]: r for r in merged}
-    assert len(merged) == 3, f"union must dedupe SCI to ONE row, got {len(merged)}: {[r['cik'] for r in merged]}"
-    assert sorted(by_cik) == ["1016281", "89089", "999999"], f"union CIK set: {sorted(by_cik)}"
-    assert by_cik["89089"]["recall_channel"] == "both", "CIK in both FTS+SIC must tag 'both'"
-    assert by_cik["89089"]["ticker"] == "SCI", "FTS row content (ticker) must survive the merge"
-    assert by_cik["999999"]["recall_channel"] == "fts", "FTS-only CIK must tag 'fts'"
-    assert by_cik["1016281"]["recall_channel"] == "sic_reverse", (
+    assert len(merged) == 3, f"union must dedupe first synthetic member to ONE row, got {len(merged)}: {[r['cik'] for r in merged]}"
+    assert set(by_cik) == {_cik_b, _cik_a, _other_cik}, f"union CIK set: {sorted(by_cik)}"
+    assert by_cik[_cik_a]["recall_channel"] == "both", "CIK in both FTS+SIC must tag 'both'"
+    assert by_cik[_cik_a]["ticker"] == _ticker_a, "FTS row content (ticker) must survive the merge"
+    assert by_cik[_other_cik]["recall_channel"] == "fts", "FTS-only CIK must tag 'fts'"
+    assert by_cik[_cik_b]["recall_channel"] == "sic_reverse", (
         "SIC-only CIK (the FTS blind spot the floor recovers) must tag 'sic_reverse'"
     )
-    assert by_cik["1016281"]["ticker"] == "", "SIC-only row gets blank ticker for downstream enrichment"
+    assert by_cik[_cik_b]["ticker"] == "", "SIC-only row gets blank ticker for downstream enrichment"
     # idempotence / no-mutation: inputs untouched
     assert "recall_channel" not in fts[0], "union_recall must NOT mutate its inputs"
 

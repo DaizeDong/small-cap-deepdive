@@ -1,0 +1,132 @@
+{
+  "ticker": "SYNTA",
+  "cik": "0000000123",
+  "date": "2000-01-01",
+  "confidence": 64,
+  "reports": [
+    {
+      "name": "buy_lf",
+      "first": "# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: buy\nconfidence: 64\nmos_basis: fcf_cap\nbuy_eligible: true\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "alternate": "# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: watch\nconfidence: 64\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "expected_rating": "买入"
+    },
+    {
+      "name": "buy_crlf",
+      "first": "# AcmeCorp synthetic report\r\n\r\n```rating\r\nverdict_date: 2000-01-01\r\nrating: buy\r\nconfidence: 64\r\nmos_basis: fcf_cap\r\nbuy_eligible: true\r\nkillflag_count: 0\r\nfundamental_decline_flag: false\r\n```\r\n",
+      "alternate": "# AcmeCorp synthetic report\r\n\r\n```rating\r\nverdict_date: 2000-01-01\r\nrating: watch\r\nconfidence: 64\r\nmos_basis: abstain\r\nbuy_eligible: false\r\nkillflag_count: 0\r\nfundamental_decline_flag: false\r\n```\r\n",
+      "expected_rating": "买入"
+    },
+    {
+      "name": "buy_bom",
+      "first": "﻿# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: buy\nconfidence: 64\nmos_basis: fcf_cap\nbuy_eligible: true\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "alternate": "﻿# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: watch\nconfidence: 64\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "expected_rating": "买入"
+    },
+    {
+      "name": "watch_lf",
+      "first": "# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: watch\nconfidence: 64\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "alternate": "# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: avoid\nconfidence: 64\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "expected_rating": "观察"
+    },
+    {
+      "name": "watch_crlf",
+      "first": "# AcmeCorp synthetic report\r\n\r\n```rating\r\nverdict_date: 2000-01-01\r\nrating: watch\r\nconfidence: 64\r\nmos_basis: abstain\r\nbuy_eligible: false\r\nkillflag_count: 0\r\nfundamental_decline_flag: false\r\n```\r\n",
+      "alternate": "# AcmeCorp synthetic report\r\n\r\n```rating\r\nverdict_date: 2000-01-01\r\nrating: avoid\r\nconfidence: 64\r\nmos_basis: abstain\r\nbuy_eligible: false\r\nkillflag_count: 0\r\nfundamental_decline_flag: false\r\n```\r\n",
+      "expected_rating": "观察"
+    },
+    {
+      "name": "watch_bom",
+      "first": "﻿# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: watch\nconfidence: 64\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "alternate": "﻿# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: avoid\nconfidence: 64\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "expected_rating": "观察"
+    },
+    {
+      "name": "avoid_lf",
+      "first": "# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: avoid\nconfidence: 64\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "alternate": "# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: watch\nconfidence: 64\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "expected_rating": "避开"
+    },
+    {
+      "name": "avoid_crlf",
+      "first": "# AcmeCorp synthetic report\r\n\r\n```rating\r\nverdict_date: 2000-01-01\r\nrating: avoid\r\nconfidence: 64\r\nmos_basis: abstain\r\nbuy_eligible: false\r\nkillflag_count: 0\r\nfundamental_decline_flag: false\r\n```\r\n",
+      "alternate": "# AcmeCorp synthetic report\r\n\r\n```rating\r\nverdict_date: 2000-01-01\r\nrating: watch\r\nconfidence: 64\r\nmos_basis: abstain\r\nbuy_eligible: false\r\nkillflag_count: 0\r\nfundamental_decline_flag: false\r\n```\r\n",
+      "expected_rating": "避开"
+    },
+    {
+      "name": "avoid_bom",
+      "first": "﻿# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: avoid\nconfidence: 64\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "alternate": "﻿# AcmeCorp synthetic report\n\n```rating\nverdict_date: 2000-01-01\nrating: watch\nconfidence: 64\nmos_basis: abstain\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+      "expected_rating": "避开"
+    }
+  ],
+  "deep": {
+    "ticker": "SYNTA",
+    "cik": "0000000123",
+    "signals": {
+      "ownership": {
+        "recent_13d_13g_count": 0,
+        "recent_13d_13g": []
+      },
+      "signals_meta": {
+        "diagnostic_only": true,
+        "never_affects_buy": true
+      }
+    }
+  },
+  "source": {
+    "artifact": "deepdive_SYNTA_2000-01-01.json",
+    "bytes": 7,
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "verdict": {
+    "ticker": "SYNTA",
+    "cik": "0000000123",
+    "verdict_date": "2000-01-01",
+    "rating": "watch",
+    "confidence": 64,
+    "mos_basis": "abstain",
+    "killflag_count": 0
+  },
+  "source_edits": [
+    {
+      "field": "artifact",
+      "value": "deepdive_SYNTB_2000-01-01.json"
+    },
+    {
+      "field": "bytes",
+      "value": 99
+    },
+    {
+      "field": "sha256",
+      "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "invalid_verification": [
+    "verified",
+    "artifact_bytes_verified",
+    true,
+    null
+  ],
+  "bad_source": [
+    {
+      "name": "traversal",
+      "field": "artifact",
+      "value": "../synthetic.json"
+    },
+    {
+      "name": "zero_length",
+      "field": "bytes",
+      "value": 0
+    },
+    {
+      "name": "bool_length",
+      "field": "bytes",
+      "value": true
+    },
+    {
+      "name": "bad_digest",
+      "field": "sha256",
+      "value": "invalid"
+    }
+  ]
+}

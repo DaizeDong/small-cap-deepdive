@@ -77,7 +77,8 @@ def test_configured_private_default_produces_usable_output(state, monkeypatch, m
     run = Path(state['root'])/FIX['run']
     report(run)
     monkeypatch.setenv('SMALLCAP_RUN', FIX['run'])
-    assert invoke(module, ['--no-rank'] if module == 'finalize_run' else [], monkeypatch) == 0
+    # A report-only run remains usable, but does not prove complete upstream coverage.
+    assert invoke(module, ['--no-rank'] if module == 'finalize_run' else [], monkeypatch) == 2
     if module == 'finalize_run':
         assert json.loads((run/'deepdive_verdicts.json').read_text(encoding='utf-8'))[0]['ticker'] == FIX['ticker']
     else:
@@ -113,7 +114,7 @@ def test_repair_without_python312_junction_api(state, monkeypatch, tmp_path, lin
     for base in type(run).__mro__:
         if 'is_junction' in base.__dict__:
             monkeypatch.delattr(base, 'is_junction')
-    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 0
+    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 2
     # A duplicate stays at its original location in either an ordinary tree or a link target.
     assert (target/('report_'+FIX['ticker']+'.md')).read_text(encoding='utf-8') == FIX['report']
     assert (run/'deepdive_verdicts.json').is_file()
@@ -125,7 +126,7 @@ def test_ordinary_nested_repair_moves_files_and_retains_duplicates(state, monkey
     report(nested)
     (run/'valuation_SYNTB.json').write_text(FIX['canonical'], encoding='utf-8')
     (nested/'valuation_SYNTB.json').write_text(FIX['duplicate'], encoding='utf-8')
-    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 0
+    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 2
     assert (run/('report_'+FIX['ticker']+'.md')).read_text(encoding='utf-8') == FIX['report']
     assert not (nested/('report_'+FIX['ticker']+'.md')).exists()
     assert (run/'valuation_SYNTB.json').read_text(encoding='utf-8') == FIX['canonical']
@@ -136,7 +137,7 @@ def test_ordinary_nested_repair_prunes_only_empty_skeleton(state, monkeypatch):
     run = Path(state['root'])/FIX['run']
     nested = run/'reports/smallcap'/FIX['run']
     report(nested)
-    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 0
+    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 2
     assert not (run/'reports').exists()
     assert (run/('report_'+FIX['ticker']+'.md')).is_file()
 
@@ -164,7 +165,7 @@ def test_repair_does_not_cross_repositories_or_directory_links(state, monkeypatc
         junction(run/'reports', outside)
         protected = outside
     before = inventory(protected)
-    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 0
+    assert invoke('finalize_run', ['--input', str(run), '--no-rank'], monkeypatch) == 2
     assert inventory(protected) == before
     assert not (run/'valuation_SYNTB.json').exists()
     assert (run/'deepdive_verdicts.json').is_file()
@@ -193,7 +194,7 @@ def test_finalizer_process_exit_retains_verdict_when_rank_child_fails(state, tmp
     control.write_text(json.dumps({'state':state,'run':str(run),'rank_code':rank_code,'no_rank':no_rank}), encoding='utf-8')
     result = REAL_RUN([sys.executable, '-X', 'utf8', '-B', str(Path(__file__)), str(control)],
                       capture_output=True, text=True, encoding='utf-8')
-    assert (result.returncode == 0) is (no_rank or rank_code == 0), result.stderr
+    assert result.returncode == 2, result.stderr  # report-only input remains partial for every child outcome
     verdicts = json.loads((run/'deepdive_verdicts.json').read_text(encoding='utf-8'))
     assert verdicts[0]['ticker'] == FIX['ticker']
     if not no_rank and rank_code:

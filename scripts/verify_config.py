@@ -57,7 +57,8 @@ def main(argv=None):
         check('sic_hard_exclude list', isinstance(config.get('sic_hard_exclude'), list),
               'sic_hard_exclude must be a list')
         identity = str(config.get('sec_user_agent', ''))
-        check('SEC identity configured', '@' in identity and 'your-email@example.com' not in identity,
+        placeholder = re.search(r'@example\.(?:com|net|org)\b', identity, re.IGNORECASE)
+        check('SEC identity configured', '@' in identity and placeholder is None,
               'set sec_user_agent privately before live SEC use; no live check was performed', warning=True)
     except (OSError, RuntimeError, ValueError, KeyError, ImportError) as exc:
         check('PRIVATE companion, config and output root', False, str(exc))

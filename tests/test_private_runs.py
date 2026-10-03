@@ -20,6 +20,21 @@ REAL_RUN = subprocess.run
 
 
 def install_metadata(state, patch):
+    from make_fixtures import output_visibility_receipt
+    outputs = importlib.import_module('_output_paths')
+    boundary = outputs._guard_module()
+    fixture_root = Path(state['companion']).parent
+    receipt = fixture_root / ('synthetic-visibility-' + str(os.getpid()) + '.json')
+    ssh_paths = [str(fixture_root / '.ssh/config'), str(fixture_root / 'ssh_config')]
+    patch(boundary, '_ssh_config_sources', lambda: {'paths': ssh_paths, 'chains': [ssh_paths]})
+
+    def prove(destination):
+        receipt.write_text(json.dumps(output_visibility_receipt(state['visibility'])), encoding='utf-8')
+        return boundary.prove_private_companion(destination, visibility_map=receipt)
+
+    facade = types.SimpleNamespace(prove_private_companion=prove, GitError=boundary.GitError)
+    patch(outputs, '_guard_module', lambda: facade)
+
     def execute(argv, **kwargs):
         argv = [str(value) for value in argv]
         if argv[0] == 'git':
@@ -28,18 +43,26 @@ def install_metadata(state, patch):
             elif 'status' in argv:
                 answer = ''
             else:
-                requested = Path(argv[argv.index('-C')+1]).resolve()
+                requested = Path(argv[argv.index('-C')+1] if '-C' in argv else kwargs['cwd']).resolve()
                 repository = next((node for node in (requested, *requested.parents)
                                    if (node/'.git').exists()), None)
                 if repository is None:
                     return subprocess.CompletedProcess(argv, 1, '', 'not a repository')
+                remote_map = state.get('remotes', {}).get(str(repository))
+                if remote_map is None:
+                    origin = state['origins'].get(str(repository), '')
+                    remote_map = {'origin': {'fetch': [origin], 'push': [origin]}} if origin else {}
                 if '--show-toplevel' in argv:
                     answer = str(repository)
+                elif '--absolute-git-dir' in argv:
+                    answer = str(repository / '.git')
+                elif 'config' in argv and '--list' in argv:
+                    answer = ''.join('remote.' + name + '.' + role + '\n' + url + '\0'
+                                     for name, directions in remote_map.items()
+                                     for role, urls in (('url', directions.get('fetch', [])),
+                                                        ('pushurl', directions.get('push', [])))
+                                     for url in urls)
                 elif 'remote' in argv:
-                    remote_map = state.get('remotes', {}).get(str(repository))
-                    if remote_map is None:
-                        origin = state['origins'].get(str(repository), '')
-                        remote_map = {'origin': {'fetch': [origin], 'push': [origin]}} if origin else {}
                     if 'get-url' not in argv:
                         answer = '\n'.join(remote_map)
                     else:
@@ -61,12 +84,17 @@ def install_metadata(state, patch):
 
 
 def finance_stubs(patch):
+    def concentration_outside_scope(*args, **kwargs):
+        pytest.fail("concentration extraction is outside the synthetic state fixture")
+
     exports = {
         '_pit_universe': {'pit_universe': lambda *a, **k: []},
         'backtest_returns': {'forward_return_with_reason': lambda *a, **k: {},
                              'benchmark_return': lambda *a, **k: 0,
                              'mktcap_asof': lambda *a, **k: {}, 'DEFAULT_HORIZON_MONTHS': 12},
-        'deepdive_data': {'pull': lambda *a, **k: {}},
+        'deepdive_data': {'pull': lambda *a, **k: {},
+                          '_extract_concentration': concentration_outside_scope,
+                          '_concentration_flag': concentration_outside_scope},
         'valuation': {'compute_valuation': lambda *a, **k: {}},
         '_valuation_model': {'_val_cfg': lambda *a, **k: {}},
     }

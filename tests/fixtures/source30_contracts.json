@@ -1,0 +1,27 @@
+{
+  "schema": "smallcap.source30.synthetic-prompt-contracts.v1",
+  "channels": [
+    "fts",
+    "sic_reverse",
+    "sic",
+    "both",
+    "unknown"
+  ],
+  "forms": [
+    "10-K",
+    "10-Q",
+    "20-F",
+    "40-F"
+  ],
+  "workflows": [
+    {
+      "path": "workflows/theme-fit-gate.js",
+      "generic_source": "SEC filing"
+    },
+    {
+      "path": "workflows/deepdive-fanout.js",
+      "generic_source": "SEC 披露文件"
+    }
+  ],
+  "theme_gate": "workflows/theme-fit-gate.js"
+}

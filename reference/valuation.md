@@ -17,7 +17,7 @@ Given a `deepdive_<ticker>_<date>.json` (produced by `deepdive_data.py`) and a c
 | `ev_sales` | ev / latest_revenue | null if revenue ≤ 0 or ev ≤ 0 |
 | `ev_ebitda` | ev / latest_ebitda | Uses latest EBITDA; normalized EBITDA in `normalized_ebitda`. EBIT recovered via the cascade below (`ebit_source` tags the concept used) so EV/EBITDA computes even when `OperatingIncomeLoss` is untagged |
 | `pe` | market_cap / net_income | null if net income ≤ 0 |
-| `fcf_yield` | fcf / market_cap | FCF = OCF − CapEx; if capex unavailable, OCF is used with flag |
+| `fcf_yield` | fcf / market_cap | FCF = OCF - CapEx for matched complete periods. Missing CapEx leaves FCF unknown; OCF is not silently treated as free cash flow. |
 | `cyclical` | CV(EBITDA) > threshold | CV computed over available annual EBITDA series; see below |
 | `normalized_ebitda` | Trailing N-year average | Only for cyclicals; non-cyclicals use latest |
 | `normalized_fcf` | Trailing N-year average FCF | Same normalization logic |
@@ -25,7 +25,7 @@ Given a `deepdive_<ticker>_<date>.json` (produced by `deepdive_data.py`) and a c
 | `reverse_dcf_implied_growth` | g = discount_rate − norm_fcf / market_cap | Levered (equity) FCF vs market cap; null with reason if FCF ≤ 0, market_cap ≤ 0, or g ≥ discount_rate |
 | `fcf_cap_model_unsuitable` | total_debt / total_assets > 0.62 **OR** `lessor_asset_heavy == true` | True for aircraft lessors, finance cos; triggers NAV path. **v0.3.2 #8:** `lessor_asset_heavy` (read from deepdive `derived`) forces this true EVEN BELOW the 0.62 threshold, asset-heavy lessors are valued on lease-fleet NAV, not trough-cycle FCF (see "Lessor NAV routing" below) |
 | `lessor_asset_heavy` | bool (deepdive `derived`) | A leasing/rental-business signal emitted by `deepdive_data.py`: leasing/rental SIC OR a lease-income revenue concept OR a very high PP&E / lease-fleet ratio with rental/lease revenue. Read by `valuation.py` (v0.3.2 #8); when true forces `fcf_cap_model_unsuitable = true` (NAV route) regardless of debt/assets |
-| `intrinsic_value_band` | norm_fcf / cap_rate − net_debt | Low end: cap_rate_high (12%); high end: cap_rate_low (9%); present for all companies (even unsuitable ones) when FCF > 0 |
+| `intrinsic_value_band` | norm_fcf / cap_rate | Equity FCF capitalization: no second net-debt subtraction. Low end uses cap_rate_high (12%); high end uses cap_rate_low (9%). Input coverage and model-suitability gates may withhold the band. |
 | `nav_intrinsic_band` | tangible_equity × [0.80, 1.05] | Only computed when fcf_cap_model_unsuitable = true |
 | `mos_basis` | `"fcf_cap"` / `"nav"` / `"abstain"` | Routing signal, see Phase 3 contract below |
 | `margin_of_safety_pct` | (intrinsic_low_equity − market_cap) / market_cap | FCF-cap MoS; null when mos_basis ≠ "fcf_cap" |
@@ -35,7 +35,7 @@ Given a `deepdive_<ticker>_<date>.json` (produced by `deepdive_data.py`) and a c
 | `rev_accel_sign` | sign(2nd difference of revenue series) | int; revenue acceleration/deceleration |
 | `latest_below_avg` | latest normalization base < trailing avg of base | bool; "is the most recent year below its own normalized average" |
 | `contamination_ratio` | latest normalization-base / 5yr-avg | float; < 1.0 means the normalized average is propped up by older/peak years (peak-contamination) |
-| `fundamental_decline_flag` | rev_slope_sign < 0 AND contamination_ratio < 1.0 AND latest_below_avg | bool; the deterministic melting-ice-cube veto (P6), see below |
+| `fundamental_decline_flag` | rev_slope_sign < 0 AND 0 < contamination_ratio < 1.0 AND latest_below_avg | bool; the deterministic melting-ice-cube veto (P6), see below |
 | `buy_eligible` | composed boolean (see "buy_eligible Composition") | bool; the single mechanical gate Phase 3 ANDs into the BUY trigger |
 | `buy_ineligible_reasons` | list[str] | Each guard that fired, for the report TRUST BANNER and audit |
 
@@ -84,14 +84,10 @@ This is a hard contract, no exceptions based on narrative or management explanat
 
 ## Lessor NAV Routing, `lessor_asset_heavy` (v0.3.2 #8)
 
-**The hole it closes.** The NAV path was gated on a single threshold: `total_debt / total_assets >
-0.62`. That works for aircraft lessors and finance cos that fund their fleets with heavy debt, but
-it mis-routes asset-heavy *lessors that fund their fleet with equity / moderate leverage*. The
-canonical misses are the railcar lessors: **GBX (Greenbrier, debt/assets = 0.41)** and **RAIL
-(FreightCar America, 0.35)** both fall *below* 0.62, so v0.3.1 valued them on trough-cycle
-normalized FCF instead of their lease-fleet NAV, GBX's 17,000-car fleet is a textbook NAV
-candidate that was left mis-valued (backlog #8). The 0.62 debt ratio is the wrong discriminator for
-a lessor: the right one is *whether the business is a leasing/rental fleet at all*.
+**The routing condition.** A lessor can fund its fleet with equity or moderate debt.
+A debt/assets threshold alone does not describe the business. Leasing evidence can therefore
+make FCF capitalization unsuitable even when debt/assets is below 0.62; the applicable
+asset-based valuation still requires its own supported inputs.
 
 **The signal.** `deepdive_data.py` emits `lessor_asset_heavy` (bool) into `derived`, a
 leasing/rental-business signal that fires on ANY of:
@@ -106,8 +102,8 @@ The reason string is recorded in `lessor_asset_heavy_detail`.
 `fcf_cap_model_unsuitable = true`, routing the name to the **NAV path (`mos_basis = "nav"`, or
 `"abstain"` when tangible equity is unavailable)** EVEN IF `total_debt / total_assets < 0.62`. It
 appends `lessor_asset_heavy_fcf_unsuitable_route_nav:<detail>` to `data_quality` so the NAV routing
-is auditable and attributable to the lessor signal (not to the debt ratio). GBX and RAIL therefore
-value on **lease-fleet NAV**, not phantom trough-cycle FCF. This is a routing change only, it
+is attributable to the observed lessor signal. The resulting valuation uses the supported
+NAV basis. This is a routing change only; it
 moves a name from FCF-cap to NAV; it never manufactures a BUY (the NAV path still requires
 `nav_margin_of_safety_pct ≥ 30%`, zero kill-flags, `buy_eligible == true`, and the 0.6 confidence
 down-weight). A normal industrial with no leasing signals keeps `lessor_asset_heavy = false` and is
@@ -127,11 +123,10 @@ The CV is measured on the annual EBITDA series from SEC/XBRL data. If EBITDA ser
 defaults to False with a data-quality flag.
 
 **Why two cap rates:**
-A single intrinsic value estimate is false precision. The band forces the consumer (Phase 3 or
-human analyst) to see both the conservative and less-conservative estimate. The CONSERVATIVE end
-(cap_rate_high = 12%) is the one used for `margin_of_safety_pct`. Buying when the conservative
-intrinsic is below market price means you need the market to be wrong AND to be wrong in a
-worst-case way before you lose money on the thesis.
+A band shows both conservative and less-conservative estimates. The conservative endpoint
+uses `cap_rate_high = 12%` and feeds `margin_of_safety_pct`. The policy fraction is
+`(intrinsic_low_equity - market_cap) / market_cap`; a value of `0.30` means intrinsic value
+is 30% above market cap. It does not mean price is 30% below intrinsic value.
 
 **Why market_cap (not EV) for reverse-DCF:**
 `norm_fcf` is OCF − CapEx, a levered (equity) cash flow that is computed after interest payments.
@@ -149,12 +144,11 @@ the coefficient-of-variation used to detect cyclicality and distorts the normali
 
 ## Fundamental-Trajectory & Contamination Veto (P6)
 
-**The problem this solves.** The FCF-cap intrinsic value is a no-growth perpetuity on a trailing
-normalized FCF. With no trajectory term, the model up-weights exactly the names whose high current
-FCF yield is high *because* the market expects the cash flow to fall, the textbook value trap. A
-declining, peak-contaminated name (SIGA: revenue −31.8% YoY, BARDA-peak-averaged `norm_fcf`) scored
-a +76% MoS BUY while clean growers scored below threshold. The static MoS model has no structural
-defense against a melting ice cube.
+**The problem this addresses.** Capitalizing a trailing cash-flow average can overstate
+a business whose recent revenue and cash generation have deteriorated. The static margin
+of safety does not establish that the historical base is sustainable. Trajectory and
+current-loss guards constrain the resulting eligibility; their presence alone does not
+prove investment performance.
 
 **The fix (deterministic, downgrade-only).** `compute_valuation()` emits a small trajectory block in
 `derived` from the multiyear revenue/normalization-base series and composes a single veto flag. It is
@@ -167,7 +161,7 @@ creates one.
 | `rev_accel_sign` | sign of the 2nd difference (revenue acceleration vs deceleration) |
 | `latest_below_avg` | True when the latest normalization base is below the trailing average of that base |
 | `contamination_ratio` | latest normalization-base ÷ 5yr-avg. < 1.0 means the average that anchors `norm_fcf`/`normalized_ebitda` is inflated by older/peak years |
-| `fundamental_decline_flag` | **`rev_slope_sign < 0` AND `contamination_ratio < 1.0` AND `latest_below_avg`** |
+| `fundamental_decline_flag` | **`rev_slope_sign < 0` AND `0 < contamination_ratio < 1.0` AND `latest_below_avg`** |
 
 When all three conditions hold, the most recent year is below its own normalized average AND the
 average is propped up by higher prior years AND the revenue trend is down, i.e. the deep "discount"
@@ -207,42 +201,60 @@ way `debt_source` and `da_source` already are.
 
 ## `buy_eligible` Composition (P1, the gate Phase 3 ANDs in)
 
-The v0.2.1 guards (extreme-MoS, large-cap, FCF-sustainability) were advisory strings the BUY trigger
-never blocked on, a $5.4B name cleared BUY in a small-cap tool. They are now promoted into one
-mechanical boolean that the BUY trigger must AND in. `compute_valuation()` composes and EMITS:
+`compute_valuation()` emits a mechanical eligibility boolean and its blocking reasons.
+`_valuation_eligibility.py` composes the guards; every active valuation basis requires:
 
 ```
 buy_eligible =
-      (not extreme_mos_review_required)
+      (not debt_evidence_uncertain)
+  AND (not extreme_mos_review_required)
   AND (not large_cap_out_of_scope)
   AND (not fcf_sustainability_uncertain)
   AND (not financial_sic_forced_unsuitable)
+  AND (not insurance_concepts_present)
+  AND (not low_revenue_loss_ratio_extreme)
   AND (not debt_truncation_suspected)
+  AND (not debt_stale)
   AND (not wrong_entity_suspected)
   AND (concentration_flag != "kill")
   AND (not fundamental_decline_flag)
+  AND (not peak_contamination_flag)
+  AND (not cross_source_mismatch)
+  AND (not normalization_masks_current_loss)
+  AND (not lumpy_ocf_normalization_suspect)
+  AND (active_mos is not None)
 ```
 
 `buy_ineligible_reasons` is the list of guards that fired (e.g. `["large_cap_out_of_scope",
 "fundamental_decline_flag"]`), used for the report TRUST BANNER and audit. `buy_eligible = true`
-means *no guard objected*, it is necessary but not sufficient for a BUY (Phase 3 still requires
-`mos_basis == "fcf_cap"`, MoS ≥ 30%, zero kill-flags, and no Tier-3-load-bearing evidence; see
-`judgment-rubric.md`). The concentration kill-flag (`concentration_flag`) is produced in the deepdive
-`derived` block from XBRL `RevenueFromContractWithCustomer` segment members / concentration footnote
-numerics (P3), see `data-sources.md` and `mechanical-checks.md`, not from the old English substring.
+means *no guard objected*; it is necessary but not sufficient for a BUY. The active MoS is
+`margin_of_safety_pct` for `fcf_cap` or `nav_margin_of_safety_pct` for `nav`.
+Phase 3 requires active MoS ≥ 30%, zero kill-flags, complete evidence, and no
+Tier-3-load-bearing evidence. The accepted asset-heavy NAV path also requires the rubric's
+0.6 confidence multiplier and explicit human-NAV-judgment notice. An `abstain` basis cannot
+support a MoS-based BUY. Historical inputs currently abstain under the dated-evidence contract.
+See `judgment-rubric.md` for the full decision rules.
+
+Stale debt blocks eligibility even when a NAV band can be computed. The lumpy-OCF guard
+uses the existing peak-above-twice-the-other-years-median test on the cyclical FCF path;
+it blocks BUY without deleting the peak observation or changing the normalization window.
+The concentration flag comes from numeric percentages in filing
+footnote text, with the supported customer/program and denominator patterns. The
+companyconcept API does not supply dimensional segment members. Missing or unsupported
+numeric evidence remains unavailable; review the source disclosure and advisory fields.
 
 ---
 
-## Inputs: Source and Fallback Chain
+## Inputs and evidence requirements
 
 All inputs come from SEC/XBRL (T1) except market cap (yfinance or override):
 
 | Input | Primary XBRL concept | Fallback |
 |---|---|---|
-| `total_debt` | `LongTermDebtNoncurrent` + `LongTermDebtCurrent` | `LongTermDebt`; then `Liabilities` (proxy, flagged) |
+| `total_debt` | Complete long-term, short-term and finance-lease components, grouped by end date | Aggregates are retained as partial evidence and checked against their covered components. Total liabilities never substitute for debt. Valuation reconciles the scalar with the latest period and its coverage; missing, partial, invalid or conflicting evidence leaves EV null and BUY ineligible. |
 | `ebit` | `OperatingIncomeLoss` | Cascade: `IncomeLossFromContinuingOperationsBeforeIncomeTaxes` (+interest addback if available) → pretax proxy; concept used recorded in `ebit_source` (see "EBIT Concept Cascade") |
 | `dep_amort` | `DepreciationAndAmortization`, `DepreciationAmortizationAndAccretionNet`, `DepreciationDepletionAndAmortization` (merged) | none |
-| `capex` | `PaymentsToAcquirePropertyPlantAndEquipment` | If unavailable, FCF = OCF (proxy, flagged) |
+| `capex` | `PaymentsToAcquirePropertyPlantAndEquipment` | An absent observation is unknown spending. It leaves that period's FCF null and incomplete; reported zero remains distinct. |
 | `assets` | `Assets` | none |
 | `equity` | `StockholdersEquity` | none |
 | `goodwill` | `Goodwill` | Absent → 0 used for NAV with proxy flag |
@@ -262,9 +274,10 @@ is CLEARLY labeled rather than a silent null, see the data-quality flag below an
 extension only; it does NOT attempt full financial-statement document parsing. The abstain stays
 graceful, never a crash, never a false BUY.
 
-**Empirical notes from probing WLFC and LNN:**
-- WLFC (CIK 1018164): `LongTermDebt` available (no split concepts); `DepreciationDepletionAndAmortization` and `DepreciationAndAmortization` both present (merged). Debt/assets ~67% → `fcf_cap_model_unsuitable = true`.
-- LNN (CIK 836157): both `LongTermDebtNoncurrent` + `LongTermDebtCurrent` available; only `DepreciationAndAmortization` present. Normal industrial → `fcf_cap_model_unsuitable = false`, `mos_basis = "fcf_cap"`.
+**Acquisition validation:** check the full concept cascade, units, periods and source
+completion. An observed aggregate or component in one issuer does not establish availability
+for another. Use generated synthetic envelopes for regression checks and a separate,
+explicit live acceptance lane for provider behavior.
 
 ---
 
@@ -284,29 +297,37 @@ Set in `config.json` (see `config.example.json` for defaults):
 
 ## Output Files
 
-- `reports/smallcap/valuation_<ticker>_<date>.json`, standalone valuation block
-- The deepdive JSON is also updated in-place with a top-level `"valuation"` key
+All valuation outputs belong to the initialized PRIVATE companion's absolute run directory.
+
+- **Unbound standalone input:** `python tools/valuation.py --json <deepdive_json> --ticker <T>`
+  writes `valuation_<ticker>_<date>.json` in the configured private output directory and may
+  merge the top-level `"valuation"` block into that unbound deepdive JSON.
+- **Bound theme input:** the host calls
+  `python tools/deepdive_data.py --valuation-request <original_request_json> --input-index <original_index>`.
+  Use the independent valuation artifact at the `valuation_path` bound by that original request.
+  Preserve the original input index and sealed data input. Do not run an in-place standalone
+  merge on a bound input or substitute an unbound valuation block. See `runbooks/theme-run.md`.
 
 ---
 
 ## Data Quality Flags
 
 The `data_quality` field is a list of strings. Each string documents a gap or assumption.
-This table is the canonical list of ALL flags emitted by `compute_valuation()`:
+The following flags describe unavailable inputs and the resulting calculation limits:
 
 | Flag | Meaning |
 |---|---|
 | `cash_unavailable` | Cash field absent from XBRL; EV excludes cash |
-| `debt_unavailable` | Debt concept absent; EV excludes debt |
-| `debt_is_total_liabilities_proxy:<src>` | Debt fell back to total Liabilities (flagged with source label) |
+| `debt_unavailable` | Debt scalar absent; EV remains null because contractual debt is unestablished |
+| `debt_is_total_liabilities_proxy:<src>` | Legacy proxy input detected; the proxy cannot establish debt coverage or a usable EV |
 | `dep_amort_unavailable` | D&A series absent; EBITDA series will be incomplete |
-| `capex_unavailable_fcf_uses_ocf_proxy` | No CapEx concept found; FCF will equal OCF |
-| `fcf_equals_ocf_proxy_no_capex` | Confirms proxy mode (redundant confirmation of above) |
+| `normalized_fcf_capex_incomplete_or_ocf_proxy` | Missing or unmatched CapEx leaves selected-period FCF unknown; OCF is not capitalized as FCF |
+| `derived_latest_fcf_not_supported_by_matching_period` | Derived FCF disagrees with matched annual OCF and CapEx evidence |
 | `net_income_nonpositive_pe_null` | NI ≤ 0; P/E ratio is null |
 | `shares_unavailable_per_share_null` | Shares series absent; per-share intrinsic values are null |
 | `ev_excludes_cash` | EV computed without cash (cash unavailable) |
-| `ev_excludes_debt` | EV computed without debt (debt unavailable) |
-| `ev_is_market_cap_only` | Both debt and cash unavailable; EV = market cap |
+| `debt_evidence_uncertain:<status>:<detail>` | Debt coverage is unavailable, unverified, partial, invalid, conflicting, or explicitly uncertain; EV/multiples are null and BUY is blocked |
+| `ev_note=debt_evidence_uncertain` | No market-cap-only EV fallback is allowed when debt is unestablished |
 | `ev_nonpositive_multiples_null` | EV ≤ 0; EV/Sales and EV/EBITDA are suppressed |
 | `ebitda_nonpositive_ev_ebitda_null` | EBITDA ≤ 0; EV/EBITDA is null |
 | `ebitda_series_partial_entries:<n>` | n year-ends skipped from EBITDA series (only one of EBIT/D&A available) |
@@ -318,7 +339,7 @@ This table is the canonical list of ALL flags emitted by `compute_valuation()`:
 | `rdcf_implied_growth_very_negative:...` | Reverse-DCF g < −20%; market pricing in steep decline |
 | `rdcf_implied_growth_very_high:...` | Reverse-DCF g > 20%; market pricing in very high growth |
 | `fcf_cap_model_unsuitable:debt_to_assets=<x>>0.62` | Debt/assets > 62%; FCF-cap model not appropriate; NAV path used |
-| `lessor_asset_heavy_fcf_unsuitable_route_nav:<detail>` | v0.3.2 #8, `derived.lessor_asset_heavy == true` forced `fcf_cap_model_unsuitable = true` (NAV route) EVEN BELOW the 0.62 debt/assets threshold; an asset-heavy lessor (GBX 0.41 / RAIL 0.35) valued on lease-fleet NAV, not trough-cycle FCF. `<detail>` names the firing signal (leasing/rental SIC, lease-income concept, or PP&E/fleet ratio + rental revenue) |
+| `lessor_asset_heavy_fcf_unsuitable_route_nav:<detail>` | v0.3.2 #8, `derived.lessor_asset_heavy == true` forced `fcf_cap_model_unsuitable = true` (NAV route) EVEN BELOW the 0.62 debt/assets threshold; an asset-heavy lessor valued on lease-fleet NAV, not trough-cycle FCF. `<detail>` names the firing signal (leasing/rental SIC, lease-income concept, or PP&E/fleet ratio + rental revenue) |
 | `foreign_filer_unvaluable:<detail>` | v0.3.2 #11, a 20-F / 40-F foreign filer whose revenue / net-income / OCF were STILL empty after the us-gaap + ifrs-full concept cascade; the abstain is explicitly labeled "foreign filer, un-valuable from EDGAR" instead of a bare `intrinsic_band_null`. Label-only; the null MoS already forces `buy_eligible = false` via `not_assessable_no_intrinsic_band` (no separate BUY gate; never a false BUY) |
 | `net_debt_excludes_cash` | Net debt = total_debt only (cash unavailable) |
 | `net_debt_excludes_debt_liabilities` | Net debt computed as −cash (debt unavailable) |
@@ -363,6 +384,6 @@ This table is the canonical list of ALL flags emitted by `compute_valuation()`:
 - Phase 3 (implemented), reads `mos_basis`, the corresponding MoS field, and the `buy_eligible`
   gate; applies BUY trigger per the three-way contract documented in "Margin-of-Safety Basis &
   Phase 3 Contract" above.
-- `data-sources.md`, origin of the P3 `concentration_flag` (XBRL `RevenueFromContractWithCustomer`
-  segment members) that `buy_eligible` consumes.
+- `data-sources.md`, filing-footnote numeric extraction and limitations behind the
+  `concentration_flag` consumed by `buy_eligible`.
 - `config.example.json`, all valuation config keys with defaults.

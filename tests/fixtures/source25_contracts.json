@@ -1,0 +1,1117 @@
+{
+  "ticker": "SYNTA",
+  "cik": "0000000123",
+  "report": "# AcmeCorp synthetic report\n```rating\nverdict_date: 2000-01-01\nrating: watch\nconfidence: 64\nmos_basis: {basis}\nmos_pct: {mos}\nbuy_eligible: false\nkillflag_count: 0\nfundamental_decline_flag: false\n```\n",
+  "mos": [
+    {
+      "name": "fcf_cap_fallback",
+      "parsed": {
+        "mos_basis": "fcf_cap",
+        "mos_pct": null
+      },
+      "valuation": {
+        "margin_of_safety_pct": 0.375
+      },
+      "expected": 37.5
+    },
+    {
+      "name": "fcf_cap_explicit",
+      "parsed": {
+        "mos_basis": "fcf_cap",
+        "mos_pct": 37.5
+      },
+      "valuation": {
+        "margin_of_safety_pct": 0.375
+      },
+      "expected": 37.5
+    },
+    {
+      "name": "fcf_cap_zero",
+      "parsed": {
+        "mos_basis": "fcf_cap",
+        "mos_pct": null
+      },
+      "valuation": {
+        "margin_of_safety_pct": 0
+      },
+      "expected": 0
+    },
+    {
+      "name": "fcf_cap_negative",
+      "parsed": {
+        "mos_basis": "fcf_cap",
+        "mos_pct": null
+      },
+      "valuation": {
+        "margin_of_safety_pct": -0.2
+      },
+      "expected": -20
+    },
+    {
+      "name": "fcf_cap_unavailable",
+      "parsed": {
+        "mos_basis": "fcf_cap",
+        "mos_pct": null
+      },
+      "valuation": {
+        "margin_of_safety_pct": null
+      },
+      "expected": null
+    },
+    {
+      "name": "fcf_cap_invalid",
+      "parsed": {
+        "mos_basis": "fcf_cap",
+        "mos_pct": null
+      },
+      "valuation": {
+        "margin_of_safety_pct": true
+      },
+      "expected": null
+    },
+    {
+      "name": "nav_fallback",
+      "parsed": {
+        "mos_basis": "nav",
+        "mos_pct": null
+      },
+      "valuation": {
+        "nav_margin_of_safety_pct": 0.375
+      },
+      "expected": 37.5
+    },
+    {
+      "name": "nav_explicit",
+      "parsed": {
+        "mos_basis": "nav",
+        "mos_pct": 37.5
+      },
+      "valuation": {
+        "nav_margin_of_safety_pct": 0.375
+      },
+      "expected": 37.5
+    },
+    {
+      "name": "nav_zero",
+      "parsed": {
+        "mos_basis": "nav",
+        "mos_pct": null
+      },
+      "valuation": {
+        "nav_margin_of_safety_pct": 0
+      },
+      "expected": 0
+    },
+    {
+      "name": "nav_negative",
+      "parsed": {
+        "mos_basis": "nav",
+        "mos_pct": null
+      },
+      "valuation": {
+        "nav_margin_of_safety_pct": -0.2
+      },
+      "expected": -20
+    },
+    {
+      "name": "nav_unavailable",
+      "parsed": {
+        "mos_basis": "nav",
+        "mos_pct": null
+      },
+      "valuation": {
+        "nav_margin_of_safety_pct": null
+      },
+      "expected": null
+    },
+    {
+      "name": "nav_invalid",
+      "parsed": {
+        "mos_basis": "nav",
+        "mos_pct": null
+      },
+      "valuation": {
+        "nav_margin_of_safety_pct": true
+      },
+      "expected": null
+    },
+    {
+      "name": "abstain",
+      "parsed": {
+        "mos_basis": "abstain",
+        "mos_pct": null
+      },
+      "valuation": {
+        "margin_of_safety_pct": 0.5
+      },
+      "expected": null
+    }
+  ],
+  "debt": [
+    {
+      "name": "complete_components",
+      "concepts": {
+        "LongTermDebtNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 20
+          }
+        ],
+        "LongTermDebtCurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 3
+          }
+        ],
+        "ShortTermBorrowings": [
+          {
+            "end": "2000-12-31",
+            "val": 2
+          }
+        ],
+        "FinanceLeaseLiabilityNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 4
+          }
+        ],
+        "FinanceLeaseLiabilityCurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 1
+          }
+        ]
+      },
+      "expected": 30,
+      "status": "reported"
+    },
+    {
+      "name": "reported_zero",
+      "concepts": {
+        "LongTermDebtNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 0
+          }
+        ],
+        "LongTermDebtCurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 0
+          }
+        ],
+        "ShortTermBorrowings": [
+          {
+            "end": "2000-12-31",
+            "val": 0
+          }
+        ],
+        "FinanceLeaseLiabilityNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 0
+          }
+        ],
+        "FinanceLeaseLiabilityCurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 0
+          }
+        ]
+      },
+      "expected": 0,
+      "status": "reported"
+    },
+    {
+      "name": "partial_component",
+      "concepts": {
+        "LongTermDebtNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 20
+          }
+        ]
+      },
+      "expected": 20,
+      "status": "partial"
+    },
+    {
+      "name": "partial_with_aggregate",
+      "concepts": {
+        "LongTermDebtNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 20
+          }
+        ],
+        "LongTermDebt": [
+          {
+            "end": "2000-12-31",
+            "val": 100
+          }
+        ]
+      },
+      "expected": 100,
+      "status": "partial"
+    },
+    {
+      "name": "matching_aggregate",
+      "concepts": {
+        "LongTermDebtNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 20
+          }
+        ],
+        "LongTermDebtCurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 3
+          }
+        ],
+        "ShortTermBorrowings": [
+          {
+            "end": "2000-12-31",
+            "val": 2
+          }
+        ],
+        "FinanceLeaseLiabilityNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 4
+          }
+        ],
+        "FinanceLeaseLiabilityCurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 1
+          }
+        ],
+        "LongTermDebt": [
+          {
+            "end": "2000-12-31",
+            "val": 23
+          }
+        ],
+        "DebtLongtermAndShorttermCombinedAmount": [
+          {
+            "end": "2000-12-31",
+            "val": 25
+          }
+        ]
+      },
+      "expected": 30,
+      "status": "reported"
+    },
+    {
+      "name": "conflicting_aggregate",
+      "concepts": {
+        "LongTermDebtNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 20
+          }
+        ],
+        "LongTermDebtCurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 3
+          }
+        ],
+        "ShortTermBorrowings": [
+          {
+            "end": "2000-12-31",
+            "val": 2
+          }
+        ],
+        "FinanceLeaseLiabilityNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 4
+          }
+        ],
+        "FinanceLeaseLiabilityCurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 1
+          }
+        ],
+        "LongTermDebt": [
+          {
+            "end": "2000-12-31",
+            "val": 100
+          }
+        ]
+      },
+      "expected": 30,
+      "status": "conflicting"
+    },
+    {
+      "name": "aggregate_different_period",
+      "concepts": {
+        "LongTermDebtNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 20
+          }
+        ],
+        "LongTermDebt": [
+          {
+            "end": "1999-12-31",
+            "val": 100
+          }
+        ]
+      },
+      "expected": 20,
+      "status": "partial"
+    },
+    {
+      "name": "invalid_component",
+      "concepts": {
+        "LongTermDebtNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": -1
+          }
+        ],
+        "LongTermDebtCurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 3
+          }
+        ],
+        "ShortTermBorrowings": [
+          {
+            "end": "2000-12-31",
+            "val": 2
+          }
+        ],
+        "FinanceLeaseLiabilityNoncurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 4
+          }
+        ],
+        "FinanceLeaseLiabilityCurrent": [
+          {
+            "end": "2000-12-31",
+            "val": 1
+          }
+        ]
+      },
+      "expected": 10,
+      "status": "invalid"
+    }
+  ],
+  "ownership": [
+    {
+      "name": "complete_empty",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [],
+              "total": {
+                "value": 0,
+                "relation": "eq"
+              }
+            }
+          }
+        }
+      ],
+      "status": "complete",
+      "count": 0,
+      "observed": 0,
+      "reason": ""
+    },
+    {
+      "name": "complete_one",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_id": "synthetic-1",
+                  "_source": {
+                    "form": "SC 13D",
+                    "file_date": "2000-01-01",
+                    "display_names": [
+                      "AcmeCorp",
+                      "AcmeCorp Synthetic Fund"
+                    ]
+                  }
+                }
+              ],
+              "total": {
+                "value": 1,
+                "relation": "eq"
+              }
+            }
+          }
+        }
+      ],
+      "status": "complete",
+      "count": 1,
+      "observed": 1,
+      "reason": ""
+    },
+    {
+      "name": "complete_two_pages",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_id": "synthetic-1",
+                  "_source": {
+                    "form": "SC 13D",
+                    "file_date": "2000-01-01",
+                    "display_names": [
+                      "AcmeCorp",
+                      "AcmeCorp Synthetic Fund"
+                    ]
+                  }
+                }
+              ],
+              "total": {
+                "value": 2,
+                "relation": "eq"
+              }
+            }
+          }
+        },
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_id": "synthetic-2",
+                  "_source": {
+                    "form": "SC 13D",
+                    "file_date": "2000-01-02",
+                    "display_names": [
+                      "AcmeCorp",
+                      "AcmeCorp Synthetic Fund"
+                    ]
+                  }
+                }
+              ],
+              "total": {
+                "value": 2,
+                "relation": "eq"
+              }
+            }
+          }
+        }
+      ],
+      "status": "complete",
+      "count": 2,
+      "observed": 2,
+      "reason": ""
+    },
+    {
+      "name": "http_failure",
+      "pages": [
+        {
+          "http_status": 503,
+          "payload": {
+            "hits": {
+              "hits": [],
+              "total": {
+                "value": null,
+                "relation": "eq"
+              }
+            }
+          }
+        }
+      ],
+      "status": "unavailable",
+      "count": null,
+      "observed": 0,
+      "reason": "http_status"
+    },
+    {
+      "name": "missing_total_empty",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": []
+            }
+          }
+        }
+      ],
+      "status": "partial",
+      "count": null,
+      "observed": 0,
+      "reason": "exact_total_unavailable"
+    },
+    {
+      "name": "missing_total_nonempty",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_id": "synthetic-1",
+                  "_source": {
+                    "form": "SC 13D",
+                    "file_date": "2000-01-01",
+                    "display_names": [
+                      "AcmeCorp",
+                      "AcmeCorp Synthetic Fund"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "status": "partial",
+      "count": null,
+      "observed": 1,
+      "reason": "exact_total_unavailable"
+    },
+    {
+      "name": "lower_bound_total",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_id": "synthetic-1",
+                  "_source": {
+                    "form": "SC 13D",
+                    "file_date": "2000-01-01",
+                    "display_names": [
+                      "AcmeCorp",
+                      "AcmeCorp Synthetic Fund"
+                    ]
+                  }
+                }
+              ],
+              "total": {
+                "value": 1,
+                "relation": "gte"
+              }
+            }
+          }
+        }
+      ],
+      "status": "partial",
+      "count": null,
+      "observed": 1,
+      "reason": "exact_total_unavailable"
+    },
+    {
+      "name": "failed_second_page",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_id": "synthetic-1",
+                  "_source": {
+                    "form": "SC 13D",
+                    "file_date": "2000-01-01",
+                    "display_names": [
+                      "AcmeCorp",
+                      "AcmeCorp Synthetic Fund"
+                    ]
+                  }
+                }
+              ],
+              "total": {
+                "value": 2,
+                "relation": "eq"
+              }
+            }
+          }
+        },
+        {
+          "http_status": 503,
+          "payload": {
+            "hits": {
+              "hits": [],
+              "total": {
+                "value": null,
+                "relation": "eq"
+              }
+            }
+          }
+        }
+      ],
+      "status": "partial",
+      "count": null,
+      "observed": 1,
+      "reason": "http_status"
+    },
+    {
+      "name": "premature_empty_page",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_id": "synthetic-1",
+                  "_source": {
+                    "form": "SC 13D",
+                    "file_date": "2000-01-01",
+                    "display_names": [
+                      "AcmeCorp",
+                      "AcmeCorp Synthetic Fund"
+                    ]
+                  }
+                }
+              ],
+              "total": {
+                "value": 2,
+                "relation": "eq"
+              }
+            }
+          }
+        },
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [],
+              "total": {
+                "value": 2,
+                "relation": "eq"
+              }
+            }
+          }
+        }
+      ],
+      "status": "partial",
+      "count": null,
+      "observed": 1,
+      "reason": "premature_empty_page"
+    },
+    {
+      "name": "duplicate_page",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_id": "synthetic-1",
+                  "_source": {
+                    "form": "SC 13D",
+                    "file_date": "2000-01-01",
+                    "display_names": [
+                      "AcmeCorp",
+                      "AcmeCorp Synthetic Fund"
+                    ]
+                  }
+                }
+              ],
+              "total": {
+                "value": 2,
+                "relation": "eq"
+              }
+            }
+          }
+        },
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_id": "synthetic-1",
+                  "_source": {
+                    "form": "SC 13D",
+                    "file_date": "2000-01-01",
+                    "display_names": [
+                      "AcmeCorp",
+                      "AcmeCorp Synthetic Fund"
+                    ]
+                  }
+                }
+              ],
+              "total": {
+                "value": 2,
+                "relation": "eq"
+              }
+            }
+          }
+        }
+      ],
+      "status": "partial",
+      "count": null,
+      "observed": 1,
+      "reason": "duplicate_page_or_filing"
+    },
+    {
+      "name": "total_mismatch",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_id": "synthetic-1",
+                  "_source": {
+                    "form": "SC 13D",
+                    "file_date": "2000-01-01",
+                    "display_names": [
+                      "AcmeCorp",
+                      "AcmeCorp Synthetic Fund"
+                    ]
+                  }
+                }
+              ],
+              "total": {
+                "value": 0,
+                "relation": "eq"
+              }
+            }
+          }
+        }
+      ],
+      "status": "invalid",
+      "count": null,
+      "observed": 1,
+      "reason": "total_mismatch"
+    },
+    {
+      "name": "bad_payload",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {}
+        }
+      ],
+      "status": "invalid",
+      "count": null,
+      "observed": 0,
+      "reason": "invalid_payload"
+    },
+    {
+      "name": "bad_row",
+      "pages": [
+        {
+          "http_status": 200,
+          "payload": {
+            "hits": {
+              "hits": [
+                {
+                  "_source": {}
+                }
+              ],
+              "total": {
+                "value": 1,
+                "relation": "eq"
+              }
+            }
+          }
+        }
+      ],
+      "status": "invalid",
+      "count": null,
+      "observed": 0,
+      "reason": "invalid_payload"
+    }
+  ],
+  "equity_basis": [
+    {
+      "name": "original_18m",
+      "data": {
+        "ticker": "SYNTA",
+        "derived": {
+          "latest_cash": 20000000,
+          "latest_total_debt": 10000000,
+          "latest_revenue": 100000000,
+          "latest_net_income": 15000000,
+          "latest_ocf": 23000000,
+          "latest_ebit": 18000000,
+          "latest_dep_amort": 4000000,
+          "latest_capex": 5000000,
+          "latest_ebitda": 22000000,
+          "latest_fcf": 18000000,
+          "fcf_is_ocf_proxy": false,
+          "sic": "3990",
+          "debt_evidence_status": "reported"
+        },
+        "financials": {
+          "assets": [
+            {
+              "end": "2024-12-31",
+              "val": 200000000
+            }
+          ],
+          "equity": [
+            {
+              "end": "2024-12-31",
+              "val": 150000000
+            }
+          ],
+          "ebit": [
+            {
+              "end": "2024-12-31",
+              "val": 18000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "dep_amort": [
+            {
+              "end": "2024-12-31",
+              "val": 4000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "revenue": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000
+            }
+          ],
+          "shares_outstanding": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000
+            }
+          ],
+          "ocf": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 23000000
+            }
+          ],
+          "capex": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 5000000
+            }
+          ],
+          "total_debt": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000,
+              "source": "synthetic_complete_components",
+              "debt_evidence_status": "reported",
+              "debt_evidence_detail": null,
+              "components": {
+                "LongTermDebtNoncurrent": 10000000,
+                "LongTermDebtCurrent": 0,
+                "ShortTermBorrowings": 0,
+                "FinanceLeaseLiabilityNoncurrent": 0,
+                "FinanceLeaseLiabilityCurrent": 0
+              },
+              "aggregates": {},
+              "missing_components": [],
+              "conflicting_aggregates": []
+            }
+          ]
+        }
+      },
+      "market_cap": 120000000,
+      "equity_low": 150000000,
+      "mos": 0.25,
+      "meets_threshold": false
+    },
+    {
+      "name": "positive_20m",
+      "data": {
+        "ticker": "SYNTA",
+        "derived": {
+          "latest_cash": 20000000,
+          "latest_total_debt": 10000000,
+          "latest_revenue": 100000000,
+          "latest_net_income": 15000000,
+          "latest_ocf": 25000000,
+          "latest_ebit": 18000000,
+          "latest_dep_amort": 4000000,
+          "latest_capex": 5000000,
+          "latest_ebitda": 22000000,
+          "latest_fcf": 20000000,
+          "fcf_is_ocf_proxy": false,
+          "sic": "3990",
+          "debt_evidence_status": "reported"
+        },
+        "financials": {
+          "assets": [
+            {
+              "end": "2024-12-31",
+              "val": 200000000
+            }
+          ],
+          "equity": [
+            {
+              "end": "2024-12-31",
+              "val": 150000000
+            }
+          ],
+          "ebit": [
+            {
+              "end": "2024-12-31",
+              "val": 18000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "dep_amort": [
+            {
+              "end": "2024-12-31",
+              "val": 4000000,
+              "start": "2024-01-01",
+              "duration_days": 365,
+              "unit": "USD",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K"
+            }
+          ],
+          "revenue": [
+            {
+              "end": "2024-12-31",
+              "val": 100000000
+            }
+          ],
+          "shares_outstanding": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000
+            }
+          ],
+          "ocf": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 25000000
+            }
+          ],
+          "capex": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "filed": "2025-02-01",
+              "fp": "FY",
+              "form": "10-K",
+              "val": 5000000
+            }
+          ],
+          "total_debt": [
+            {
+              "end": "2024-12-31",
+              "val": 10000000,
+              "source": "synthetic_complete_components",
+              "debt_evidence_status": "reported",
+              "debt_evidence_detail": null,
+              "components": {
+                "LongTermDebtNoncurrent": 10000000,
+                "LongTermDebtCurrent": 0,
+                "ShortTermBorrowings": 0,
+                "FinanceLeaseLiabilityNoncurrent": 0,
+                "FinanceLeaseLiabilityCurrent": 0
+              },
+              "aggregates": {},
+              "missing_components": [],
+              "conflicting_aggregates": []
+            }
+          ]
+        }
+      },
+      "market_cap": 120000000,
+      "equity_low": 166666667,
+      "mos": 0.3889,
+      "meets_threshold": true
+    }
+  ],
+  "invalid_identities": [
+    {
+      "cik": 999
+    },
+    {
+      "taxonomy": "ifrs-full"
+    },
+    {
+      "tag": "Assets"
+    }
+  ],
+  "inference": {
+    "complete": {
+      "excess": [
+        -0.2,
+        0.1,
+        0.4,
+        0.2
+      ],
+      "labels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "cells": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "missing": {
+      "excess": [
+        0.1,
+        0.4,
+        0.2
+      ],
+      "labels": [
+        1,
+        2,
+        3
+      ],
+      "cells": [
+        0,
+        0,
+        0
+      ]
+    }
+  }
+}

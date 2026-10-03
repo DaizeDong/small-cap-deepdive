@@ -6,27 +6,22 @@
 
 ---
 
-## Why Event-Driven, Not Theme-Driven
+## Event-Driven Discovery as a Hypothesis
 
-The run-3 hunting-grounds audit established a key empirical result:
+Event filings offer a separate route for finding candidates whose ownership or trading
+conditions have recently changed. Whether that route adds useful candidates or improves
+outcomes is a hypothesis to test with dated inputs, comparable coverage and forward results.
 
-> Theme/industry discovery is efficiently priced in the >$200M market-cap band.
-> The mispricing that small capital can still capture is overwhelmingly **event-driven /
-> forced-trading**, not static "cheap neglected value" within a sector.
+The historical theme screens returned no BUY decisions under their selection rules,
+data coverage and conservative valuation policy. That observation does not establish
+efficient pricing above any market-cap threshold, absence of theme opportunities, or
+superior event-driven performance. Selected themes, incomplete coverage and interventions
+limit what can be inferred from those runs.
 
-This is not a theoretical claim.  The run-3 evidence was:
-- Three full theme runs (~40 deep dives) across industrials, deathcare, ag inputs, and AI.
-- BUY count across all runs: **0**.
-- The WATCH ratings were mostly correct, efficiently priced cyclicals with no margin of safety.
-- The rubric's BUY trigger (Phase 3, `margin_of_safety_pct ≥ 30%`) is conservative by design
-  (12% cap rate on normalized FCF), but even at that bar, no theme company cleared it.
-
-The implication: the structural alpha remaining in small-cap equities is concentrated in
-**temporary mis-pricings created by forced trading or information asymmetry around specific
-filing events**, not in "undiscovered value" within identifiable sectors.
-
-Two event types have theoretical and empirical backing as sources of persistent (if decaying)
-structural mis-pricing:
+The event types below suggest possible mechanisms for temporary mispricing. A plausible
+mechanism is a research rationale, not measured effectiveness of this implementation.
+Prospective comparisons must report candidate denominators, failed work, eligibility and
+outcomes for both discovery routes.
 
 1. **Spinoffs, Form 10-12B**, forced index-fund selling creates supply overhang.
 2. **Cluster open-market insider buys, Form 4**, insiders buying at market price with
@@ -101,12 +96,10 @@ Each spinoff candidate carries:
   "event_type": "spinoff"
 }
 ```
-This directly satisfies the rubric's catalyst category (a):
-> "(a) Spinoff filings: Form 10-12B or 15-12B on file, with a documented index-fund /
-> mandate forced-selling mechanism."
-
-The downstream agent must still verify and populate the `catalyst` field with the
-specific forced-selling mechanism per the rubric's five-requirement checklist.
+This is an unverified discovery hint for the rubric's spinoff catalyst category.
+The downstream agent must independently verify the T1 filing, the specific forced-selling
+mechanism, and every item in the rubric's five-requirement checklist. A form match alone
+does not satisfy the catalyst requirement or waive any rating gate.
 
 ---
 
@@ -169,23 +162,23 @@ The `latest-cluster-buys` table has 17 columns (0-indexed):
 | 12 | Value | Total dollar value of cluster purchase |
 | 13-16 | 1d/1w/1m/6m | Price change since filing |
 
-Column indices are detected dynamically from the header row to guard against layout changes.
-Hardcoded fallback indices are used if the header row is absent.
+Column indices are detected from a recognized, unambiguous header row. A missing or
+ambiguous required header makes the observation unavailable; the parser does not use
+hardcoded column positions to manufacture a successful observation.
 
 ### Catalyst Record
 
-Each cluster-buy candidate carries:
-```json
-{
-  "catalyst": "cluster insider buy: 3 insiders, $2,038,036, trade date 2026-06-15",
-  "event_type": "insider_cluster",
-  "n_insiders": 3,
-  "value_usd": 2038036
-}
-```
-This directly satisfies the rubric's catalyst category (b):
-> "(b) Cluster open-market insider purchases: Form 4 filings showing ≥2 to 3 insiders
-> purchasing shares at market prices within any rolling 90-day window."
+Each cluster-buy candidate carries these fields:
+
+| Field | Meaning |
+|---|---|
+| `catalyst` | Unverified source description of the cluster |
+| `event_type` | `insider_cluster` for this discovery path |
+| `n_insiders` | Parsed count, subject to independent filing verification |
+| `value_usd` | Parsed purchase value, subject to independent filing verification |
+This is an unverified cluster-buy discovery hint. Independently verify the relevant Form 4
+filings, open-market purchase classification, insider count, and timing against the rubric.
+The source label alone does not establish a verified catalyst or permit a BUY.
 
 ---
 
@@ -196,16 +189,15 @@ discovery flow exists because **keyword FTS over-recalls severely**, a term like
 "refractory" matches every oncology filing.  The gate is the precision restoration
 mechanism for a fundamentally noisy input channel.
 
-Event discovery uses a **structurally different input channel**:
-- A Form 10-12B is definitionally a spinoff registration filing.  There is no false
-  positive class: every 10-12B hit is a spinoff or carve-out, by SEC definition.
-- A row in openinsider's cluster-buy table is definitionally a multi-insider open-market
-  purchase cluster.  The page is already filtered; no keyword matching is involved.
+Event discovery uses filing-type and source-table filters instead of theme keywords.
+Those filters identify observations for review; they do not prove that every hit is a
+qualifying spinoff or purchase cluster. A registration filing can require further event
+classification, and a source-table row still needs transaction and issuer verification.
 
-The form-type filter replaces keyword precision.  Applying a theme-fit gate on top of
-these results would be incorrect: it would drop spinoffs and insider-cluster companies
-that happen not to fit any currently active theme, which is exactly the set of
-under-covered companies the event mode is designed to surface.
+Event admission replaces theme-fit decisions for this entry mode because an event need not
+belong to an active theme. Preserve the bound event-admission evidence and independently
+verify the catalyst mechanism with T1 support. The catalyst freeze and all valuation,
+completion, and rating gates continue to apply.
 
 **Practical consequence:** downstream, skip Gate 1 (SIC filter) and Gate 2 (LLM
 theme-fit) for event candidates.  The mechanical kill-flag scan (`cheap_pass.py`) still
@@ -215,11 +207,9 @@ runs, a compelling catalyst does not excuse a going-concern filing.
 
 ## Connection to judgment-rubric.md Catalyst Axis
 
-The Phase 3 symmetric BUY trigger in `judgment-rubric.md` includes a **catalyst modifier**:
-
-> If all five requirements are met [category match, T1-evidenced, dated trigger,
-> forced-trading mechanism, catalyst field populated], the MoS threshold is waived and
-> BUY is permissible even at MoS < 30%, subject to the same zero-kill-flag guardrails.
+The catalyst MoS waiver in `judgment-rubric.md` is **frozen**. A supported event may
+justify WATCH with a catalyst. It does not waive the active MoS threshold, eligibility
+requirements or zero-kill-flag rule for BUY. Discovery admission is separate from a rating.
 
 Categories (a) and (b) of the rubric's closed catalyst list map directly to the two
 axes enumerated here:
@@ -270,7 +260,7 @@ The anomalies documented here are **real but decaying**:
 - `SKILL.md §Entry 4`, workflow orchestration for event-driven runs
 - `judgment-rubric.md §Catalyst / Forced-Trading Modifier`, rubric integration for
   categories (a) spinoff and (b) cluster insider buy
-- `cognitive-priors.md §5`, run-3 audit finding that event-driven is where remaining
-  edge lives; honest caveat that anomalies are decaying (one line below)
+- `cognitive-priors.md §5`, limits of the historical zero-BUY observation and the
+  evidence needed to test event-driven discovery
 - `discovery-engine.md`, for event-driven discovery see this document (event-driven.md)
 - `mechanical-checks.md`, kill-flag scan still mandatory for event candidates

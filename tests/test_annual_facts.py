@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from test_private_runs import state
-from make_fixtures import annual_fact_scenarios
+from make_fixtures import annual_fact_scenarios, annual_fact_response
 
 CASE = annual_fact_scenarios()
 
@@ -12,7 +12,7 @@ CASE = annual_fact_scenarios()
 def fetch(monkeypatch, facts, asof, concept=None):
     import _deepdive_concepts as concepts
     monkeypatch.setattr(concepts, 'http_get', lambda *a, **k: SimpleNamespace(
-        status_code=200, json=lambda: {'units': {'USD': facts}}))
+        status_code=200, json=lambda: annual_fact_response(facts, concept=concept)))
     return concepts._one_concept(CASE['cik'], concept or CASE['concept'], asof=asof)
 
 

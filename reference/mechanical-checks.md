@@ -1,7 +1,7 @@
 # Mechanical Checks, Invariant B
 
-> Five Python guards that prevent the most expensive data errors found in real production runs.
-> Each guard corresponds to a specific class of bug encountered during development.
+> Mechanical guards for annual filing selection, disclosure context and financial evidence.
+> The contracts below describe current producer behavior.
 > The machine layer outputs data, never narrative. Judgment belongs to the LLM layer.
 
 ---
@@ -16,122 +16,84 @@ If a Python tool cannot determine a value from authoritative data, it outputs `n
 
 ---
 
-## Guard 1, 10-K/A Amendment Exclusion
+## Guard 1, Annual Filing Selection
 
-**Bug (fix #1, from production run):** `discover.py` and `cheap_pass.py` were counting 10-K/A amendment filings alongside 10-K annual reports, leading to duplicate processing and inflated kill-flag counts.
+Annual disclosure retrieval tries exact forms in order: 10-K, then 20-F, then 40-F.
+Amendments are excluded from this selection. Record the selected filing identity and
+source-completion state; failure to retrieve any supported annual filing remains unknown.
 
-**Rule:** When fetching filings for a company, filter to `form_type == "10-K"` only. Exclude `10-K/A` (amendments), `10-KT` (transition period), and `10-K405` (legacy variant).
-
-**Why amendments cause harm:** A 10-K/A often amends only a single exhibit or disclosure. If it contains a going-concern mention that the original 10-K did not, you may attribute a kill-flag that belongs to an edge case, not the current annual position. Conversely, an amendment may correct a material weakness from the original, treating both as independent signals double-counts. Always use the original 10-K as the authoritative annual report; track 10-K/A separately if you need amendment history.
-
-**Anchor test:** KOP (Koppers Holdings), amendment exclusion verified to produce clean single-filing processing.
+An amendment can change a specific disclosure without representing an independent annual
+report. Review amendment history separately when needed, preserving its relationship to
+the original filing. The generated filing controls exercise annual fallback and unavailable
+sources without treating a missing filing as clear.
 
 ---
 
 ## Guard 2, Kill-Flag Full-Text Context, Not Market-Wide Count
 
-**Bug (fix #2, from production run):** The original `cheap_pass.py` used `efts.sec.gov` with a `cik` parameter to count filings containing kill-flag keywords. Two failures:
-1. The `cik` filter parameter silently did not work, counts reflected the entire SEC corpus, not the specific company.
-2. Every 10-K risk section routinely mentions "going concern" in boilerplate disclaimers (e.g., "The Company does not have any going concern issues"). Counting keyword occurrences always over-reports.
+A market-wide keyword count does not establish a company-specific disclosure.
+Retrieve the issuer's selected annual filing and inspect the assertion in context.
+Boilerplate and negated statements must not become affirmative findings.
 
-**Rule:** Kill-flag detection reads the full text of the target company's most recent 10-K via `edgartools`, then checks for the flag keyword in context, not as a raw count.
+**Current rule:** The filing-disclosure parser in `tools/_filing_disclosures.py`
+evaluates local assertions and their polarity. It keeps evidence offsets and distinguishes
+affirmative, negated, remediated, conditional, historical and ambiguous statements.
+An unavailable or unresolved observation remains unknown rather than clear.
 
-**Going-concern requires double-hit:** A going-concern flag is valid only when both of the following appear anywhere in the same document:
-- `going concern`
-- `substantial doubt`
+## Guard 3, Going-Concern Assertion Evidence
 
-A filing that says "we have no going concern issues" should produce `has_going_concern = False`. A filing with both `going concern` and `substantial doubt` in the auditor's note or MD&A produces `has_going_concern = True`.
+Two phrases anywhere in a document are insufficient. The parser must connect substantial
+doubt to going-concern language in the relevant assertion and account for negation and
+remediation. It does not join unrelated sentences to manufacture a finding. Conditional
+and unresolved historical language retains a null flag for review.
 
-**Implementation:** `cheap_pass.py` uses `edgartools` to retrieve the 10-K text and applies the double-hit rule, not a global string count.
-
-**Anchor test:** IQST, going concern correctly flagged True; amendment exclusion (Guard 1) verified to not contaminate the result.
-
----
-
-## Guard 3, Going-Concern Double-Hit (Standalone Rule)
-
-This guard is listed separately because it is the single most impactful mechanical check in terms of false-positive prevention.
-
-**Rule (restatement for clarity):** `has_going_concern = True` requires simultaneous presence of:
-- The phrase `going concern` AND
-- The phrase `substantial doubt`
-
-both present in the same 10-K filing (full text). No proximity constraint is applied in code,
-both phrases must appear anywhere in the same document for the flag to fire.
-
-**Why this matters:** Of the original kill-flag signals, going-concern had the highest false-positive rate when measured by raw keyword count. After applying the double-hit rule, false positives dropped from approximately 60% to under 10% in test runs.
-
-**Other kill-flags use single-hit with context verification:**
-- `has_material_weakness`, see Guard 3b below for the refined affirmative-finding rule
-- `has_death_spiral`, requires `variable conversion` or `discount to VWAP` (or `discount to market`) in a debt instrument description
+The same evidence discipline applies to material weakness. The synthetic filing-disclosure
+regressions exercise current assertions, negation, remediation and unrelated clauses.
+Historical false-positive rates are not a current validation result; see
+[the evidence status](../docs/evidence-status.md).
 
 ---
 
-## Guard 3b, Material Weakness Affirmative-Finding Rule
+## Guard 3b, Material-Weakness Assertion Evidence
 
-**Bug (Phase 1 audit finding):** 4 out of 4 companies flagged `has_material_weakness = True`
-in a production audit run were false positives. All four had boilerplate risk-factor language
-such as "our failure to maintain effective internal controls could result in a material weakness"
-not actual ICFR findings. Agents overturned every one manually, wasting deep-dive time.
-
-**Root cause:** The prior rule fired on the bare phrase `material weakness` anywhere in the 10-K.
-Risk-factor sections routinely describe *hypothetical* weaknesses as a standard disclosure.
-
-**Rule (Phase 1 fix):** `has_material_weakness = True` requires BOTH:
-1. The phrase `material weakness` appears in the filing AND
-2. At least one **affirmative-finding phrase** also appears in the same document:
-   - `"identified a material weakness"`
-   - `"identified material weakness"`
-   - `"were not effective"`
-   - `"was not effective"`
-
-**Implementation:** `cheap_pass.py` `killflag_scan()` and `deepdive_data.py` `tenk_sections()`
-both apply this two-condition check. Single-hit on the bare phrase alone returns `False`.
-
-**Why "have identified" was removed:** The standalone phrase `"have identified"` fired on
-ordinary segment descriptions such as "we have identified three business segments", causing
-false positives in healthy filers. The four specific phrases above are sufficiently precise
-without it.
-
-**Going-concern rule unchanged:** The going-concern double-hit (Guard 3) remains:
-`going concern` + `substantial doubt` both present anywhere in the same document. No change.
-
-**Anchor tests:**
-- EGAN: clean filer, must return `kf_material_weakness = 0` (FP prevention)
-- KOP: clean filer, must return `kf_material_weakness = 0` (FP prevention; Guard 3b anchor)
+Current disclosure extraction uses `tools/_filing_disclosures.py` for both the cheap
+screen and deep-dive filing context. A bare phrase or an unrelated affirmative sentence
+does not establish a finding. The parser distinguishes negated and remediated statements
+from current unresolved findings; conditional, ambiguous or unavailable evidence remains
+unknown for review. See the synthetic filing-disclosure regressions for the supported
+statement forms. This rule does not certify that an issuer has no other financial risk.
 
 ---
 
 ## Guard 4, `concept_series` Multi-Concept Merge
 
-**Bug (fix #4, from production run):** `deepdive_data.py` uses the EDGAR `companyconcept` endpoint to fetch XBRL financial series (e.g., `us-gaap/Revenues`). The bug: when the endpoint returns multiple time periods including both annual and quarterly data, the "most recent two periods" selection was picking stale fiscal years (e.g., FY2017 → FY2018) because the data was not sorted by fiscal year end date.
+The selector validates fact shape and filing dates against the requested as-of date.
+For flow concepts, _annual_entry accepts periods of 330 to 400 days. Registered instant
+concepts use the separate instant-balance path. An annual flow is not defined by a
+10-K-only form predicate.
 
-**Rule:** When retrieving `concept_series`, filter to:
-1. Annual periods only (`form == "10-K"`)
-2. Sorted by `end` date descending
-3. Take the N most recent **complete fiscal years** (not the N most recent rows)
+Within each concept, the latest eligible filing supplies each period end; across the configured cascade, later concepts override earlier concepts for the same period end, sorted ascending
+by end, and truncated to the most recent requested periods. The latest returned point
+is at index -1. Preserve the underlying end and filed dates when interpreting changes;
+do not assume a documented warning field exists unless the producer emits it.
 
-The output field `revenue_growth_pct` (and any other derived growth metric) must be annotated with the fiscal year start and end dates it was computed from. If the retrieved data is older than 18 months from the current date, emit a warning flag `data_may_be_stale: true`.
-
-**EGAN case:** EGAN's `revenue_growth_pct` was computed from FY2017 to FY2018 data because the concept endpoint returned those as "most recent" without date sorting. The actual revenue trajectory since 2018 was completely different. This caused a materially incorrect mechanical score.
-
-**LLM layer obligation:** Even after this guard is implemented, the LLM layer must independently verify revenue growth from the 10-K text, not trust the XBRL value blindly. The mechanical layer provides a starting point; the judgment layer cross-checks against the most recent 10-K MD&A.
+An unsorted or mismatched-period response can anchor growth to an old interval.
+Cross-check the selected annual filing and its MD&A against the dated series before
+using the derived result.
 
 ---
 
-## Guard 5, `runway = nan` Semantic Disambiguation
+## Guard 5, Runway Periods and Missing Evidence
 
-**Bug (fix #5, from production run):** When `operating_cash_flow > 0` (the company is cash-flow positive and not burning cash), `runway` is mathematically undefined, you cannot divide cash on hand by a negative outflow. The original code returned `nan` in this case, which was misread as "missing data" or "company has no runway."
+The producer field is runway_periods. When the latest OCF is negative and cash is
+available, it is cash divided by the absolute latest OCF, rounded to one decimal place.
+The unit is the period covered by that OCF observation, commonly a year for annual data;
+it is not automatically a quarter.
 
-**Rule:** The `runway` field must carry a semantic annotation distinguishing three cases:
-
-| `runway` value | `runway_note` | Meaning |
-|---|---|---|
-| numeric (quarters) | `"computed: cash / quarterly_net_outflow"` | Company is burning cash; runway is real |
-| `null` | `"ocf_positive: not burning cash"` | Company is cash-flow positive, `nan` here is a good sign |
-| `null` | `"insufficient_data"` | Cannot compute because required fields are missing |
-
-**LLM layer obligation:** The disclosure-discipline doc (`disclosure-discipline.md`) requires that the judgment agent explicitly distinguish these three cases. Seeing `runway = null` with `runway_note = "ocf_positive"` should be interpreted as a positive financial indicator, not a data gap. This is documented in `disclosure-discipline.md` under "honest data-gap."
+The field is null when OCF is nonnegative or required cash/OCF evidence is missing.
+These producers do not emit a runway_note. Inspect the accompanying cash, OCF and
+source evidence to distinguish no measured cash burn from missing inputs. A null
+runway alone proves neither financial health nor a data gap.
 
 ---
 
@@ -153,21 +115,21 @@ This rule deserves its own section because it is the most frequently violated in
 
 ## Summary Table
 
-| Guard | Bug Source | Key Rule | Anchor Test |
-|---|---|---|---|
-| 1: Amendment exclusion | Fix #1 (production run) | `form_type == "10-K"` only | KOP |
-| 2: Kill-flag full context | Fix #2 (production run) | Read full text via edgartools, not FTS count | IQST |
-| 3: Going-concern double-hit | Fix #2 (production run) | Requires both `going concern` + `substantial doubt` in same filing | IQST |
-| 3b: MW affirmative-finding | Phase 1 audit (4/4 FP) | `material weakness` + affirmative phrase required; bare boilerplate = False | EGAN, KOP |
-| 4: concept_series merge | Fix #4 (production run) | Filter to annual, sort by `end` date desc, annotate dates | EGAN |
-| 5: runway nan | Fix #5 (production run) | Annotate `ocf_positive` vs `insufficient_data` | Multiple |
+| Guard | Evidence | Key rule |
+|---|---|---|
+| Annual filing selection | Generated filing controls | 10-K, then 20-F, then 40-F; exclude amendments |
+| Disclosure context | Synthetic filing disclosures | Evaluate the connected assertion and its polarity |
+| Going concern | Synthetic filing disclosures | Preserve timing, negation and uncertainty |
+| Material weakness | Synthetic filing disclosures | Distinguish current, remediated and ambiguous assertions |
+| Concept series | Generated concept fixtures | Annual flow duration, instant classification, ascending end dates |
+| Runway periods | Cash and latest OCF | State the OCF period and distinguish nonnegative OCF from missing data |
 
 ---
 
 ## Cross-references
 
-- `discovery-engine.md`, Gate 2 reads full 10-K text; same edgartools retrieval pipeline used here.
-- `judgment-rubric.md`, kill-flag counts from Guard 2/3 feed directly into the rubric's kill-flag hard-rules (≥2 → avoid, ≥3 → forced bottom of ranking).
+- `discovery-engine.md`, Gate 2 reads the selected annual filing text; same edgartools retrieval pipeline used here.
+- `judgment-rubric.md`, kill-flag counts from Guard 2/3 feed directly into the rubric's kill-flag hard-rules (effective count ≥2 → avoid; AVOID or effective count ≥2 → forced bottom of ranking).
 - `disclosure-discipline.md`, runway null disambiguation (Guard 5) is explicitly called out as a required honest data-gap disclosure.
 - `valuation.md`, Phase 2 valuation module; consumes the financial series produced by `deepdive_data.py` and applies the same data-only contract (no narrative, no buy/sell rating).
 - `event-driven.md`, kill-flag scan (`cheap_pass.py`) applies **equally** to event-mode candidates (spinoffs and insider-cluster buys).  A compelling catalyst does not excuse a going-concern filing.  Guards 1 to 5 are not relaxed for event candidates.
