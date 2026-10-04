@@ -223,9 +223,13 @@ required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-fie
   ```
 - **Switch configs (hot-swap):** point the env var at another config dir, configs are self-contained
   (`output_dir` relative to the resolved PRIVATE companion). Each selected directory must be within an existing PRIVATE Git worktree.
-- **Secrets / PII:** Mode B, your `config.json` lives outside this repo; `config.json`, `*.env`, and
-  `secrets/*` are also gitignored as a backstop. `init_config.py` refuses to write inside the repo
-  and `verify_config.py` FAILs on an in-repo `--config-dir`. Commit and push configuration and runtime DATA in the PRIVATE companion. Initialization verifies every remote fetch and push destination before writing; PUBLIC or unknown visibility is refused. The synthetic identity above is illustrative and must be replaced privately before live use.
+- **Secrets / PII:** keep `config.json` and runtime DATA versioned in the verified PRIVATE
+  companion, outside this public tool source. The tool's ignore rules are only a backstop;
+  they do not replace the private boundary or the companion's history and backup.
+  Initialization and verification reject a config destination inside the public tool and
+  verify every remote fetch and push destination; PUBLIC or unknown visibility stops writes.
+  Commit and push configuration and runtime DATA in the PRIVATE companion. Replace the
+  synthetic identity above only in that private configuration before live use.
 
 ---
 
