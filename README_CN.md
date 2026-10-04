@@ -1,10 +1,10 @@
 # small-cap-deepdive
 
-机械化排雷 SEC 小盘股全库,给定主题或 ticker，先排掉地雷，再深挖幸存者。
+机械化排雷 SEC 小盘股全库，给定主题或 ticker，先排掉地雷，再深挖幸存者。
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![避雷扫描器](https://img.shields.io/badge/%E9%81%BF%E9%9B%B7-%E6%89%AB%E6%8F%8F%E5%99%A8-green?style=flat)](#-先读这里--设计哲学)
+[![避雷扫描器](https://img.shields.io/badge/%E9%81%BF%E9%9B%B7-%E6%89%AB%E6%8F%8F%E5%99%A8-green?style=flat)](#设计理念)
 [![依赖](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
 [![语言](https://img.shields.io/badge/%E8%AF%AD%E8%A8%80-EN%20%2F%20CN-blue?style=flat)](#语言)
 [![Roadmap](https://img.shields.io/badge/Roadmap-v0.3.3-purple?style=flat)](ROADMAP.md)
@@ -13,21 +13,25 @@
 
 ---
 
-## ⭐ 先读这里, 设计哲学
+## 设计理念
 
 **被忽视 ≠ 被低估。**
 
-无分析师覆盖的小盘股满足了必要条件，但这不是充分条件。被忽视本身已被有效定价。真正制造可利用低效的，是围绕基本面真实变化的信息扩散延迟。这个工具的作用是找到可能满足该条件的公司,并在任何判断开始之前，机械地淘汰掉那些不可能满足的。
+缺少分析师覆盖本身不能证明价格有误。基本面变化是否存在信息扩散延迟，需要另行核实。工具先按明确规则排查财务和申报风险，再把有证据支持的候选交给人工尽调。
 
 **产出是避雷扫描器，不是买入清单。**
 
-排名靠前的公司意味着它通过了所有淘汰门、有真实的主题敞口、值得完整人工尽调,不代表买入。这个工具的核心价值，在于它**排除**了什么：持续经营疑虑的候选、死亡螺旋的稀释者、不正常申报的公司,这些在任何判断动用之前就已被挡在门外。
+排名靠前的公司意味着它通过了所有淘汰门、有真实的主题敞口、值得完整人工尽调，不代表买入。这个工具的核心价值，在于它**排除**了什么：持续经营疑虑的候选、死亡螺旋的稀释者、不正常申报的公司，这些在任何判断动用之前就已被挡在门外。
 
 **零买入需要结合筛选范围和数据覆盖解释。**
 
 某主题没有产出 4 分以上候选，只说明本次观察到的候选在当前规则下没有达标。它不能证明该主题没有合适公司，也不能证明市场定价有效或事件路线更有优势。报告应同时说明候选范围、缺失数据、失败步骤和人工干预。
 
-一句话：**工具的 edge 是机械纪律一致地施加于全量候选，而非对某家公司的叙事综合。** 本仓库里的每个工具、每个不变量、每条硬规则，都源于四条原则,改根因（不打补丁）、Hybrid 而非 thin（数据层有其存在价值）、纪律即护城河、`reference/` 单一真相源。
+一句话：**工具的 edge 是机械纪律一致地施加于全量候选，而非对某家公司的叙事综合。** 本仓库里的每个工具、每个不变量、每条硬规则，都源于四条原则，改根因（不打补丁）、Hybrid 而非 thin（数据层有其存在价值）、纪律即护城河、`reference/` 单一真相源。
+
+保守的资格规则也有代价：一家经营正常的公司，可能因证据缺失或口径不兼容而无法获得评级。
+因此，计算前必须核对日期、财务期间、单位和来源，报告必须保留未完成步骤及检索范围。
+通过这些检查，只能说明候选满足已声明的筛选条件；预测能力还需要针对有明确日期和范围的总体单独评估。
 
 📜 **[阅读完整设计哲学 → PHILOSOPHY.md](PHILOSOPHY.md)**
 
@@ -44,31 +48,31 @@
    export SMALLCAP_RUN
    ```
 
-1. **枚举 SEC 全库**：用 EDGAR 全文检索（FTS），可选 UNION 一个 **SIC 反向召回底**（`discover.py --sic-reverse`，内部调用 `filter_by_sic.py`）,对有专属 SIC 码的主题,枚举该 SIC 下全部注册人,避免漏掉低关键词密度的真实成员；该召回底按主题 opt-in。市值用 fallback 链解析（yfinance 为空时用 SEC 股数×价格）；仍无法定价的归 `band="unknown"` 流过,而非静默丢弃。
+1. **枚举 SEC 全库**：用 EDGAR 全文检索（FTS），可选 UNION 一个 **SIC 反向召回底**（`discover.py --sic-reverse`，内部调用 `filter_by_sic.py`）,对有专属 SIC 码的主题，枚举该 SIC 下全部注册人，避免漏掉低关键词密度的真实成员；该召回底按主题 opt-in。市值用 fallback 链解析（yfinance 为空时用 SEC 股数×价格）；仍无法定价的归 `band="unknown"` 流过，而非静默丢弃。
 
-2. **机械避雷**（`cheap_pass.py`）：直接读 SEC 申报的硬红线,持续经营审计段、死亡螺旋可转债、内控重大缺陷、magnitude 级客户/政府单一项目集中度。触发的公司不进入判断,无论叙事质量如何。
+2. **机械避雷**（`cheap_pass.py`）：直接读 SEC 申报的硬红线，持续经营审计段、死亡螺旋可转债、内控重大缺陷、magnitude 级客户/政府单一项目集中度。触发的公司不进入判断，无论叙事质量如何。
 
-3. **两阶段精度门（强制）**：门 1（`filter_by_sic.sic_classify`，由 `run_theme.py` 内联调用）：SIC **复核层**，不是排除层。命中硬排除 SIC 的公司被标为 `sic_tier="review"`，**仍然进入门 2**；门 1 永不丢弃任何公司。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / partial / misrecall`，丢弃 `misrecall` 是全流程中唯一一次按主题契合度剔除。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司,而门 1 把它们全部放行了,因为 pharma SIC 只会拿到 `review`。召回用 `recall@gold`（对照手工真实成员清单）**度量**,而非假设。
+3. **两阶段精度门（强制）**：门 1（`filter_by_sic.sic_classify`，由 `run_theme.py` 内联调用）：SIC **复核层**，不是排除层。命中硬排除 SIC 的公司被标为 `sic_tier="review"`，**仍然进入门 2**；门 1 永不丢弃任何公司。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / partial / misrecall`，丢弃 `misrecall` 是全流程中唯一一次按主题契合度剔除。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司，而门 1 把它们全部放行了，因为 pharma SIC 只会拿到 `review`。召回用 `recall@gold`（对照手工真实成员清单）**度量**,而非假设。
 
 4. **取数**（`deepdive_data.py`）：XBRL 财务序列（含 EBIT 概念级联、债务与股数 fallback）、Form 4 内部人交易、货架/ATM 状态、稀释历史、重大事件时间线。数据完整性守卫：债务截断、错误实体、低营收巨亏比、以及**二次源交叉校验**（SEC vs yfinance，>2.5× 分歧即标记并阻断 BUY）。
 
-5. **估值 + 机械 `buy_eligible` 门**（`valuation.py`）：反向 DCF（标准化 FCF）、EV/EBITDA 倍数、周期底部 EBITDA 标准化、重资产 NAV 路径。买入要求 `mos_basis∈{fcf_cap,nav}` 且 安全边际 ≥ 30% 且 **`buy_eligible == true`** 且 零 kill-flag 且 无 T3 核心论据。`buy_eligible` 与入全部守卫,极端 MoS、大盘上限、FCF 可持续性、金融-SIC/保险排除、债务截断、二次源分歧、集中度 kill,以及 **V 形价值陷阱否决**（`fundamental_decline_flag` 单调下滑 + `peak_contamination_flag` 谷→峰→回落）。催化剂修正当前冻结为 WATCH（待机制校准）。
+5. **估值 + 机械 `buy_eligible` 门**（`valuation.py`）：反向 DCF（标准化 FCF）、EV/EBITDA 倍数、周期底部 EBITDA 标准化、重资产 NAV 路径。买入要求 `mos_basis∈{fcf_cap,nav}` 且 安全边际 ≥ 30% 且 **`buy_eligible == true`** 且 零 kill-flag 且 无 T3 核心论据。`buy_eligible` 与入全部守卫，极端 MoS、大盘上限、FCF 可持续性、金融-SIC/保险排除、债务截断、二次源分歧、集中度 kill,以及 **V 形价值陷阱否决**（`fundamental_decline_flag` 单调下滑 + `peak_contamination_flag` 谷→峰→回落）。催化剂修正当前冻结为 WATCH（待机制校准）。
 
 6. **强制反方判断**：评分前先锚定基准概率，对每个候选强制反方 WebSearch，7 维评分卡配硬上限规则。证据按 Tier 标注（T1 第一方 SEC 申报 / T2 独立第三方 / T3 公司自述）；T3 证据不得作为买入支撑。
 
-7. **收尾 + 排序**（`finalize_run.py`、`make_report.py`、`rank.py`）：确定性逐票报告,每个评级下附数据质量**信任 banner**,自动生成 verdict 喂入 track-forward,并产出 `RANKING.md`（漏斗计数、淘汰原因、数据盲区）。
+7. **收尾 + 排序**（`finalize_run.py`、`make_report.py`、`rank.py`）：确定性逐票报告，每个评级下附数据质量**信任 banner**,自动生成 verdict 喂入 track-forward,并产出 `RANKING.md`（漏斗计数、淘汰原因、数据盲区）。
 
-8. **前向校准**（`track_forward.py`）：verdict 记入 `<私有数据目录>/metrics/verdicts.jsonl`（由 `guards/tools/datadir.py` 解析到**仓库之外**，绝不落回仓内；仓内只带 `metrics/verdicts.jsonl.example` 作为 schema）,到期对 IWM 做 Brier 评分,含 de-risk 指标（避免暴雷/下行捕获）。
+8. **前向校准**（`track_forward.py`）：verdict 记入 `<私有数据目录>/metrics/verdicts.jsonl`（由 `guards/tools/datadir.py` 解析到**仓库之外**，绝不落回仓内；仓内只带 `metrics/verdicts.jsonl.example` 作为 schema）,到期对 IWM 做 Brier 评分，含 de-risk 指标（避免暴雷/下行捕获）。
 
-9. **诊断信号,防火墙隔离**（`signals.py`）：严格诊断的侧信道,度量"延迟信息扩散"立论,**价格背离**（基本面轨迹 vs 滚动价格回报 → `unpriced_improvement` / `melting_ice_cube_priced` / `aligned`）与**持仓**（13D/13G + 做空)。它**永不**触碰 `buy_eligible` 或买入决策,仅记录供未来 per-signal 校准。
+9. **诊断信号，防火墙隔离**（`signals.py`）：严格诊断的侧信道，度量"延迟信息扩散"立论，**价格背离**（基本面轨迹 vs 滚动价格回报 → `unpriced_improvement` / `melting_ice_cube_priced` / `aligned`）与**持仓**（13D/13G + 做空)。它**永不**触碰 `buy_eligible` 或买入决策，仅记录供未来 per-signal 校准。
 
 **它不做什么：**
 
-- 多因子/量化选股或回测,实证证明扣除交易成本后因子 alpha 消失，这个决策空间不进本工具。
+- 多因子/量化选股或回测，实证证明扣除交易成本后因子 alpha 消失，这个决策空间不进本工具。
 - 交易信号、执行或组合管理。
-- 实时行情,所有数据来自 SEC 申报，典型延迟 1 to 4 天。
+- 实时行情，所有数据来自 SEC 申报，典型延迟 1 to 4 天。
 - 大盘或卖方覆盖较多的公司；工具面向缺少分析师覆盖的小盘和微盘公司。
-- 自动买入建议,每份输出以"值得人工尽调"结尾，不以"买入"结尾。
+- 自动买入建议，每份输出以"值得人工尽调"结尾，不以"买入"结尾。
 
 ### 证据与评估
 
@@ -155,7 +159,7 @@ test -f "$skill_alias/SKILL.md" || exit 1
   # 编辑该 config.json：把 "sec_user_agent" 设为你的真实姓名+邮箱（唯一硬性必填）
   python scripts/verify_config.py --json  # 检查本地配置、私有输出目录和依赖
   ```
-- **切换 config（即插即用）：** 把环境变量指向另一个 config 目录即可, config 自包含（`output_dir`
+- **切换 config（即插即用）：** 把环境变量指向另一个 config 目录即可， config 自包含（`output_dir`
   相对于已验证的私有伴生仓）。每个配置目录都必须位于已经存在的 PRIVATE Git 工作树内。
 - **密钥 / PII：** Mode B, 你的 `config.json` 位于仓库之外；`config.json`、`*.env`、`secrets/*` 同时
   也在 gitignore 里作为兜底。`init_config.py` 拒绝往仓内写，`verify_config.py` 对仓内的
@@ -175,7 +179,7 @@ test -f "$skill_alias/SKILL.md" || exit 1
 
 共有四种入口模式。
 
-### 1. 主题跑,全库筛选
+### 1. 主题跑，全库筛选
 
 获取某主题的小盘纯玩家排名：
 
@@ -217,9 +221,9 @@ python tools/rank.py --input "${REPORTS_ROOT}" --output RANKING-rerun-02.md
 
 完整步骤：**[runbooks/batch-rank.md](runbooks/batch-rank.md)**
 
-预计 token 预算：零,纯确定性计算，无 LLM 调用。
+预计 token 预算：零，纯确定性计算，无 LLM 调用。
 
-### 4. 事件驱动发现,分拆或内部人集群
+### 4. 事件驱动发现，分拆或内部人集群
 
 用结构性催化剂（强制交易）而非主题关键词来发现被误定价的小盘股：
 
@@ -237,7 +241,7 @@ python tools/discover_events.py --insider-clusters
 内部人集群催化剂：多名内部人在公开市场用个人资金买入，是可获取的最硬管理层
 信心信号（Form 4，公开市场现金购买，不含期权行权）。
 
-无需主题适配门,表单类型枚举本身即为精确过滤器。Kill-flag 扫描仍然强制执行
+无需主题适配门，表单类型枚举本身即为精确过滤器。Kill-flag 扫描仍然强制执行
 （`cheap_pass.py --universe <candidates_event_*.json>`）。未上市的分拆子公司（暂无
 ticker）通过 CIK 处理，归入 `band="unknown"` 队列。
 
@@ -268,11 +272,11 @@ skill 触发于小盘/微盘价值研究、主题选股、单公司深度尽调�
 | 分数 | 含义 | 行动 |
 |---|---|---|
 | 4 to 5 | 通过全部门，真实主题敞口，无结构性红线 | 值得完整人工尽调 |
-| 3 | 边界,某一维度偏弱 | 读维度详情后再决定 |
+| 3 | 边界，某一维度偏弱 | 读维度详情后再决定 |
 | 1 to 2 | 硬上限规则生效 | 存在已命名的结构性问题；在解决前不应投资 |
-| 已淘汰 | cheap_pass 触发 kill-flag | 停止,不必重新审查 |
+| 已淘汰 | cheap_pass 触发 kill-flag | 停止，不必重新审查 |
 
-评级是机械的：`rating = f(MoS / NAV-MoS, kill-flags, 硬上限, buy_eligible)`。7 维评分卡是诊断性 `/35` 汇总（无隐藏权重）,不是评级驱动;硬上限规则凌驾于叙事质量之上。完整评分卡：`reference/judgment-rubric.md`。
+评级是机械的：`rating = f(MoS / NAV-MoS, kill-flags, 硬上限, buy_eligible)`。7 维评分卡是诊断性 `/35` 汇总（无隐藏权重）,不是评级驱动；硬上限规则凌驾于叙事质量之上。完整评分卡：`reference/judgment-rubric.md`。
 
 主题跑收尾产出确定性逐票报告，外加 `RANKING.md`（漏斗计数、淘汰原因、数据盲区）。
 
@@ -304,7 +308,7 @@ skill 触发于小盘/微盘价值研究、主题选股、单公司深度尽调�
   workflows/deepdive-fanout.js — 可选：尽调并行加速
 ```
 
-**两条硬边界。**（1）`tools/*.py` 只出数、不做投资判断；判断层只读 JSON、不算财务。（2）诊断 `signals` 层被防火墙隔离,`valuation.py` / `buy_eligible` / 买入触发器对任何 signal **零引用**（加/不加 signals,buy_eligible 字节相同）。取数/判断分工经两轮生产 bug 验证(bug 全在取数层,被边界拦住);signals 防火墙每轮 grep 校验。
+**两条硬边界。**（1）`tools/*.py` 只出数、不做投资判断；判断层只读 JSON、不算财务。（2）诊断 `signals` 层被防火墙隔离，`valuation.py` / `buy_eligible` / 买入触发器对任何 signal **零引用**（加/不加 signals,buy_eligible 字节相同）。取数/判断分工经两轮生产 bug 验证(bug 全在取数层，被边界拦住);signals 防火墙每轮 grep 校验。
 
 ---
 
@@ -319,13 +323,13 @@ skill 触发于小盘/微盘价值研究、主题选股、单公司深度尽调�
 | pandas | BSD | 数据处理 |
 | requests | Apache 2.0 | 带速率纪律的 HTTP |
 
-**market-intel（可选只读复用）：** 若已安装 `market-intel` skill，判断层会读取其源目录来路由定性检索（X 舆情、行业新闻、竞品网络存在感）到最优 MCP 工具。market-intel 不会在运行时被当作 skill 调用,只读取 catalog 作为文档。完整的防递归设计见 `reference/data-sources.md §market-intel`。
+**market-intel（可选只读复用）：** 若已安装 `market-intel` skill，判断层会读取其源目录来路由定性检索（X 舆情、行业新闻、竞品网络存在感）到最优 MCP 工具。market-intel 不会在运行时被当作 skill 调用，只读取 catalog 作为文档。完整的防递归设计见 `reference/data-sources.md §market-intel`。
 
 **OpenInsider 可用性：** 默认路径解析 OpenInsider 提供的 Form 4 买卖信息。获取或解析失败时，输出保留不可用状态；当前没有自动切换到 EDGAR Form 4 的实现。配置 `"insider_source": "edgar"` 选择的是尚未实现的路径，会返回 `available: false`。报告不能把不可用的数据写成零交易。详见 `reference/data-sources.md`。
 
 **Workflow host 要求：** `workflows/theme-fit-gate.js` 和 `workflows/deepdive-fanout.js` 需要通过已配置的 Workflow host 处理绑定请求。自然语言编排可以准备请求，但只有导入对应的 host 结果后，该阶段才算完成。这两个 JavaScript 文件不能直接用 Node 运行。
 
-**X 舆情路由：** 需要某只票的 X/Twitter 舆情时，若已通过 market-intel 配置文件配置了 twitterapi.io key，则走 resale 路由（供应商账号池+代理，用户账号零风险）；不可用时回退到搜索引擎索引 X 内容。永久排除用户自己账号的登录路由,存在账号封禁风险。
+**X 舆情路由：** 需要某只票的 X/Twitter 舆情时，若已通过 market-intel 配置文件配置了 twitterapi.io key，则走 resale 路由（供应商账号池+代理，用户账号零风险）；不可用时回退到搜索引擎索引 X 内容。永久排除用户自己账号的登录路由，存在账号封禁风险。
 
 ---
 

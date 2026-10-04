@@ -4,6 +4,31 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ## [Unreleased]
 
+### Current evidence and completion contracts
+
+- Financial calculations retain dated source evidence, compatible annual periods and units;
+  missing inputs remain unavailable. Debt and lease evidence constrain EV and NAV calculations.
+- Discovery and theme-fit stages require scope and completion receipts. Finalization and ranking
+  preserve existing artifacts, and tracking separates missing outcomes from measured returns and
+  calibration coverage. A populated report or a zero-BUY result alone proves no predictive edge.
+- Configuration and new report output resolve to a verified, versioned PRIVATE companion. The
+  default report root is companion-relative `./reports/smallcap`; there is no public-source fallback.
+- Both README introductions explain the cost of conservative evidence requirements before setup.
+
+### Historical navigation
+
+The numbered releases below retain their original observations and dates. Their research paths
+are historical locations, not files supplied by the current public tool:
+
+| Historical reference | Current reading path |
+|---|---|
+| `docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md` and its study directory | Real-run research artifacts are retained privately; the public [evidence status](docs/evidence-status.md) defines what current evidence can establish. |
+| `docs/coverage-test-2026-06-20/` and `docs/optimization-campaign-2026-06/` | Historical campaign locations, unavailable as current public artifacts. Use [evidence status](docs/evidence-status.md) for the present acceptance boundary. |
+| The planned v0.3.4 ROADMAP section cited in 0.3.3 | That release-specific section has been replaced by [Financial and forensic evidence](ROADMAP.md#financial-and-forensic-evidence). Source-mismatch and debt-quality policy changes still require review and validation. |
+
+These navigation notes do not rerun, revalidate or supersede the historical measurements.
+
+
 ### Changed
 - **P7 load budget is green: 5.82% duplicated prose to 0.27%, against a 2.0% budget.** The gate went
   red on its first armed run (185 of 3181 SKILL.md shingles also present in a reference). One side
