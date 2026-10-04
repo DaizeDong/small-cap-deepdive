@@ -81,22 +81,25 @@ judgment; judgment layer has no data computation.
 
 ## P3, Discipline as moat, not narrative · 纪律即护城河，非叙事
 
-The market has efficient mechanisms for pricing widely available qualitative information
-about small-cap companies. What it prices slowly is **systematic, consistent, mechanical
-coverage** of the full SEC-filing universe of a theme.
+The intended benefit is **systematic, consistent, mechanical coverage** of a theme's SEC-filing
+companies. Whether that discipline identifies a pricing inefficiency needs separate evidence;
+the design itself does not establish an investment advantage.
 
-An individual analyst reading 20 companies will miss going-concern disclosures buried in the
-auditor's section. They will not check Form 4 net buy/sell for all candidates. They will be
-influenced by which companies have the best IR presentation.
+Selective reading can miss going-concern disclosures in the auditor's section, leave insider
+activity unchecked or let a polished IR presentation determine which company gets attention.
+Applying the same documented procedure to every admitted candidate reduces that inconsistency.
 
 The tool's competitive advantage, to the extent one exists, is:
 
-1. **Complete coverage:** every SEC-filing company in the theme universe, not a curated subset.
+1. **Coverage as an explicit goal:** enumerate the eligible SEC-filing theme population.
+   A run may claim complete coverage only when its dated population, retrieval scope and
+   completion receipts support that claim. Caps, missing pages, failed stages and model
+   abstentions remain visible; otherwise conclusions apply only to the retrieved candidates.
 2. **Consistent application:** the same kill-flags, the same rubric, the same disconfirmation
    search, for every candidate without attention bias.
-3. **Honest zeroing:** the willingness to produce zero shortlist candidates when the universe
-   does not support it. Narrative synthesis cannot say "there is nothing here", it will find
-   something. The mechanical kill-flags can.
+3. **Honest zeroing:** report zero shortlist candidates when none of the observed candidates
+   meets the active rules. Include coverage and unfinished work with that result; it does not
+   establish that the theme has no suitable companies or investment opportunities.
 
 This is why the rating hard-rules are non-negotiable: **a T3-evidence buy thesis is not a
 thesis, it is a rationalization.** The hard rules exist to prevent the LLM judgment layer
@@ -107,9 +110,12 @@ hallucinated facts, backtest overfitting, confident-but-wrong, and halo bias. Ev
 in `reference/judgment-rubric.md` and every kill-flag in `cheap_pass.py` maps to one of these
 failure modes. The discipline is not cosmetic; it is the product.
 
-> - **纪律才是护城河：** 市场对广泛可得的定性信息定价有效。它定价慢的，是对 SEC 全库主题候选系统、一致、
->   机械的覆盖。T3 证据的买入论点不是论点，是合理化。硬规则防止 LLM 判断层构建超越证据的叙事。
-> - **0 买入是功能：** 叙事综合无法说"这里什么都没有",它总会找到什么。机械 kill-flag 可以。
+> - **纪律的作用：** 对每个已纳入的候选采用相同流程，减少选择性阅读和叙事偏好造成的不一致。
+>   这是否构成投资优势，需要单独举证；硬规则的作用是防止判断超出证据。
+> - **完整覆盖是目标：** 只有带日期的候选总体、检索范围和完成凭据都支持时，才能声称覆盖完整。
+>   数量上限、漏页、失败步骤和模型弃答必须保留；否则结论只适用于已取回的候选。
+> - **零候选需要说明范围：** 当前观察到的候选均未达到规则要求时，可以返回零，但必须同时说明覆盖
+>   缺口和未完成工作。它不能证明该主题没有合适公司或投资机会。
 
 ---
 
