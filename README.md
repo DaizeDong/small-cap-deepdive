@@ -4,7 +4,7 @@ Mechanically de-risk the SEC small-cap universe for a theme or ticker, kill the 
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![De-risk Scanner](https://img.shields.io/badge/De--risk-Scanner-green?style=flat)](#-read-this-first--the-design-philosophy)
+[![De-risk Scanner](https://img.shields.io/badge/De--risk-Scanner-green?style=flat)](#design-philosophy)
 [![Depends](https://img.shields.io/badge/depends-edgartools%20MIT-green?style=flat)](https://github.com/dgunning/edgartools)
 [![Languages](https://img.shields.io/badge/Languages-EN%20%2F%20CN-blue?style=flat)](#languages)
 [![Roadmap](https://img.shields.io/badge/Roadmap-v0.3.3-purple?style=flat)](ROADMAP.md)
@@ -13,7 +13,7 @@ Mechanically de-risk the SEC small-cap universe for a theme or ticker, kill the 
 
 ---
 
-## ⭐ Read this first, the design philosophy
+## Design philosophy
 
 **Being neglected is not the same as being undervalued.**
 
@@ -37,6 +37,12 @@ across the full candidate set, not narrative synthesis on any individual company
 invariant, and hard rule in this repo exists because of four principles, root-cause design (not
 symptom patching), Hybrid-not-thin (the data layer earns its keep), discipline-as-moat, and a
 single source of truth in `reference/`.
+
+Conservative eligibility rules can withhold a rating from a sound company when evidence is
+missing or incompatible. That cost is deliberate: dated periods, units and source provenance
+must support the calculation before a numeric ranking is useful. The report must retain missing
+work and retrieval limits, and predictive claims require a separate evaluation of a dated
+population. Passing these checks establishes the documented screening conditions only.
 
 📜 **[Read the full design philosophy → PHILOSOPHY.md](PHILOSOPHY.md)**
 
