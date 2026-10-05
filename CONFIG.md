@@ -109,3 +109,11 @@ The JSON doctor returns `status`, `reports_root` and named `checks`. A ready res
 covers local configuration, PRIVATE destination proof and declared dependency versions.
 It does not claim live SEC, market or model readiness. No run or report directories
 are created by these checks.
+
+## Companion storage and retention
+
+[storage.contract.json](storage.contract.json) declares companion-relative paths, their producers, consumers, recovery requirements and retirement conditions. Existing domain schemas above remain authoritative for field validation. Privacy classification in `.dataclass.json` does not establish retention.
+
+The 64 MiB worktree budget is a review threshold, excluding Git metadata. Exceeding it requires examining dependencies, not discarding core data. Use the shared `skill-smith` storage-contract checker with this source checkout and its PRIVATE companion; no copy of the checker is vendored here. It inventories structure and retention declarations, not live provider readiness or recovery.
+
+Keep every verdict row and all evidence required by active runs or retained reviews. Scorecards are derived. Final reports and their deepdive/valuation inputs remain in the companion; completed screening tables, development backtests and process logs may be retired when no retained report, review or active run depends on them. Never fabricate report hashes or completed review evidence for legacy records.

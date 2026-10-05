@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "tool": "small-cap-deepdive",
+  "max_bytes": 67108864,
+  "artifacts": [
+    {
+      "artifact_id": "gitignore",
+      "path_pattern": ".gitignore",
+      "purpose": "Repository operation and current setup documentation",
+      "schema": "Git metadata or Markdown; CONFIG.md governs configuration",
+      "producer": "Repository maintainer",
+      "consumer_or_final_deliverable": "Companion setup, versioning and recovery",
+      "rebuild_or_restore": "Restore from the companion Git history",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the current setup and recovery instructions; remove superseded development notes after extracting active decisions."
+      }
+    },
+    {
+      "artifact_id": "root-documents",
+      "path_pattern": "*.md",
+      "purpose": "Repository operation and current setup documentation",
+      "schema": "Git metadata or Markdown; CONFIG.md governs configuration",
+      "producer": "Repository maintainer",
+      "consumer_or_final_deliverable": "Companion setup, versioning and recovery",
+      "rebuild_or_restore": "Restore from the companion Git history",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the current setup and recovery instructions; remove superseded development notes after extracting active decisions."
+      }
+    },
+    {
+      "artifact_id": "config",
+      "path_pattern": "config.json",
+      "purpose": "Runtime tuning and EDGAR identity",
+      "schema": "CONFIG.md config.json schema",
+      "producer": "scripts/init_config.py and operator setup",
+      "consumer_or_final_deliverable": "tools/_common.py:load_config",
+      "rebuild_or_restore": "Restore from private Git; never use a public fallback",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the current initialized configuration and required credential identity."
+      }
+    },
+    {
+      "artifact_id": "verdicts",
+      "path_pattern": "data/metrics/verdicts.jsonl",
+      "purpose": "Longitudinal judgment and outcome truth ledger",
+      "schema": "reference/track-forward.md and metrics/verdicts.jsonl.example",
+      "producer": "tools/track_forward.py",
+      "consumer_or_final_deliverable": "Outcome scoring, review and calibration",
+      "rebuild_or_restore": "Restore exact ledger records; never invent missing report hashes or reviews",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Do not delete ledger rows. Preserve original judgment, quote and review evidence; scoring updates records in place. The 12-month horizon is not a deletion TTL."
+      }
+    },
+    {
+      "artifact_id": "scorecard",
+      "path_pattern": "data/metrics/scorecard.md",
+      "purpose": "Derived calibration display",
+      "schema": "reference/track-forward.md",
+      "producer": "tools/track_forward.py --scorecard",
+      "consumer_or_final_deliverable": "User inspection of retained verdicts",
+      "rebuild_or_restore": "Rebuild from the retained verdict ledger",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "May be regenerated after the ledger is safely retained; do not treat a cached scorecard as the truth source."
+      }
+    },
+    {
+      "artifact_id": "current-reports",
+      "path_pattern": "reports/smallcap/**",
+      "purpose": "Active batches and selected final judgment reports",
+      "schema": "tools/finalize_run.py, tools/new_run.py and reference/track-forward.md",
+      "producer": "Current research pipeline",
+      "consumer_or_final_deliverable": "Finalization, review, user delivery and referenced calibration evidence",
+      "rebuild_or_restore": "Restore final reports and their input evidence; active runs require their full unfinished dependency set",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Retain complete active batches. After finalization, keep final reports, verdict payloads, deepdive/valuation evidence and explicit reference closure; retire duplicate downloads, unused candidates and process logs when no active run or retained review needs them."
+      }
+    },
+    {
+      "artifact_id": "retained-reports",
+      "path_pattern": "data/reports/**",
+      "purpose": "Selected reports and judgment evidence from earlier runs",
+      "schema": "Producer report JSON and Markdown; reference/track-forward.md",
+      "producer": "Earlier research pipeline",
+      "consumer_or_final_deliverable": "Retained user reports and possible independent verdict review",
+      "rebuild_or_restore": "Restore retained report bytes and linked evidence from private Git",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep final reports, deepdive/valuation evidence and their explicit references. Completed development backtests, raw screening copies and unreferenced logs are retired, not retained merely because they are historical."
+      }
+    },
+    {
+      "artifact_id": "convergence-receipt",
+      "path_pattern": "data/maintenance/storage-convergence.json",
+      "purpose": "Latest source convergence and retention decision",
+      "schema": "schema_version 1; source heads, artifact hashes and executed retirement results",
+      "producer": "Explicit storage maintenance",
+      "consumer_or_final_deliverable": "Current layout audit and recorded historical limitations",
+      "rebuild_or_restore": "Restore from private Git",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the latest completed decision and minimal historical conclusions; do not retain entire development campaigns through this artifact."
+      }
+    },
+    {
+      "artifact_id": "retired-source-residue",
+      "path_pattern": "data/retired-source-residue/**",
+      "purpose": "Temporary private holding of obsolete files removed from the public source worktree",
+      "schema": "Original file bytes; hashes and move receipt in data/maintenance/storage-convergence.json",
+      "producer": "Explicit source data-boundary repair",
+      "consumer_or_final_deliverable": "No current runtime consumer; pending physical retirement",
+      "rebuild_or_restore": "Not required by current operation; original hashes remain in the convergence receipt",
+      "retention_rule": {
+        "class": "retired",
+        "rule": "This holding path repairs the public data boundary only. Remove after the reviewed retirement operation can execute; placement in private Git does not make these files core data."
+      }
+    },
+    {
+      "artifact_id": "migration-material",
+      "path_pattern": "data/migrations/**",
+      "purpose": "Old history preservation bundles",
+      "schema": "Git bundles and migration receipts",
+      "producer": "Earlier migrations",
+      "consumer_or_final_deliverable": "No normal runtime consumer",
+      "rebuild_or_restore": "Use current published code and retained final convergence decisions",
+      "retention_rule": {
+        "class": "retired",
+        "rule": "Remove after necessary unique code and conclusions are integrated or extracted. Being private or historical is not a retention rule."
+      }
+    }
+  ]
+}
