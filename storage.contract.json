@@ -78,7 +78,7 @@
       "rebuild_or_restore": "Restore final reports and their input evidence; active runs require their full unfinished dependency set",
       "retention_rule": {
         "class": "core",
-        "rule": "Retain complete active batches. After finalization, keep final reports, verdict payloads, deepdive/valuation evidence and explicit reference closure; retire duplicate downloads, unused candidates and process logs when no active run or retained review needs them."
+        "rule": "Retain complete active batches and unresolved finalization dependencies. After finalization, record the exact final reports, original verdict payloads, deepdive/valuation inputs and cited local reference closure in the current private receipt. Repeated downloads, unused candidates and process logs require exact owner-reviewed non-core declarations only after that closure is proved; no age-only or whole-batch retirement. Future reclassification must split the broad declaration into disjoint reviewed ownership; never overlay a non-core exact pattern on a core glob. Every path must have one owner."
       }
     },
     {
@@ -91,7 +91,7 @@
       "rebuild_or_restore": "Restore retained report bytes and linked evidence from private Git",
       "retention_rule": {
         "class": "core",
-        "rule": "Keep final reports, deepdive/valuation evidence and their explicit references. Completed development backtests, raw screening copies and unreferenced logs are retired, not retained merely because they are historical."
+        "rule": "Retain final reports, original judgment evidence, deepdive/valuation inputs and their exact references. Record the selected closure in the current private receipt before releasing any historical report path. Completed backtests, raw screening copies and unreferenced process files require individual dependency review and narrow non-core declarations; the broad core glob is temporary protection while that review remains incomplete, not a permanent archive policy. Future reclassification must split the broad declaration into disjoint reviewed ownership; never overlay a non-core exact pattern on a core glob. Every path must have one owner."
       }
     },
     {
@@ -130,7 +130,61 @@
       "rebuild_or_restore": "Use current published code and retained final convergence decisions",
       "retention_rule": {
         "class": "retired",
-        "rule": "Remove after necessary unique code and conclusions are integrated or extracted. Being private or historical is not a retention rule."
+        "rule": "Hold until unique code and necessary restoration conclusions are integrated or retained through exact PRIVATE revision and receipt references. Then review obsolete bundles for retirement. Preserve original verdict and report evidence separately; historical existence or a size threshold alone never proves released dependencies."
+      }
+    },
+    {
+      "artifact_id": "imported-legacy-verdicts",
+      "path_pattern": "imports/legacy-migrated-20260820/data/metrics/verdicts.jsonl",
+      "purpose": "Original longitudinal verdict ledger preserved by the reviewed earlier migration.",
+      "schema": "Historical verdict JSONL; reference/track-forward.md defines current interpretation, but migrated row compatibility is not revalidated by inventory.",
+      "producer": "Earlier verdict pipeline; reviewed migration.",
+      "consumer_or_final_deliverable": "Historical attribution, calibration and restoration review.",
+      "rebuild_or_restore": "Restore exact imported ledger bytes from PRIVATE history; the canonical ledger is not assumed to be a lossless replacement.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Preserve imported original verdicts until lossless reconciliation and required historical evidence are established. Do not delete rows or invent hashes, source attribution or completed review evidence."
+      }
+    },
+    {
+      "artifact_id": "imported-legacy-scorecard",
+      "path_pattern": "imports/legacy-migrated-20260820/data/metrics/scorecard.md",
+      "purpose": "Derived historical calibration display associated with the imported ledger.",
+      "schema": "Historical Markdown scorecard; reference/track-forward.md describes the current derived display.",
+      "producer": "Earlier scorecard generator; reviewed migration.",
+      "consumer_or_final_deliverable": "Operator inspection of the imported verdict ledger.",
+      "rebuild_or_restore": "Regenerate a current display from the retained imported ledger after compatibility is verified; this need not reproduce old display bytes.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Hold the old display until imported ledger compatibility and unique interpretation or restoration notes are reviewed. Do not treat it as verdict truth or retire it from age alone."
+      }
+    },
+    {
+      "artifact_id": "external-migration-database-recovery",
+      "path_pattern": "trend-pulse/pre-cutover-online-backup/history.db",
+      "purpose": "One transitional recovery snapshot for an external database migration awaiting cutover and delta verification.",
+      "schema": "SQLite online-backup snapshot governed by its external source owner; not the small-cap verdict schema.",
+      "producer": "Reviewed external database migration preparation.",
+      "consumer_or_final_deliverable": "External source owner's pending cutover, delta validation and rollback review; never a live database or small-cap ledger.",
+      "rebuild_or_restore": "Restore this exact PRIVATE snapshot and its migration receipt while rollback remains required; verify the source owner's cutover and delta procedure before using it.",
+      "max_bytes": 1048576,
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep only during pending cutover and delta verification. After migration validation closes, the external source owner must decide retirement. No live reads or writes, no additional snapshots, and no retention inferred from small-cap ledger rules."
+      }
+    },
+    {
+      "artifact_id": "external-migration-recovery-instructions",
+      "path_pattern": "trend-pulse/STORAGE.md",
+      "purpose": "One transitional ownership and recovery note accompanying the external database migration snapshot.",
+      "schema": "Markdown migration instructions governed by the external source owner.",
+      "producer": "Reviewed external database migration preparation.",
+      "consumer_or_final_deliverable": "External source owner's pending cutover, delta validation and rollback review; not runtime configuration for this skill.",
+      "rebuild_or_restore": "Restore the note with the exact PRIVATE snapshot and its reviewed migration receipt until restoration obligations close.",
+      "max_bytes": 1048576,
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep only during pending cutover and delta verification. After migration validation closes, the external source owner must decide retirement or preserve necessary final recovery conclusions. No additional note copies or automatic extension to other files."
       }
     }
   ]

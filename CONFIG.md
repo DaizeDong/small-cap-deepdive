@@ -117,3 +117,43 @@ are created by these checks.
 The 64 MiB worktree budget is a review threshold, excluding Git metadata. Exceeding it requires examining dependencies, not discarding core data. Use the shared `skill-smith` storage-contract checker with this source checkout and its PRIVATE companion; no copy of the checker is vendored here. It inventories structure and retention declarations, not live provider readiness or recovery.
 
 Keep every verdict row and all evidence required by active runs or retained reviews. Scorecards are derived. Final reports and their deepdive/valuation inputs remain in the companion; completed screening tables, development backtests and process logs may be retired when no retained report, review or active run depends on them. Never fabricate report hashes or completed review evidence for legacy records.
+
+### Reviewed migrated metrics
+
+The exact `imports/legacy-migrated-20260820/data/metrics/` ledger and scorecard
+paths are declared separately from canonical metrics. Preserve original
+imported verdict rows until lossless reconciliation and their required reference
+closure are established; the canonical ledger is not assumed to replace them.
+The imported scorecard is derived, but its compatibility and any unique
+interpretation or restoration notes need review before retirement. Storage
+inventory does not validate historical rows or prove regeneration.
+
+An external migration can require a temporary recovery hold inside the shared
+PRIVATE companion. The contract separately declares one exact database snapshot
+and one recovery note, each capped at 1 MiB, while cutover and delta validation
+are pending. They are neither a live database nor a small-cap verdict ledger.
+No additional snapshots or notes inherit this hold. Once migration validation
+closes, the external source owner must decide retirement and retain any
+necessary final recovery conclusions. The snapshot's payload and live migration
+procedure are governed by that owner rather than this skill's metric schemas.
+
+### Exact report closure and budget review
+
+Before releasing a historical report path, record the selected final report,
+original judgment payload, deepdive/valuation input and each necessary local
+reference in the current PRIVATE maintenance receipt. Active batches and
+unresolved finalization or rollback dependencies stay protected. Original
+verdict rows, imported attribution and supported evidence must not be removed
+to meet the 64 MiB review budget.
+
+Completed backtests, repeated downloads, raw screening copies and unreferenced
+process files need individual dependency review and a reviewed split of the
+broad declaration into disjoint ownership. Every path must match exactly one
+artifact; an exact non-core pattern overlaid on a core glob cannot override it.
+The broad report core patterns protect files until that closure is proved;
+their presence is not a policy to archive every historical process file.
+Migration bundles require unique code and restoration conclusions to be retained
+by exact PRIVATE revision and receipt references before retirement review.
+No new report archive or migration copy is needed. No cleanup or restore occurs
+in this contract change. A budget excess remains a failed check until working
+storage meets its reviewed bound.
