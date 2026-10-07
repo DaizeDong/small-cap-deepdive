@@ -6,6 +6,8 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ### Current evidence and completion contracts
 
+- Declare imported ledger and scorecard files separately from two bounded
+  migration recovery inputs; recovery snapshots cannot become live ledger data.
 - Financial calculations retain dated source evidence, compatible annual periods and units;
   missing inputs remain unavailable. Debt and lease evidence constrain EV and NAV calculations.
 - Discovery and theme-fit stages require scope and completion receipts. Finalization and ranking
