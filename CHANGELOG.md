@@ -4,6 +4,10 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ## [Unreleased]
 
+### Configuration and storage contracts
+
+- Shared DATA/CONFIG discovery, root-only profiles and required SEC identity readiness; output writers enforce source artifact ownership.
+
 ### Current evidence and completion contracts
 
 - Declare imported ledger and scorecard files separately from two bounded

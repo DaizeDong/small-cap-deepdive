@@ -161,7 +161,7 @@ Then install the data-layer dependencies and configure once:
 ```bash
 cd ~/.claude/plugins/small-cap-deepdive
 pip install -r tools/requirements.txt
-gh repo create small-cap-deepdive-config --private
+gh repo create small-cap-deepdive-config --private --add-readme
 gh repo clone small-cap-deepdive-config ~/.small-cap-deepdive-config
 export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
 python scripts/init_config.py
@@ -211,7 +211,7 @@ required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-fie
 [CONFIG.md](CONFIG.md).
 
 - **Config discovery:** the pinned `guards/tools/datadir.py` resolver selects the companion.
-  `SMALL_CAP_DEEPDIVE_CONFIG_DIR` or `SMALL_CAP_DEEPDIVE_CONFIG` takes priority;
+  DATA override precedes `SMALL_CAP_DEEPDIVE_CONFIG`, then `SMALL_CAP_DEEPDIVE_CONFIG_DIR`;
   the resolver also supports its sibling-companion and home-directory conventions.
   The selected directory must belong to a verified PRIVATE Git repository and contain
   `config.json`. Missing configuration or unproved visibility fails without selecting another output home.
@@ -222,7 +222,7 @@ required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-fie
   python scripts/verify_config.py --json  # local config, PRIVATE root and dependency checks
   ```
 - **Switch configs (hot-swap):** point the env var at another config dir, configs are self-contained
-  (`output_dir` relative to the resolved PRIVATE companion). Each selected directory must be within an existing PRIVATE Git worktree.
+  (`output_dir` relative to the resolved PRIVATE companion). Each selected directory must be an existing PRIVATE Git worktree root; nested profiles are refused.
 - **Secrets / PII:** keep `config.json` and runtime DATA versioned in the verified PRIVATE
   companion, outside this public tool source. The tool's ignore rules are only a backstop;
   they do not replace the private boundary or the companion's history and backup.
@@ -435,3 +435,5 @@ Contributing: see the design spec in `docs/` for architectural invariants. The c
 is the data/judgment boundary: the data layer (`tools/*.py`) never produces investment judgment;
 the judgment layer never computes financials. Changes that blur this boundary require explicit
 justification in [PHILOSOPHY.md](PHILOSOPHY.md).
+
+Configuration and tracking share one root; see [CONFIG.md](CONFIG.md) for exact DATA/CONFIG precedence and separate-worktree profile switching. Blank SEC identity is NOT READY. The 64 MiB storage review remains unresolved while protected evidence or retirement holds exceed it.

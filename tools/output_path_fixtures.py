@@ -23,7 +23,7 @@ def output_path_security_case(root):
         "origins": {name: "https://github.com/" + identity + ".git"
                     for name, identity in identities.items()},
         "visibility": {identities["public"]: "PUBLIC", identities["private"]: "PRIVATE"},
-        "output": Path("reports/output.json"),
+        "output": Path("reports/smallcap/output.json"),
         "incompatible_api": "def prove_private_companion(destination):\n    return None\n",
         "changed_signature": "synthetic-changed-configuration",
     }

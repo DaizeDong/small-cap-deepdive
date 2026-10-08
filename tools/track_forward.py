@@ -38,9 +38,9 @@ Usage (REPORTS_ROOT is the resolved absolute private path):
     python tools/track_forward.py --selftest
 
 Output: _metrics_dir()/verdicts.jsonl and _metrics_dir()/scorecard.md.
-_metrics_dir() resolves datadir.resolve_data_dir("small-cap-deepdive")/"metrics",
-then proves the private output path. SMALL_CAP_DEEPDIVE_DATA_DIR may select the
-private data root. These are versioned companion DATA, never paths inside this tool repo.
+_metrics_dir() uses the same companion root as configuration and reports, then
+selects its data/metrics child. SMALL_CAP_DEEPDIVE_DATA_DIR must select that
+companion data/ child. These are versioned companion DATA, never paths inside this tool repo.
 
 Notes:
     --backfill is the correct way to add prices to existing rows with null entry prices.
@@ -50,7 +50,6 @@ Notes:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import math
 import uuid
@@ -64,7 +63,7 @@ from typing import Any
 
 # Add tools dir to path for _common import
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import CFG, REPORTS, today
+from _common import CFG, REPORTS, today, _companion_root
 from _output_paths import prove_output_path, prepare_output
 
 # v0.3.3 refactor, the scoring MATH and the P8 recall-floor audit were extracted into sibling
@@ -90,39 +89,13 @@ from _recall import (
     _truthy_csv, _recall_set_from_candidate_files, _recall_set_from_universe_files,
 )
 
-# Real run outputs belong in the verified private companion repository.
-# Resolve that location before every write and fail if it is unavailable.
-# Public tool files must never serve as a fallback for private observations.
-# datadir moved into the guards submodule: one copy for the fleet instead of one per repo,
-# which had already begun to drift. The insert above stays, because sibling modules in this
-# same tools/ directory are still imported by bare name.
-_datadir_path = Path(__file__).resolve().parents[1] / "guards/tools/datadir.py"
-if not _datadir_path.is_file():
-    raise ImportError("Pinned guards resolver is missing; initialize the guards submodule")
-_datadir_spec = importlib.util.spec_from_file_location("_smallcap_tracking_datadir", _datadir_path)
-if _datadir_spec is None or _datadir_spec.loader is None:
-    raise ImportError("Cannot load the pinned guards resolver; initialize the guards submodule")
-_datadir = importlib.util.module_from_spec(_datadir_spec)
-_datadir_spec.loader.exec_module(_datadir)
-resolve_data_dir = _datadir.resolve_data_dir
-DataDirNotInitialized = _datadir.DataDirNotInitialized
-
+# Reports and verdict tracking use the same proved companion root.
 REPO = Path(__file__).resolve().parent.parent
 SKILL = "small-cap-deepdive"
 
 
 def _metrics_dir() -> Path:
-    d = resolve_data_dir(SKILL)
-    if d is None:
-        raise DataDirNotInitialized(
-            "small-cap-deepdive has no private data directory, so forward-tracking has nowhere to\n"
-            "record verdicts. A freshly cloned public skill is SUPPOSED to look like this -- it\n"
-            "ships uninitialized. Point it at your own store:\n"
-            "    mkdir -p ~/.small-cap-deepdive-config/data/metrics\n"
-            "    (or set SMALL_CAP_DEEPDIVE_DATA_DIR)\n"
-            "The shape you are expected to produce is in metrics/verdicts.jsonl.example."
-        )
-    return prove_output_path(d / "metrics")
+    return prove_output_path(_companion_root() / 'data' / 'metrics')
 
 
 def _verdicts_file() -> Path:
@@ -442,7 +415,7 @@ def _ledger_lock(target):
     it behind: verify no tracker writer is running before manually removing it.
     There is deliberately no automatic stale-lock deletion.
     """
-    lock_path = prepare_output(target.with_name(f".{target.name}.lock"))
+    lock_path = prepare_output(target.with_name(f".{target.name}.lock"), artifact_id='verdict-lock')
     try:
         stream = lock_path.open("x", encoding="ascii")
     except FileExistsError as exc:
@@ -464,7 +437,7 @@ def _save_verdicts(rows: list[dict]) -> None:
     Reload and retry the command to score or backfill the current set of rows.
     """
     content = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
-    target = prepare_output(VERDICTS_FILE)
+    target = prepare_output(VERDICTS_FILE, artifact_id='verdicts')
     with _ledger_lock(target):
         try:
             current = target.read_bytes()
@@ -498,7 +471,8 @@ def _validate_adjudication_writes(previous, rows):
 
 def _replace_verdicts(target, content):
     """Replace the entire ledger while the caller holds its exclusive lock."""
-    tmp_path = prepare_output(target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp"))
+    tmp_path = prepare_output(target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp"),
+                              artifact_id='verdict-staging')
     created = False
     try:
         with tmp_path.open("x", encoding="utf-8") as stream:
@@ -506,7 +480,7 @@ def _replace_verdicts(target, content):
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        prove_output_path(target)
+        prepare_output(target, artifact_id='verdicts')
         os.replace(tmp_path, target)
     finally:
         if created:
@@ -516,7 +490,7 @@ def _replace_verdicts(target, content):
 def _append_verdict(row: dict) -> bool:
     """Atomically deduplicate and append; return whether a new row was recorded."""
     _require_adjudication_receipt(row)
-    target = prepare_output(VERDICTS_FILE)
+    target = prepare_output(VERDICTS_FILE, artifact_id='verdicts')
     with _ledger_lock(target):
         rows = _load_verdicts()
         if not isinstance(rows, _VerdictSnapshot) or rows.source_path != target:
@@ -1326,7 +1300,7 @@ def cmd_scorecard(args) -> None:
         if earliest_maturity and scored:
             lines += ["", f"*Earliest pending maturity: {earliest_maturity.strftime('%Y-%m-%d')}*"]
 
-    prepare_output(destination).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    prepare_output(destination, artifact_id='scorecard').write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Scorecard written: {SCORECARD_FILE}")
     print(f"Scored: {len(scored)} | Pending: {len(pending)}")
 

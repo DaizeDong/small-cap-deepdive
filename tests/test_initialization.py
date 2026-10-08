@@ -31,11 +31,11 @@ def test_init_proves_destination_before_identity_instructions(state, monkeypatch
     state['visibility']['example/synthetic-smallcap-config'] = visibility
     if label == 'unversioned':
         (companion / '.git').rmdir()
-    destination = companion / 'new-profile'
+    destination = companion
     result = invoke(load_init(), monkeypatch, '--out', str(destination))
     output = capsys.readouterr().out
     assert (result == 0) is accepted
-    assert destination.exists() is accepted
+    assert (destination / 'config.json').exists() is accepted
     if accepted:
         assert json.loads((destination / 'config.json').read_text(encoding='utf-8'))['schema_version'] == 1
     else:

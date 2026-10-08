@@ -43,7 +43,7 @@ def test_default_sidecar_rechecks_companion_visibility(module, state):
 
 @pytest.mark.parametrize('explicit', [False, True])
 def test_sidecar_writes_generated_rows_in_verified_private_companion(module, state, explicit):
-    directory = Path(state['companion']) / 'nested' if explicit else None
+    directory = Path(state['root']) / 'nested' if explicit else None
     path = module.write_sic_floor_sidecar(FIX['theme'], FIX['sic'], directory)
     assert json.loads(path.read_text(encoding='utf-8')) == FIX['sic']
     assert path.is_relative_to(Path(state['companion']))

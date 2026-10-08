@@ -89,10 +89,10 @@ def test_possessive_uncertainty_reaches_deepdive_completion(callers, case):
 
 
 @pytest.mark.parametrize("identity,expected", [
-    ("Synthetic Analyst user1@example.com", "warn"),
-    ("Synthetic Analyst USER1@EXAMPLE.COM", "warn"),
-    ("Synthetic Analyst your-email@example.com", "warn"),
-    ("", "warn"), ("Synthetic Analyst", "warn"),
+    ("Synthetic Analyst user1@example.com", "fail"),
+    ("Synthetic Analyst USER1@EXAMPLE.COM", "fail"),
+    ("Synthetic Analyst your-email@example.com", "fail"),
+    ("", "fail"), ("Synthetic Analyst", "fail"),
     ("Synthetic Analyst user1@example-employer.com", "pass")])
 def test_configuration_doctor_does_not_accept_example_identity(state, monkeypatch, capsys, identity, expected):
     config_path = Path(state["companion"]) / "config.json"
@@ -106,7 +106,7 @@ def test_configuration_doctor_does_not_accept_example_identity(state, monkeypatc
     spec = importlib.util.spec_from_file_location("synthetic_identity_doctor", root / "scripts/verify_config.py")
     doctor = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(doctor)
-    assert doctor.main(["--json"]) == 0
+    assert doctor.main(["--json"]) == (0 if expected == "pass" else 1)
     output = capsys.readouterr().out
     report = json.loads(output)
     item = next(row for row in report["checks"] if row["name"] == "SEC identity configured")

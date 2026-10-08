@@ -31,9 +31,12 @@ def main(argv=None):
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
     if args.config_dir:
-        os.environ['SMALL_CAP_DEEPDIVE_CONFIG_DIR'] = args.config_dir
+        for name in ('SMALL_CAP_DEEPDIVE_DATA_DIR', 'SMALL_CAP_DEEPDIVE_CONFIG_DIR'):
+            os.environ.pop(name, None)
+        os.environ['SMALL_CAP_DEEPDIVE_CONFIG'] = args.config_dir
     checks = []
     reports_root = None
+    resolved_root = None
 
     def check(name, ok, detail='', warning=False):
         checks.append({'name': name, 'status': 'pass' if ok else ('warn' if warning else 'fail'),
@@ -41,8 +44,9 @@ def main(argv=None):
 
     sys.path.insert(0, str(_REPO/'tools'))
     try:
-        from _common import load_config, output_root
+        from _common import load_config, output_root, _companion_root
         config = load_config()
+        resolved_root = str(_companion_root())
         reports_root = str(output_root())
         check('PRIVATE companion, config and output root', True)
         check('schema_version', config.get('schema_version') == 1, 'schema_version must equal 1')
@@ -59,7 +63,7 @@ def main(argv=None):
         identity = str(config.get('sec_user_agent', ''))
         placeholder = re.search(r'@example\.(?:com|net|org)\b', identity, re.IGNORECASE)
         check('SEC identity configured', '@' in identity and placeholder is None,
-              'set sec_user_agent privately before live SEC use; no live check was performed', warning=True)
+              'set sec_user_agent privately before live SEC use; no live check was performed')
     except (OSError, RuntimeError, ValueError, KeyError, ImportError) as exc:
         check('PRIVATE companion, config and output root', False, str(exc))
 
@@ -81,7 +85,8 @@ def main(argv=None):
         check('dependency declarations', False, str(exc))
 
     ready = not any(item['status'] == 'fail' for item in checks)
-    report = {'status': 'ready' if ready else 'not_ready', 'reports_root': reports_root,
+    report = {'status': 'ready' if ready else 'not_ready', 'ready': ready,
+              'resolved_root': resolved_root, 'reports_root': reports_root,
               'scope': 'local_configuration_only', 'live_services_checked': False, 'checks': checks}
     if args.json:
         print(json.dumps(report, ensure_ascii=False))
