@@ -10,12 +10,12 @@ import re
 import time
 from datetime import datetime, timezone
 
-from _output_paths import prove_output_path, prepare_output
+from _output_paths import prove_output_path, prove_companion_root, prepare_output
 
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent
 _REF = _REPO / "reference"
-_CONFIG_DIR_ENV_VARS = ("SMALL_CAP_DEEPDIVE_CONFIG_DIR", "SMALL_CAP_DEEPDIVE_CONFIG")
+_CONFIG_DIR_ENV_VARS = ("SMALL_CAP_DEEPDIVE_CONFIG", "SMALL_CAP_DEEPDIVE_CONFIG_DIR")
 
 
 class ConfigNotInitialized(RuntimeError):
@@ -42,14 +42,16 @@ def _companion_root():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module._own_repo_root = lambda: str(_REPO)
-    module._config_env_vars = lambda skill: _CONFIG_DIR_ENV_VARS
     for selector in (*_CONFIG_DIR_ENV_VARS, 'SMALL_CAP_DEEPDIVE_DATA_DIR'):
         if os.environ.get(selector) and not Path(os.environ[selector]).expanduser().is_dir():
             raise ConfigNotInitialized(selector+' names a missing companion directory')
     companion = module.resolve_companion_root('small-cap-deepdive')
     if companion is None:
         raise ConfigNotInitialized(CONFIG_SETUP_HINT)
-    return prove_output_path(companion)
+    selected_data = os.environ.get('SMALL_CAP_DEEPDIVE_DATA_DIR')
+    if selected_data and Path(selected_data).expanduser().resolve() != (Path(companion) / 'data').resolve():
+        raise ConfigNotInitialized('SMALL_CAP_DEEPDIVE_DATA_DIR must select the companion data/ directory')
+    return prove_companion_root(companion)
 
 
 def resolve_config_json() -> Path | None:

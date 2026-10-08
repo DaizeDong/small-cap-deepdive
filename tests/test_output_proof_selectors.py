@@ -33,10 +33,15 @@ def native_case(tmp_path, monkeypatch):
         return result.stdout.strip()
 
     case["git"] = git
+    case['native_run'] = native_run
     for name, path in case["repositories"].items():
         path.mkdir()
         git(path, "init", "-q")
         git(path, "remote", "add", "origin", case["origins"][name])
+        tree = git(path, 'write-tree')
+        commit = git(path, '-c', 'user.name=Example User', '-c', 'user.email=user1@example.com',
+                     'commit-tree', tree, '-m', 'Synthetic empty fixture')
+        git(path, 'update-ref', 'HEAD', commit)
     receipt = case["home"] / ".pii-guard/visibility.json"
     receipt.parent.mkdir()
     receipt.write_text(json.dumps(output_visibility_receipt(case["visibility"])), encoding="utf-8")

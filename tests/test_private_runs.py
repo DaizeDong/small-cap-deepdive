@@ -28,12 +28,14 @@ def install_metadata(state, patch):
     ssh_paths = [str(fixture_root / '.ssh/config'), str(fixture_root / 'ssh_config')]
     patch(boundary, '_ssh_config_sources', lambda: {'paths': ssh_paths, 'chains': [ssh_paths]})
 
-    def prove(destination):
+    def prove(destination, visibility_map=None):
         receipt.write_text(json.dumps(output_visibility_receipt(state['visibility'])), encoding='utf-8')
         return boundary.prove_private_companion(destination, visibility_map=receipt)
 
-    facade = types.SimpleNamespace(prove_private_companion=prove, GitError=boundary.GitError)
+    facade = types.SimpleNamespace(prove_private_companion=prove, GitError=boundary.GitError,
+                                   read_private_companion_git=boundary.read_private_companion_git)
     patch(outputs, '_guard_module', lambda: facade)
+    patch(outputs._storage_module(), 'load_boundary', lambda: facade)
 
     def execute(argv, **kwargs):
         argv = [str(value) for value in argv]
@@ -54,6 +56,10 @@ def install_metadata(state, patch):
                     remote_map = {'origin': {'fetch': [origin], 'push': [origin]}} if origin else {}
                 if '--show-toplevel' in argv:
                     answer = str(repository)
+                elif 'rev-parse' in argv and '--verify' in argv:
+                    answer = '0123456789abcdef0123456789abcdef01234567'
+                elif 'check-ignore' in argv:
+                    return subprocess.CompletedProcess(argv, 1, '', '')
                 elif '--absolute-git-dir' in argv:
                     answer = str(repository / '.git')
                 elif 'config' in argv and '--list' in argv:
@@ -274,7 +280,7 @@ def test_explicit_report_proves_actual_other_companion(state, monkeypatch, tmp_p
     state['visibility']['example/synthetic-other-config'] = visibility
     source = tmp_path/'input.json'
     source.write_text(json.dumps(SAMPLE['report']), encoding='utf-8')
-    destination = other/'nested/report.md'
+    destination = other/'reports/smallcap/nested/report.md'
     monkeypatch.setattr(sys, 'argv', ['make_report.py', '--json', str(source), '--out', str(destination)])
     if visibility == 'PRIVATE':
         importlib.import_module('make_report').main()
@@ -299,6 +305,10 @@ def test_backtest_writer_uses_same_unbatched_root(state):
 @pytest.mark.parametrize('visibility', ['PRIVATE', 'PUBLIC'])
 def test_doctor_json_uses_same_root_without_output(state, monkeypatch, capsys, visibility):
     state['visibility']['example/synthetic-smallcap-config'] = visibility
+    config_path = Path(state['companion']) / 'config.json'
+    config = json.loads(config_path.read_text(encoding='utf-8'))
+    config['sec_user_agent'] = 'Synthetic Analyst user1@example-employer.com'
+    config_path.write_text(json.dumps(config), encoding='utf-8')
     monkeypatch.setattr(importlib.util, 'find_spec', lambda name: object())
     monkeypatch.setattr(importlib.metadata, 'version', lambda name: SAMPLE['dependencies'][name])
     monkeypatch.setattr(sys, 'argv', ['verify_config.py', '--json'])

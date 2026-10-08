@@ -409,3 +409,5 @@ the current private ledger; do not assume a cohort date or a fixed scorecard res
 forgotten deep-dive, so it does not count toward the "N missing" warning. The coverage denominator
 is therefore genuine deep-dive coverage rather than the raw `band=deep` row count, and no manual
 re-band or `--allow-missing` step is needed.
+
+Configuration and retention: [CONFIG.md](CONFIG.md). Shared DATA/CONFIG discovery, root-only profiles and required SEC identity readiness; output writers enforce source artifact ownership.

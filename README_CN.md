@@ -103,7 +103,7 @@ git clone --recurse-submodules https://github.com/DaizeDong/small-cap-deepdive.g
 ```bash
 cd ~/.claude/plugins/small-cap-deepdive
 pip install -r tools/requirements.txt
-gh repo create small-cap-deepdive-config --private
+gh repo create small-cap-deepdive-config --private --add-readme
 gh repo clone small-cap-deepdive-config ~/.small-cap-deepdive-config
 export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
 python scripts/init_config.py
@@ -150,7 +150,7 @@ test -f "$skill_alias/SKILL.md" || exit 1
 身份（`sec_user_agent`）。逐字段完整规范见 [CONFIG.md](CONFIG.md)。
 
 - **配置发现：** 通过固定版本的 `guards/tools/datadir.py` 选择伴生仓。
-  优先使用 `SMALL_CAP_DEEPDIVE_CONFIG_DIR` 或 `SMALL_CAP_DEEPDIVE_CONFIG`，
+  DATA 选择优先，其次为 `SMALL_CAP_DEEPDIVE_CONFIG`、`SMALL_CAP_DEEPDIVE_CONFIG_DIR`，
   也支持解析器约定的相邻伴生仓和主目录位置。选中的目录必须属于可验证为 PRIVATE 的 Git 仓库，
   并包含 `config.json`。缺少配置或无法确认可见性时，工具报错，不改用其他输出目录。
 - **首次配置：**
@@ -346,3 +346,5 @@ English（[`README.md`](README.md)，权威版本）· 中文（`README_CN.md`�
 见 [ROADMAP.md](ROADMAP.md) · [PHILOSOPHY.md](PHILOSOPHY.md) · [CHANGELOG.md](CHANGELOG.md) · [LICENSE](LICENSE)（MIT）。
 
 贡献：架构不变量见 `docs/` 设计规范。核心不变量是数据/判断边界：数据层（`tools/*.py`）永不产生投资判断；判断层永不计算财务。任何模糊这条边界的改动，需在 [PHILOSOPHY.md](PHILOSOPHY.md) 给出显式理由。
+
+配置、报告和跟踪共用同一伴生仓根，DATA/CONFIG 的完整顺序见 [CONFIG.md](CONFIG.md)。切换配置须选择独立的 PRIVATE 工作树根，嵌套 profile 会被拒绝；SEC 身份为空时结果为 NOT READY。保留证据或待核对旧文件仍超出 64 MiB 时，存储检查继续报错。

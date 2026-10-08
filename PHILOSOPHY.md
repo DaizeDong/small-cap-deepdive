@@ -215,3 +215,5 @@ revised here. Never quietly violated.
 > **"这让输出更接近真相，还是只让叙事更有说服力而没有更接近真相？"**
 >
 > 当两者冲突，检验结果胜出,或者在这里显式、审慎地修订原则。绝不悄悄违反。
+
+Configuration selection and retention follow the actual consuming capability. A PRIVATE boundary does not make every cache core, and a local readiness check does not prove a live integration. Exact storage ownership and lifecycle remain declared in CONFIG and the source contracts.

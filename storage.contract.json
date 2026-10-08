@@ -186,6 +186,51 @@
         "class": "core",
         "rule": "Keep only during pending cutover and delta verification. After migration validation closes, the external source owner must decide retirement or preserve necessary final recovery conclusions. No additional note copies or automatic extension to other files."
       }
+    },
+    {
+      "artifact_id": "config-staging",
+      "path_pattern": ".config-*.tmp",
+      "purpose": "Atomic configuration or verdict transaction staging and coordination.",
+      "schema": "scripts/init_config.py or tools/track_forward.py temporary format",
+      "producer": "Configuration initializer or verdict writer",
+      "consumer_or_final_deliverable": "The adjacent atomic replacement or locked ledger transaction",
+      "rebuild_or_restore": "Recover from the preserved final configuration or verdict ledger after resolving any interrupted writer.",
+      "persistence": "transient",
+      "transient_reason": "Bounded named staging or lock files scoped to one active transaction; no generic temporary output namespace.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Retain while a writer or recovery obligation is active; remove only after its transaction is resolved."
+      }
+    },
+    {
+      "artifact_id": "verdict-lock",
+      "path_pattern": "data/metrics/.verdicts.jsonl.lock",
+      "purpose": "Atomic configuration or verdict transaction staging and coordination.",
+      "schema": "scripts/init_config.py or tools/track_forward.py temporary format",
+      "producer": "Configuration initializer or verdict writer",
+      "consumer_or_final_deliverable": "The adjacent atomic replacement or locked ledger transaction",
+      "rebuild_or_restore": "Recover from the preserved final configuration or verdict ledger after resolving any interrupted writer.",
+      "persistence": "transient",
+      "transient_reason": "Bounded named staging or lock files scoped to one active transaction; no generic temporary output namespace.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Retain while a writer or recovery obligation is active; remove only after its transaction is resolved."
+      }
+    },
+    {
+      "artifact_id": "verdict-staging",
+      "path_pattern": "data/metrics/.verdicts.jsonl.*.tmp",
+      "purpose": "Atomic configuration or verdict transaction staging and coordination.",
+      "schema": "scripts/init_config.py or tools/track_forward.py temporary format",
+      "producer": "Configuration initializer or verdict writer",
+      "consumer_or_final_deliverable": "The adjacent atomic replacement or locked ledger transaction",
+      "rebuild_or_restore": "Recover from the preserved final configuration or verdict ledger after resolving any interrupted writer.",
+      "persistence": "transient",
+      "transient_reason": "Bounded named staging or lock files scoped to one active transaction; no generic temporary output namespace.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Retain while a writer or recovery obligation is active; remove only after its transaction is resolved."
+      }
     }
   ]
 }

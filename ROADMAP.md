@@ -70,3 +70,5 @@ Any change to the diagnostic role of a signal requires a separate evidence-based
 
 Automated theme selection remains deferred. Revisit it only through a defined comparison
 against an appropriate baseline with dated populations and realized outcomes.
+
+Configuration and storage repair: Shared DATA/CONFIG discovery, root-only profiles and required SEC identity readiness; output writers enforce source artifact ownership. Synthetic checks establish the declared local behavior; live capability and protected-data retirement still require their own evidence.

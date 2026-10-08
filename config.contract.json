@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "repository_kind": "skill",
+  "configuration": "settings",
+  "rationale": "Native settings govern supported runtime behavior; storage initialization and live capability acceptance are separate checks.",
+  "documentation": [
+    "CONFIG.md"
+  ],
+  "settings": {
+    "schema_document": "CONFIG.md",
+    "discovery_document": "CONFIG.md",
+    "environment": "SMALL_CAP_DEEPDIVE_CONFIG",
+    "aliases": [
+      "SMALL_CAP_DEEPDIVE_CONFIG_DIR",
+      "SMALL_CAP_DEEPDIVE_DATA_DIR"
+    ],
+    "precedence": [
+      "Explicit --out or --config-dir for that command",
+      "SMALL_CAP_DEEPDIVE_DATA_DIR (exact companion data/ child)",
+      "SMALL_CAP_DEEPDIVE_CONFIG",
+      "SMALL_CAP_DEEPDIVE_CONFIG_DIR",
+      "Sibling small-cap-deepdive-config",
+      "~/.small-cap-deepdive-config",
+      "~/.small-cap-deepdive-data"
+    ],
+    "required_fields": [
+      "sec_user_agent"
+    ],
+    "initializer": {
+      "path": "scripts/init_config.py",
+      "args": [
+        "--out",
+        "{output}"
+      ]
+    },
+    "doctor": {
+      "path": "scripts/verify_config.py",
+      "args": [
+        "--json"
+      ]
+    }
+  }
+}

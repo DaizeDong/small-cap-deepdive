@@ -32,7 +32,7 @@
     "source34_contracts.json": "477cc2e2d3753c49aa7a0621440e39cbde9e7fa654e5313086633e8f01ac329f",
     "test_source34_contracts.py": "f2dc42545d44c9d30c26dfe5b1cbc225786dafa64af5526cbe63143cc0174b57",
     "test_source35_contracts.py": "9be855681ba932a4ab28562e831aa8c2c9ed1d955c68bd076039eec6fd9046b8",
-    "test_source36_contracts.py": "fb25aa48744ae05f38b6aede6cdb214986799210b746bcf768857122bead1105"
+    "test_source36_contracts.py": "9f1800aa883dd2a106238f0e6d63b3b9a0d062da37e03674cc3562a39e958e06"
   },
   "repository_examples": {
     "reference/config.example.json": "1723cf6ab5f5ae528717611f6720e7ddf5eac9a17db5cf718725a5e51a85bed0",

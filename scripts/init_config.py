@@ -11,19 +11,18 @@ import os
 from pathlib import Path
 import stat
 import sys
-import tempfile
+import uuid
 
 _REPO = Path(__file__).resolve().parents[1]
 _EXAMPLE = _REPO / 'reference/config.example.json'
 sys.path.insert(0, str(_REPO / 'tools'))
-from _output_paths import OutputPathError, prove_output_path
+from _output_paths import OutputPathError, prove_output_path, prove_companion_root, authorize_output
 
 
 def resolve_out(out_arg):
     """Use the runtime's companion selectors without requiring config.json yet."""
-    selected = out_arg or os.environ.get('SMALL_CAP_DEEPDIVE_CONFIG_DIR') or os.environ.get('SMALL_CAP_DEEPDIVE_CONFIG')
-    if selected:
-        return Path(selected).expanduser()
+    if out_arg:
+        return prove_companion_root(out_arg)
     from _common import _companion_root
     return _companion_root()
 
@@ -41,15 +40,17 @@ def check_config_target(target):
 
 def write_config(target, text):
     """Replace only after a complete write and a fresh destination proof."""
-    descriptor, name = tempfile.mkstemp(prefix='.config-', suffix='.tmp', dir=target.parent)
-    temporary = Path(name)
+    authorize_output(target, artifact_id='config')
+    temporary = authorize_output(target.parent / ('.config-' + uuid.uuid4().hex + '.tmp'),
+                                 artifact_id='config-staging')
+    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
         with os.fdopen(descriptor, 'w', encoding='utf-8', newline='\n') as stream:
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
         check_config_target(target)
-        if prove_output_path(target) != target:
+        if authorize_output(target, artifact_id='config') != target:
             raise OutputPathError('config destination changed during initialization')
         os.replace(temporary, target)
     finally:
@@ -58,12 +59,13 @@ def write_config(target, text):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--out', help='directory within an existing PRIVATE companion')
+    parser.add_argument('--out', help='existing PRIVATE companion worktree root')
     parser.add_argument('--force', action='store_true', help='replace an existing ordinary config.json')
     args = parser.parse_args()
     try:
-        out_dir = prove_output_path(resolve_out(args.out))
+        out_dir = prove_companion_root(resolve_out(args.out))
         target = out_dir / 'config.json'
+        authorize_output(target, artifact_id='config')
         check_config_target(target)
         if prove_output_path(target) != target:
             raise OutputPathError('config destination must remain in the verified directory')

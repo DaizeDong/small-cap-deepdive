@@ -54,6 +54,13 @@ def _prove_output_path(requested):
     if any(part.lower() == '.git' or ':' in part or part.endswith((' ', '.')) for part in parts):
         raise OutputPathError('ambiguous or reserved output path')
     try:
+        for node in (path.absolute(), *path.absolute().parents):
+            try:
+                info = node.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
+                raise OutputPathError('PRIVATE output cannot use filesystem aliases')
         path = path.resolve()
         if path.is_relative_to(SOURCE_ROOT) or SOURCE_ROOT.is_relative_to(path):
             raise OutputPathError('runtime output must be outside the tool source in a separate PRIVATE companion')
@@ -93,12 +100,48 @@ def prove_output_path(requested):
     return _prove_output_path(requested)[0]
 
 
-def prepare_output(requested):
+def prove_companion_root(requested):
+    """Configuration profiles are separate PRIVATE worktree roots, never subdirectories."""
+    path, proof = _prove_output_path(requested)
+    if path != Path(proof.root).resolve():
+        raise OutputPathError('Select a PRIVATE worktree root; nested configuration profiles are unsupported')
+    return path
+
+
+@lru_cache(maxsize=1)
+def _storage_module():
+    path = SOURCE_ROOT / 'guards/tools/storage_contract.py'
+    spec = importlib.util.spec_from_file_location('_smallcap_storage_contract', path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except (OSError, ImportError, AttributeError) as exc:
+        raise OutputPathError('Initialize pinned guards storage admission') from exc
+    return module
+
+
+def authorize_output(requested, *, directory=False, artifact_id=None):
+    path, proof = _prove_output_path(requested)
+    try:
+        admission = _storage_module().authorize_artifact_write(
+            SOURCE_ROOT, proof.root, path.relative_to(proof.root).as_posix(),
+            directory=directory, artifact_id=artifact_id)
+        if (proof.root, proof.repositories, proof.signature) != (
+                admission.proof.root, admission.proof.repositories, admission.proof.signature):
+            raise OutputPathError('PRIVATE output proof changed before artifact admission')
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise OutputPathError('Storage contract refused output: ' + str(exc)) from exc
+    return admission.path
+
+
+def prepare_output(requested, *, artifact_id='current-reports'):
     """Recheck path and publication identity after creating the destination's parents."""
     path, before = _prove_output_path(requested)
+    authorize_output(path, artifact_id=artifact_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     final, after = _prove_output_path(path)
     if final != path or (before.root, before.repositories, before.signature) != (
             after.root, after.repositories, after.signature):
         raise OutputPathError('PRIVATE output destination changed while preparing its parent')
-    return final
+    return authorize_output(final, artifact_id=artifact_id)

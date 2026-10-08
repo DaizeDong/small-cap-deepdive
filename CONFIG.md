@@ -11,15 +11,20 @@ Secrets stay outside the tool source; runtime DATA is versioned only in PRIVATE 
 
 > **`reference/config.example.json` defaults**  ◁overlaid by◁  **your `config.json`**  ◁then◁  **`SMALLCAP_*` env scalar overrides`**
 
-The pinned `guards/tools/datadir.py` resolver chooses the companion. Explicit
-`SMALL_CAP_DEEPDIVE_CONFIG_DIR` and `SMALL_CAP_DEEPDIVE_CONFIG` selectors take priority;
-the resolver also supports its documented sibling and home-directory conventions.
-`config.json` must exist in the resolved, versioned PRIVATE companion. The enclosing
-Git repository and every configured remote's effective GitHub fetch and push destinations
-are verified before config or output is used; the remote need not be named `origin`.
-Missing config, a missing resolver, PUBLIC visibility and unknown visibility fail
-with setup diagnostics. Initialize the pinned kit with
-`git submodule update --init --recursive -- guards`.
+The pinned `guards/tools/datadir.py` resolver selects one root for configuration,
+reports, initialization and tracking. The order is `SMALL_CAP_DEEPDIVE_DATA_DIR`,
+`SMALL_CAP_DEEPDIVE_CONFIG`, `SMALL_CAP_DEEPDIVE_CONFIG_DIR`, a sibling
+`small-cap-deepdive-config`, `~/.small-cap-deepdive-config`, then
+`~/.small-cap-deepdive-data`. A DATA override must name the exact `data/` child;
+root lookup removes that terminal component. Tracking always uses
+`<companion>/data/metrics`, even before `data/` exists. Explicit initializer
+`--out` and doctor `--config-dir` select the root for that command before the environment.
+
+Each selected configuration root must be the exact root of an existing PRIVATE
+Git worktree. Nested configuration profiles are unsupported and are refused
+before writes. All physical and effective fetch/push destinations need current
+PRIVATE receipts. Missing explicit directories, config, resolver or proof fail.
+Initialize the kit with `git submodule update --init --recursive -- guards`.
 
 Importing shared code and writers does not load configuration or create directories.
 `load_config()` explicitly requires initialized configuration. `output_root()` returns
@@ -45,7 +50,7 @@ Only `sec_user_agent` is required at runtime; every other field has a default in
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `schema_version` | int | no | `1` | Config-spec contract tag (E1; mirrors `registry.json`'s `schema_version`). Pins config major version; `verify_config.py` fails if it is not `1`. |
-| `sec_user_agent` | string | **yes** (runtime) | none (placeholder in example) | EDGAR `User-Agent`; **PII** = real name + email, e.g. the synthetic `"AcmeCorp user1@example.com"`. Placeholder/empty → 403 from `efts.sec.gov`. `verify_config.py` reports it as a loud **WARN** (named, never echoed) so a freshly-stamped config is still structurally READY for the hot-swap test (E5); it is the one value you must fill before any live EDGAR call. |
+| `sec_user_agent` | string | **yes** (runtime) | none (placeholder in example) | EDGAR `User-Agent`; **PII** = real name + email, e.g. the synthetic `"AcmeCorp user1@example.com"`. Placeholder/empty → 403 from `efts.sec.gov`. `verify_config.py` returns **NOT READY** for a blank or example identity without echoing its value. Fill it privately before live EDGAR use; offline readiness does not establish SEC acceptance. |
 | `output_dir` | string | no | `./reports/smallcap` | Report root, relative to the verified PRIVATE companion by default. `SMALLCAP_RUN` adds a per-run subdir. |
 | `market_cap_max` | int | no | `2000000000` | Deep-dive band ceiling (USD). |
 | `watch_band_max` | int | no | `5000000000` | Watch band ceiling (USD). |
@@ -70,7 +75,7 @@ automatically load arbitrary `.env` files. The `twitterapi.io` credential is **r
 
 Configuration and real runtime DATA belong in a versioned PRIVATE companion, outside the public tool source. Commit and push them there to retain history and recovery copies. Public-source ignore rules are only a backstop; they do not make a public directory private.
 
-The destination proof resolves the actual enclosing Git worktree and checks all effective fetch and push URLs for every configured remote. It queries GitHub using an explicit host, so an ambient `GH_HOST` cannot substitute another server. No configured remotes, PUBLIC visibility and unknown visibility are errors. Existing `config.json` links, reparse points and hardlinks are refused before replacement.
+The destination proof resolves the actual enclosing Git worktree and checks all effective fetch and push URLs for every configured remote. It uses the shared current visibility receipt and resolves Git destinations locally; no network request is part of artifact admission. No configured remotes, PUBLIC visibility and unknown visibility are errors. Existing `config.json` links, reparse points and hardlinks are refused before replacement.
 
 ## First-time setup (E3)
 
@@ -78,7 +83,7 @@ Run from the tool checkout. Create or clone the PRIVATE companion first; initial
 
 ```bash
 pip install -r tools/requirements.txt
-gh repo create small-cap-deepdive-config --private
+gh repo create small-cap-deepdive-config --private --add-readme
 gh repo clone small-cap-deepdive-config "$HOME/.small-cap-deepdive-config"
 export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
 python scripts/init_config.py
@@ -86,26 +91,20 @@ python scripts/init_config.py
 python scripts/verify_config.py --json
 ```
 
-`--out` selects a directory within an existing PRIVATE worktree. With no explicit argument or config selector, initialization uses the same companion discovery as the runtime. Existing configuration is preserved unless `--force` is supplied. Repeated forced initialization writes the same template bytes; a complete temporary write precedes replacement.
+`--out` selects an existing PRIVATE worktree root. Without it, initialization uses the runtime discovery order above, including the DATA override. Existing configuration is preserved unless `--force` is supplied. Repeated forced initialization writes the same template bytes; a complete temporary write precedes replacement.
 
 After editing, commit and push the configuration in the PRIVATE companion. Runtime reports and observations belong in that same versioned private storage. A successful doctor checks local configuration and dependencies; it does not establish live service readiness.
 
 ## Switching between two configs (hot-swap), E5
 
-Each config belongs to a verified PRIVATE companion; its default `output_dir` is companion-relative. Keep as
-many config dirs as you like and switch by repointing the env var, nothing else changes:
+Each profile belongs to a separate PRIVATE worktree root. For example, select
+`~/configs/smallcap-conservative` or `~/configs/smallcap-aggressive` after creating
+and proving each independent PRIVATE worktree. Do not place these as subdirectories
+inside one companion. Unset DATA and unused CONFIG aliases when switching, then set
+`SMALL_CAP_DEEPDIVE_CONFIG` to the intended root. Initialize with `--out`, fill
+`sec_user_agent` privately, and run `verify_config.py --config-dir <root> --json`.
 
-```bash
-export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config/conservative"
-# Switch to a second profile in this same verified PRIVATE worktree:
-export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config/aggressive"
-```
-
-Initialize each profile with `python scripts/init_config.py --out "$SMALL_CAP_DEEPDIVE_CONFIG_DIR"`, set
-`sec_user_agent` in each, run `verify_config.py` against each (`--config-dir`), then flip the env var. Both must report
-**READY**.
-
-The JSON doctor returns `status`, `reports_root` and named `checks`. A ready result
+The JSON doctor returns `ready`, `status`, `resolved_root`, `reports_root` and named `checks`. A ready result
 covers local configuration, PRIVATE destination proof and declared dependency versions.
 It does not claim live SEC, market or model readiness. No run or report directories
 are created by these checks.
@@ -157,3 +156,13 @@ by exact PRIVATE revision and receipt references before retirement review.
 No new report archive or migration copy is needed. No cleanup or restore occurs
 in this contract change. A budget excess remains a failed check until working
 storage meets its reviewed bound.
+
+The machine-readable lifecycle adapter is [config.contract.json](config.contract.json).
+Writers call the pinned Guards artifact admission before creating a destination:
+undeclared, retired and ignored durable paths fail. Configuration and verdict
+staging files have narrow transient owners; they remain protected while a writer
+or interrupted recovery needs them. Supported report writes stay within declared
+`reports/smallcap/**`; custom locations need a reviewed source contract first.
+Report writers are bound to the current-report artifact and cannot replace
+configuration or tracking files. Configuration and tracking writers bind their
+own artifact IDs. Path aliases are refused before canonical path resolution.

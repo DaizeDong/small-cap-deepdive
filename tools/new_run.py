@@ -16,6 +16,7 @@ from urllib.parse import quote
 import uuid
 
 from _common import load_config, output_root, prove_output_path, today, validate_run_name
+from _output_paths import authorize_output
 
 _REPO = Path(__file__).resolve().parent.parent
 _SNAPSHOT_KEYS = ['wacc', 'cap_rate_low', 'cap_rate_high', 'normalize_years',
@@ -107,11 +108,13 @@ def main(argv=None):
         input_hash = supplied_hash or hashlib.sha256(canonical).hexdigest()
         created = today()
         commit, dirty = _git_version(_REPO)
+        authorize_output(root, directory=True, artifact_id='current-reports')
         root.mkdir(parents=True, exist_ok=True)
         root = prove_output_path(root)
         for attempt in range(8):
             name = f'{created}_{label}_{uuid.uuid4().hex}'
             directory = _run_directory(root, name)
+            authorize_output(directory, directory=True, artifact_id='current-reports')
             try:
                 directory.mkdir(exist_ok=False)
                 break
@@ -125,7 +128,7 @@ def main(argv=None):
         for filename, text in (
                 ('_run.json', json.dumps(manifest, indent=2, ensure_ascii=False)+'\n'),
                 ('_run_state.txt', name+'\n')):
-            target = prove_output_path(directory/filename)
+            target = authorize_output(directory/filename, artifact_id='current-reports')
             if target.parent != directory:
                 raise ValueError('allocated run metadata escaped its directory')
             with target.open('x', encoding='utf-8') as stream:
