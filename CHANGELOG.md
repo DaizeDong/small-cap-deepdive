@@ -10,6 +10,7 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ### Current evidence and completion contracts
 
+- Add matching English and Chinese workflow diagrams distinguishing candidate research from re-ranking; align single-ticker and Chinese screening guidance with the actual `rejected` result rather than any individual risk flag.
 - Declare imported ledger and scorecard files separately from two bounded
   migration recovery inputs; recovery snapshots cannot become live ledger data.
 - Financial calculations retain dated source evidence, compatible annual periods and units;

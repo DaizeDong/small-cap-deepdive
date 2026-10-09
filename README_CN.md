@@ -50,7 +50,7 @@
 
 1. **枚举 SEC 全库**：用 EDGAR 全文检索（FTS），可选 UNION 一个 **SIC 反向召回底**（`discover.py --sic-reverse`，内部调用 `filter_by_sic.py`）,对有专属 SIC 码的主题，枚举该 SIC 下全部注册人，避免漏掉低关键词密度的真实成员；该召回底按主题 opt-in。市值用 fallback 链解析（yfinance 为空时用 SEC 股数×价格）；仍无法定价的归 `band="unknown"` 流过，而非静默丢弃。
 
-2. **机械避雷**（`cheap_pass.py`）：直接读 SEC 申报的硬红线，持续经营审计段、死亡螺旋可转债、内控重大缺陷、magnitude 级客户/政府单一项目集中度。触发的公司不进入判断，无论叙事质量如何。
+2. **机械避雷**（`cheap_pass.py`）：直接读 SEC 申报的硬红线，持续经营审计段、死亡螺旋可转债、内控重大缺陷、magnitude 级客户/政府单一项目集中度。按返回的 `rejected` 判定是否淘汰；单一风险标记不必然淘汰，`rejected=true` 的公司不进入判断。
 
 3. **两阶段精度门（强制）**：门 1（`filter_by_sic.sic_classify`，由 `run_theme.py` 内联调用）：SIC **复核层**，不是排除层。命中硬排除 SIC 的公司被标为 `sic_tier="review"`，**仍然进入门 2**；门 1 永不丢弃任何公司。门 2（LLM）：读每家公司 10-K 业务描述，判 `pure_play / partial / misrecall`，丢弃 `misrecall` 是全流程中唯一一次按主题契合度剔除。典型失败案例：用 `refractory`（难治性）作为铁路车厢隔热主题关键词，FTS 拉回整个肿瘤 biotech 板块，零家铁路公司，而门 1 把它们全部放行了，因为 pharma SIC 只会拿到 `review`。召回用 `recall@gold`（对照手工真实成员清单）**度量**,而非假设。
 
@@ -85,6 +85,46 @@ CORE-4 是四个二元困境指标之和，取值为 0 到 4。固定分数门�
 完整范围和数据来源，以及重新执行的评估。没有 BUY 输出不能证明市场有效或没有投资机会。
 
 ---
+
+## 研究流程
+
+```mermaid
+flowchart TD
+    theme["theme<br/>召回 SEC 候选"]
+    direct["ticker / events<br/>已知公司或事件候选"]
+    rerank["rank<br/>读取既有评级报告"]
+    screen{"机械筛查<br/>rejected = true？"}
+    excluded["记录淘汰结果<br/>保留原因与范围"]
+    sic["仅 theme：SIC 复核<br/>标记 keep / review，均保留"]
+    fit{"主题契合度复核"}
+    data["获取尽调数据<br/>保留证据与缺口"]
+    rubric["估值与反方检验<br/>应用评级规则"]
+    reports["公司报告与 verdicts<br/>保留完成凭据"]
+    ranking["排序已观察的候选<br/>报告淘汰结果与缺口"]
+    follow["研究交付<br/>人工尽调与后续跟踪"]
+
+    theme --> screen
+    direct --> screen
+    screen -->|"是"| excluded
+    screen -->|"否：theme"| sic
+    screen -->|"否：ticker / events"| data
+    sic --> fit
+    fit -->|"pure_play / partial"| data
+    fit -->|"misrecall"| excluded
+    data --> rubric --> reports
+    reports -->|"按需排序"| ranking
+    reports -->|"单公司报告"| follow
+    ranking --> follow
+    rerank --> ranking
+    excluded -.->|"筛选过程的证据"| ranking
+```
+
+只有 `theme` 经过 SIC 与主题契合度复核；SIC 复核标签不会淘汰候选。
+机械筛查以 `cheap_pass` 返回的 `rejected` 为准：单一风险标记不必然淘汰公司。
+
+尽调仍须满足相应的准入、市值分层和步骤完成检查；未完成工作会保留在报告中。
+诊断 `signals` 仅供研究参考，不设置 BUY 资格，也不执行交易。
+详细步骤见[入口流程](SKILL.md#four-entry-workflows)。
 
 ## 安装
 
@@ -276,7 +316,7 @@ skill 触发于小盘/微盘价值研究、主题选股、单公司深度尽调�
 | 4 to 5 | 通过全部门，真实主题敞口，无结构性红线 | 值得完整人工尽调 |
 | 3 | 边界，某一维度偏弱 | 读维度详情后再决定 |
 | 1 to 2 | 硬上限规则生效 | 存在已命名的结构性问题；在解决前不应投资 |
-| 已淘汰 | cheap_pass 触发 kill-flag | 停止，不必重新审查 |
+| 已淘汰 | cheap_pass 返回 `rejected=true` | 停止，不必重新审查 |
 
 评级是机械的：`rating = f(MoS / NAV-MoS, kill-flags, 硬上限, buy_eligible)`。7 维评分卡是诊断性 `/35` 汇总（无隐藏权重）,不是评级驱动；硬上限规则凌驾于叙事质量之上。完整评分卡：`reference/judgment-rubric.md`。
 
