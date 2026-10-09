@@ -146,40 +146,21 @@ or the absence of investment opportunities.
 
 ## Research workflow
 
-```mermaid
-flowchart TD
-    theme["theme<br/>Recall SEC candidates"]
-    direct["ticker / events<br/>Known ticker or event candidates"]
-    rerank["rank<br/>Read existing scored reports"]
-    screen{"Mechanical screening<br/>rejected = true?"}
-    excluded["Record exclusions<br/>Keep reasons and scope"]
-    sic["SIC review: theme only<br/>Tag keep / review; retain both"]
-    fit{"Theme-fit review"}
-    data["Pull deep-dive data<br/>Retain evidence and gaps"]
-    rubric["Valuation + disconfirmation<br/>Apply rating rules"]
-    reports["Company reports + verdicts<br/>Retain completion evidence"]
-    ranking["Rank observed candidates<br/>Report exclusions and gaps"]
-    follow["Research deliverable<br/>Human due diligence and tracking"]
+<p align="center">
+  <a href="docs/diagrams/workflow-en.png">
+    <img width="760" src="docs/diagrams/workflow-en.png" alt="Research workflow: screen theme, ticker or event candidates; theme checks precede deep-dive reports; deliver directly or rank as needed.">
+  </a>
+</p>
 
-    theme --> screen
-    direct --> screen
-    screen -->|"Yes"| excluded
-    screen -->|"No: theme"| sic
-    screen -->|"No: ticker / events"| data
-    sic --> fit
-    fit -->|"pure_play / partial"| data
-    fit -->|"misrecall"| excluded
-    data --> rubric --> reports
-    reports -->|"Rank as needed"| ranking
-    reports -->|"Single-company report"| follow
-    ranking --> follow
-    rerank --> ranking
-    excluded -.->|"Funnel evidence"| ranking
-```
+[DOT source](docs/diagrams/workflow-en.dot) · [Rendering script](docs/diagrams/render.py)
 
-Only `theme` uses the SIC and theme-fit stages; a SIC review label never removes a
-candidate. Mechanical screening follows `cheap_pass`'s `rejected` result: a single
+Only `theme` uses the SIC and theme-fit stages; both SIC `keep` and `review` tiers
+retain the candidate. Theme-fit review removes only `misrecall`.
+Mechanical screening follows `cheap_pass`'s `rejected` result: a single
 risk flag does not necessarily eliminate a company.
+
+A single-company report can be delivered directly; optional ranking also accepts
+existing scored reports. Both outputs support human due diligence.
 
 Deep-dive still requires the applicable admission, band and completion checks;
 missing work remains visible. Diagnostic `signals` supply research context only,
