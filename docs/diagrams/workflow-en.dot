@@ -1,0 +1,41 @@
+// Public workflow documentation. Render with: python docs/diagrams/render.py
+digraph workflow {
+  graph [rankdir=LR, bgcolor="white", fontname="Arial", pad=0.18,
+         nodesep=0.35, ranksep=0.30, splines=polyline];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=15,
+        fontcolor="#0f172a", penwidth=1.6, margin="0.15,0.12"];
+  edge [fontname="Arial", fontsize=11, color="#64748b", fontcolor="#475569",
+        penwidth=1.4, arrowsize=0.7];
+
+  candidates [label=<<b>Candidates</b><br/><font point-size="12">theme / ticker / events</font>>,
+              fillcolor="#eef2ff", color="#6366f1"];
+  screen [label=<<b>cheap_pass</b><br/><font point-size="12">rejected?</font>>,
+          fillcolor="#fef9c3", color="#ca8a04"];
+  theme [label=<<b>Theme review</b><br/><font point-size="12">SIC tiers → fit</font>>,
+         fillcolor="#fef9c3", color="#ca8a04"];
+  excluded [label=<<b>Exclusions</b><br/><font point-size="12">Reasons + scope</font>>,
+            fillcolor="#fff1f2", color="#e11d48"];
+  research [label=<<b>Data + valuation</b><br/><font point-size="12">Countercase</font>>,
+            fillcolor="#f1f5f9", color="#475569"];
+  reports [label=<<b>Company report</b><br/><font point-size="12">Deliver directly</font>>,
+           fillcolor="#e0f2fe", color="#0284c7"];
+  existing [label=<<b>Scored reports</b><br/><font point-size="12">Existing rank input</font>>,
+            fillcolor="#eef2ff", color="#6366f1"];
+  ranking [label=<<b>Optional rank</b><br/><font point-size="12">Coverage + gaps</font>>,
+           fillcolor="#e0f2fe", color="#0284c7"];
+
+  candidates -> screen;
+  screen -> theme [label="false:\ntheme", color="#ca8a04"];
+  screen -> research [label="false: ticker / events", color="#475569"];
+  screen -> excluded [label="true", color="#e11d48", fontcolor="#be123c"];
+  theme -> research [label="fit retained", color="#16a34a"];
+  theme -> excluded [label="misrecall", color="#e11d48", fontcolor="#be123c"];
+  research -> reports;
+  reports -> ranking [color="#0284c7"];
+  existing -> ranking [color="#6366f1"];
+  excluded -> ranking [style=dashed, color="#e11d48", constraint=false];
+
+  { rank=same; theme; excluded; }
+  { rank=same; research; existing; }
+  { rank=same; reports; ranking; }
+}

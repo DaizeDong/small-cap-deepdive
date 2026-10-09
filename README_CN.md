@@ -88,39 +88,19 @@ CORE-4 是四个二元困境指标之和，取值为 0 到 4。固定分数门�
 
 ## 研究流程
 
-```mermaid
-flowchart TD
-    theme["theme<br/>召回 SEC 候选"]
-    direct["ticker / events<br/>已知公司或事件候选"]
-    rerank["rank<br/>读取既有评级报告"]
-    screen{"机械筛查<br/>rejected = true？"}
-    excluded["记录淘汰结果<br/>保留原因与范围"]
-    sic["仅 theme：SIC 复核<br/>标记 keep / review，均保留"]
-    fit{"主题契合度复核"}
-    data["获取尽调数据<br/>保留证据与缺口"]
-    rubric["估值与反方检验<br/>应用评级规则"]
-    reports["公司报告与 verdicts<br/>保留完成凭据"]
-    ranking["排序已观察的候选<br/>报告淘汰结果与缺口"]
-    follow["研究交付<br/>人工尽调与后续跟踪"]
+<p align="center">
+  <a href="docs/diagrams/workflow-cn.png">
+    <img width="760" src="docs/diagrams/workflow-cn.png" alt="研究流程：筛查主题、公司或事件候选；主题专用检查后进入尽调；报告直接交付或按需排序。">
+  </a>
+</p>
 
-    theme --> screen
-    direct --> screen
-    screen -->|"是"| excluded
-    screen -->|"否：theme"| sic
-    screen -->|"否：ticker / events"| data
-    sic --> fit
-    fit -->|"pure_play / partial"| data
-    fit -->|"misrecall"| excluded
-    data --> rubric --> reports
-    reports -->|"按需排序"| ranking
-    reports -->|"单公司报告"| follow
-    ranking --> follow
-    rerank --> ranking
-    excluded -.->|"筛选过程的证据"| ranking
-```
+[DOT 源码](docs/diagrams/workflow-cn.dot) · [绘图脚本](docs/diagrams/render.py)
 
-只有 `theme` 经过 SIC 与主题契合度复核；SIC 复核标签不会淘汰候选。
+只有 `theme` 经过 SIC 与主题契合度复核；SIC 的 `keep`、`review` 两层均保留候选。
+主题契合度只淘汰 `misrecall`。
 机械筛查以 `cheap_pass` 返回的 `rejected` 为准：单一风险标记不必然淘汰公司。
+
+单公司报告可直接交付；排序按需进行，也可读取既有评级报告。两种输出都供人工尽调使用。
 
 尽调仍须满足相应的准入、市值分层和步骤完成检查；未完成工作会保留在报告中。
 诊断 `signals` 仅供研究参考，不设置 BUY 资格，也不执行交易。

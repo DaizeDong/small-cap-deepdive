@@ -9,6 +9,7 @@
     "          so it is owed no schema, only the guarantee that it never comes back.",
     "Enforced by tools/data_boundary.py, in .githooks and in CI."
   ],
+  "_readme_diagrams": "docs/diagrams/ Graphviz sources, PNGs and render.py are TOOL documentation, not real-run output.",
   "data": [
     "metrics/verdicts.jsonl",
     "metrics/scorecard.md",
@@ -132,6 +133,11 @@
     "style": "style/.dataclass.json (independent style/tools/make_fixtures.py)"
   },
   "tool": [
+    "docs/diagrams/workflow-en.dot",
+    "docs/diagrams/workflow-cn.dot",
+    "docs/diagrams/workflow-en.png",
+    "docs/diagrams/workflow-cn.png",
+    "docs/diagrams/render.py",
     "tools/output_path_fixtures.py",
     "tests/test_output_proof_selectors.py"
   ]
