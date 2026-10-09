@@ -1,219 +1,136 @@
 # Design Philosophy, Hybrid architecture, discipline as moat
 
-> **设计哲学, Hybrid 架构，纪律即护城河**
+> 设计原则：确定性取数与模型判断分工，一致执行证据规则。
 
-This is the organizing principle of small-cap-deepdive. Every tool, every invariant, every
-hard rule in this repo exists because of the four principles below. They are the lens that
-produced each design decision, and the test every future change must pass.
+The skill combines deterministic filing tools with model-assisted judgment. Its design
+aims to make coverage, calculations and rating conditions inspectable. The four principles
+below define that division of responsibility; they do not establish predictive performance.
 
-> 这是 small-cap-deepdive 的统领原则。本仓库里的每个工具、每个不变量、每条硬规则，都源于下面四条。
-> 它们是催生每个设计决定的透镜，也是未来每次改动都必须通过的检验。
-
-**The one-sentence version:** the tool's edge is mechanical discipline applied consistently
-across the full candidate set, not narrative synthesis on any individual company.
-
-> **一句话：** 工具的 edge 是机械纪律一致地施加于全量候选，而非对某家公司的叙事综合。
-
----
+> 本工具将确定性申报处理与模型判断结合，使覆盖范围、财务计算和评级条件可检查。
+> 以下四项原则规定各层职责；设计本身不证明预测能力。
 
 ## P1, Root-cause design, not symptom patching · 改根因，不打补丁
 
-The design started from a specific failure mode: LLM-native "stock research" agents produce
-confident narratives that are internally consistent but factually wrong on the key data points
-that matter, going-concern disclosures, death-spiral convertibles, ICFR failures, because
-they rely on recall or web-search summaries rather than deterministic SEC filing retrieval.
+Narrative research can miss going-concern disclosures, death-spiral convertibles and ICFR
+failures when it relies on recall or search summaries. The architectural response is to
+retrieve and parse filings in Python, then give the resulting JSON to the judgment layer.
+The data layer computes financials and mechanical eligibility; the judgment layer applies
+the rubric without recalculating financial values.
 
-The patch would be: add instructions to "check SEC filings carefully."
+Historical development notes describe 10 data-layer bugs across two production-bug rounds,
+including FTS precision, going-concern assertion checks, concept-series merging, amendment
+selection and Form 4 direction parsing. Those observations motivated the separation and
+regression checks. They are development context, not proof that current outputs are free
+of data errors; current acceptance follows [evidence status](docs/evidence-status.md).
 
-The root fix: **separate the data layer from the judgment layer with a hard architectural
-boundary.** The Python tools (`tools/*.py`) are purely deterministic, they never produce
-investment judgment. The LLM layer (`SKILL.md`, `reference/*.md`, `workflows/*.js`) never
-computes financials, it reads a JSON that the deterministic layer produced and applies a
-rubric.
-
-This boundary was not designed upfront and then validated. It was **forced by 10 production
-bugs**, all in the data layer (FTS precision failure, going-concern double-confirmation
-requirement, concept series merging, amendment exclusion, Form 4 direction parsing).
-The boundary prevented every one of those bugs from contaminating the judgment output.
-
-> - **补丁：** 加指令"仔细检查 SEC 申报"。
-> - **根因修复：** 用硬性架构边界把数据层和判断层分开。Python 工具（`tools/*.py`）纯确定性,永不做投资
->   判断。LLM 层（`SKILL.md`、`reference/*.md`、`workflows/*.js`）永不计算财务,只读确定性层生成的
->   JSON 并施加评分卡。
-> - **为何重要：** 这条边界由 10 个生产 bug 强制产生，不是事后合理化。边界挡住了每一个 bug 对判断输出
->   的污染。
-
----
+> 依赖模型记忆或搜索摘要，可能漏读持续经营披露、死亡螺旋可转债和内控缺陷。因此由 Python
+> 获取、解析申报并计算财务及机械资格，判断层读取 JSON 后应用评分规范，不重新计算财务。
+> 历史开发记录中的两轮、共 10 个取数层问题促成了这一分工和回归检查；这些记录不代表当前
+> 输出已无数据错误，验收仍须依据当前证据。
 
 ## P2, Hybrid, not thin: the data layer earns its keep · Hybrid 而非 thin：数据层有其存在价值
 
-Two architectural patterns exist for agent skills:
+A thin skill delegates acquisition and analysis to an existing engine. A hybrid skill
+includes domain-specific deterministic acquisition and delegates judgment to a model.
+Source routing can be sufficient for general commercial research, as in market-intel.
+SEC research also needs explicit handling of filing semantics:
 
-- **Thin:** delegate everything to an existing engine. The skill is a prompt that calls
-  `deep-research` or `WebSearch`.
-- **Hybrid:** bundle a deterministic data layer; delegate only the judgment to LLM.
+- Historical development observations reported FTS over-recall of 15 to 25×. Current runs
+  must measure their own retrieval scope and theme fit rather than assume that ratio.
+- Going-concern language can describe a hypothetical risk. A current connected assertion
+  needs the checks in [mechanical-checks.md](reference/mechanical-checks.md), including the
+  relationship between going-concern and substantial-doubt language.
+- Form 4 `transactionCode` and transaction direction need source-specific parsing and
+  verification. Current source availability is defined in [data-sources.md](reference/data-sources.md).
 
-For general commercial research, thin delegation (market-intel's pattern) is correct: the
-skill's only unique function is source routing and quality guardrails.
+The bundled data layer retains these domain rules so each judgment uses the same acquisition
+and calculation procedure. It does not replace the judgment rubric or prove source completeness.
 
-For small-cap SEC research, **thin fails**: the 10 production bugs above are all domain-specific
-filing edge cases that no general-purpose web-search or LLM-with-tools architecture handles
-reliably. A thin skill would re-encounter every one of these bugs on every run:
-
-- EDGAR FTS over-recalls by 15 to 25×; without `filter_by_sic` + LLM gate, the analyst
-  pipeline is flooded with off-topic companies.
-- "Going concern" in a filing often appears in the risk-factor section describing hypothetical
-  scenarios. The double-confirmation requirement (going-concern paragraph AND substantial-doubt
-  language) is not in any general LLM's training for SEC analysis.
-- `edgartools` Form 4 direction parsing was unreliable in production (the `transactionCode`
-  field semantics are non-obvious). No thin wrapper would have caught this.
-
-The bundled data layer is therefore not overhead, it is **institutional knowledge crystallized
-from real production failures.**
-
-The boundary between layers is the implementation of this principle: data layer has no
-judgment; judgment layer has no data computation.
-
-> - **为何 Hybrid 而非 thin：** thin 会在每次运行时重踩上述所有坑。数据层不是额外开销,它是真实生产
->   失败结晶的机构知识。判断层 thin 才是对的（LLM 的价值在于读 JSON 应用纪律，而非算财务或拼 FTS 字符串）。
-
----
+> 通用商业研究可以主要依靠来源路由；SEC 研究还需要处理申报特有的语义。历史开发观察曾记录
+> 15 到 25 倍的 FTS 过召回，当前运行仍须单独报告自己的范围。持续经营假设性表述、关联断言、
+> Form 4 交易方向等问题需要专门解析。保留确定性取数层，是为了统一这些处理规则和财务计算，
+> 不能据此认定来源完整或省略判断规范。
 
 ## P3, Discipline as moat, not narrative · 纪律即护城河，非叙事
 
-The intended benefit is **systematic, consistent, mechanical coverage** of a theme's SEC-filing
-companies. Whether that discipline identifies a pricing inefficiency needs separate evidence;
-the design itself does not establish an investment advantage.
+Apply the same screening, rubric and disconfirmation procedure to every admitted candidate.
+This reduces inconsistency from selective reading and investor-relations presentation quality.
+Whether it identifies a pricing inefficiency requires separate outcome evidence. The factor
+strategy exclusion reflects the concern that transaction costs can remove apparent gross
+alpha; this design does not establish net factor performance.
 
-Selective reading can miss going-concern disclosures in the auditor's section, leave insider
-activity unchecked or let a polished IR presentation determine which company gets attention.
-Applying the same documented procedure to every admitted candidate reduces that inconsistency.
+1. **Coverage:** claim complete coverage only with a dated population, retrieval scope and
+   completion receipts. Retain caps, missing pages, failed stages and model abstentions.
+2. **Consistent decisions:** apply the same kill-flags and rating conditions to each candidate.
+   T3 company-sourced evidence cannot support a BUY thesis.
+3. **Empty results:** report zero qualifying candidates when the observed set has none, together
+   with missing work. This cannot establish that the theme has no investment opportunities.
 
-The tool's competitive advantage, to the extent one exists, is:
+The rules address factual hallucination, backtest overfitting, unsupported confidence and
+halo bias. Their definitions live in [judgment-rubric.md](reference/judgment-rubric.md) and
+[disclosure-discipline.md](reference/disclosure-discipline.md).
 
-1. **Coverage as an explicit goal:** enumerate the eligible SEC-filing theme population.
-   A run may claim complete coverage only when its dated population, retrieval scope and
-   completion receipts support that claim. Caps, missing pages, failed stages and model
-   abstentions remain visible; otherwise conclusions apply only to the retrieved candidates.
-2. **Consistent application:** the same kill-flags, the same rubric, the same disconfirmation
-   search, for every candidate without attention bias.
-3. **Honest zeroing:** report zero shortlist candidates when none of the observed candidates
-   meets the active rules. Include coverage and unfinished work with that result; it does not
-   establish that the theme has no suitable companies or investment opportunities.
-
-This is why the rating hard-rules are non-negotiable: **a T3-evidence buy thesis is not a
-thesis, it is a rationalization.** The hard rules exist to prevent the LLM judgment layer
-from constructing narratives that outrun the evidence.
-
-The fintwit/Reddit critique of LLM investing agents converges on four failure modes:
-hallucinated facts, backtest overfitting, confident-but-wrong, and halo bias. Every hard rule
-in `reference/judgment-rubric.md` and every kill-flag in `cheap_pass.py` maps to one of these
-failure modes. The discipline is not cosmetic; it is the product.
-
-> - **纪律的作用：** 对每个已纳入的候选采用相同流程，减少选择性阅读和叙事偏好造成的不一致。
->   这是否构成投资优势，需要单独举证；硬规则的作用是防止判断超出证据。
-> - **完整覆盖是目标：** 只有带日期的候选总体、检索范围和完成凭据都支持时，才能声称覆盖完整。
->   数量上限、漏页、失败步骤和模型弃答必须保留；否则结论只适用于已取回的候选。
-> - **零候选需要说明范围：** 当前观察到的候选均未达到规则要求时，可以返回零，但必须同时说明覆盖
->   缺口和未完成工作。它不能证明该主题没有合适公司或投资机会。
-
----
+> 对每个已纳入候选采用相同的筛查、评分和反方检索流程，以减少选择性阅读和叙事偏好。
+> 完整覆盖须有带日期的总体、检索范围和完成凭据；上限、漏页、失败步骤和模型弃答必须保留。
+> T3 公司自述不能支撑 BUY。可以返回零候选，但必须说明范围和未完成工作；投资优势需要
+> 独立的结果证据。规则重点处理事实错误、回测过拟合、缺乏依据的确信和光环偏差。
 
 ## P4, Single source of truth, reference before orchestration · 单一真相源，reference 先于编排
 
-The methodology invariants live in `reference/*.md`. These files are
-the **single source of truth** for how kill-flags are defined, how dimensions are scored, how
-evidence is tiered, and what cognitive priors anchor the judgment.
+`reference/*.md` owns methodology: kill-flags, score dimensions, evidence tiers and cognitive
+priors. `SKILL.md` routes the work; runbooks supply commands; `workflows/*.js` loads the
+references as its preamble. Change a methodology rule in its owning reference and update
+dependent navigation or invocation as needed. Repeating the full rule in each entry creates
+independent copies that can diverge.
 
-`SKILL.md` orchestrates by *pointing at* these files; it does not inline their content.
-`workflows/*.js` loads them as a PREAMBLE; it does not duplicate them.
+[CONFIG.md](CONFIG.md) and source contracts own configuration and retention. A PRIVATE
+boundary does not make every cache a core record, and local readiness does not prove a live
+integration. Retention follows the declared producer, consumer and recovery dependencies.
 
-This design prevents the most common failure mode in agentic systems: **reference drift**,
-where the orchestration layer and the reference layer diverge silently over time until they
-contradict each other.
-
-The rule: **any change to a methodology invariant is made once, in `reference/`**. The
-orchestration and workflow layers are downstream consumers; they change only when the
-reference changes, not in parallel.
-
-> - **单一真相源：** 方法论不变量在 `reference/*.md`。`SKILL.md` 通过引用（不内联）使用它们；
->   `workflows/*.js` 作为 PREAMBLE 加载（不复制）。
-> - **为何重要：** 防止 reference 漂移,编排层和参考层静默分叉、最终自相矛盾，是 agent 系统最常见的
->   失效模式。
-
----
+> 方法规范由 `reference/*.md` 维护，SKILL 负责路由，运行手册提供命令，workflow 加载参考规范。
+> 修改规则时更新其权威位置及相关入口，避免多份规则分别演变。配置和保留规则由 CONFIG 及
+> 源码合同定义；文件处于私有仓不代表它必须永久保留，本地就绪也不等于服务实测成功。
 
 ## Operationalizing the diffusion thesis · 让"信息扩散"论点落地
 
-The edge claim above, "delayed information diffusion," a real fundamental change the market has not
-yet priced, was for a long time **stated everywhere and measured nowhere**: the docs claimed an
-inflection thesis while the code ran a static cheapness + kill-flag screen. A no-growth perpetuity on
-trailing XBRL has zero forward signal; with no trajectory term, the engine up-weights exactly the
-melting-ice-cube names whose high FCF yield is high *because* the market already expects decline. That
-doc/code gap was itself a violation of the generative test below (the thesis made the narrative more
-convincing without moving output closer to truth). The thesis is now being **operationalized**, split
-into two halves on the philosophy line:
+Static trailing-FCF valuation alone cannot distinguish improving fundamentals from a
+declining business with a high historical yield. The design addresses this in two parts:
 
-- **Conservative half, SHIPPED (iteration 1).** A deterministic, downgrade-only
-  trajectory/contamination veto (`fundamental_decline_flag` = revenue slope down AND
-  contamination_ratio < 1.0 AND latest-below-own-average; see `reference/valuation.md` P6). It is pure
-  T1 arithmetic on the trailing series, it can only *remove* a false-positive BUY (never manufacture
-  one), and it is the philosophy-faithful way to defend against the value trap. It fully respects
-  P3 (discipline-as-moat) and the generative test.
-- **Expansive half, APPROVED (iteration 1, §5-Q2) and now BUILT (iteration 4).** A firewalled
-  diagnostic side-channel that **operationalizes the thesis diagnostically** behind a strict
-  architectural firewall. It now directly *measures* "unpriced change": P16 (fundamental-vs-price
-  divergence, `tools/signals.py`) reads the deterministic T1 trajectory from `derived` and compares
-  it to the trailing 6m/12m price move, labeling `unpriced_improvement` (fundamentals up + price
-  flat, the diffusion thesis, previously undetectable) vs `melting_ice_cube_priced` (fundamentals
-  down + price elevated). P17 adds free ownership/short-interest positioning
-  (13D/13G + best-effort FINRA, staleness-labeled). P15 alt-data (TrendsMCP / GDELT / news-volume;
-  see `reference/data-sources.md`) is agent-gathered T2 corroboration at analysis time. **The
-  firewall is the whole point and is non-negotiable:** every signal lives in a SEPARATE top-level
-  `signals` namespace (sibling of `derived`, never inside it); `valuation.py`, the `buy_eligible`
-  composite, and the BUY trigger MUST NOT read any `signals.*` field; a BUY stays anchored to T1
-  filing-derived valuation + zero kill-flags + `buy_eligible`. Signals are read as labeled T2
-  context and snapshotted by `track_forward` for FUTURE per-signal Brier, they can NEVER originate
-  or up-weight a BUY. This is exactly the input T1-purism exists to suppress, so it is *quarantined*
-  rather than mechanized: making it diagnostic-only is how we operationalize the thesis WITHOUT
-  rebuilding the confident-but-wrong narrative engine this skill exists to prevent.
+- **Conservative eligibility checks:** the implemented T1 trajectory veto uses
+  `fundamental_decline_flag` (negative revenue slope, `0 < contamination_ratio < 1.0` and
+  latest below its own average). The related peak-contamination veto covers a rebound
+  followed by deterioration. These checks can downgrade BUY to WATCH; they cannot create
+  a BUY. Exact conditions are in [valuation.md](reference/valuation.md).
+- **Diagnostic observations:** implemented P16 compares the T1 trajectory with trailing
+  6m/12m prices; P17 records 13D/13G and best-effort, staleness-labeled short interest.
+  P15 consists of agent-gathered T2 context from available sources such as TrendsMCP,
+  GDELT and news volume. [data-sources.md](reference/data-sources.md) owns the fields,
+  availability limits and namespace contract.
 
-This note closes the prior doc/code gap completely: the conservative half (iteration 1) makes the
-T1 trajectory veto real; the expansive half is now BUILT (iteration 4) but quarantined, the thesis
-is operationalized *diagnostically*, never as a load-bearing input on BUY. The generative test below
-is satisfied because the side-channel moves output closer to truth (a real divergence becomes
-labeled, calibratable evidence) without making the narrative load-bearing: get the firewall wrong
-and it would only "make the narrative more convincing", which is precisely why the firewall, not
-the signal, is the deliverable.
+All diagnostic fields stay in top-level `signals`, alongside `derived`. Valuation,
+`buy_eligible` and the BUY trigger must not read them. Tracking preserves their snapshots
+for future per-signal Brier calibration. Neither the implementation nor a snapshot proves
+that a signal predicts returns; using one in eligibility would require a separately reviewed
+methodology change.
 
-> - **保守半边（迭代 1 已交付）：** 确定性、只降级的轨迹/污染否决（`fundamental_decline_flag`，纯 T1
->   算术，只能移除假阳性 BUY，绝不制造 BUY）,这是抵御价值陷阱的、忠于哲学的方式。
-> - **扩张半边（已批准，迭代 2 未建）：** 受防火墙隔离的诊断旁路，用免费粗粒度 alt-data（TrendsMCP /
->   GDELT / 新闻量）**仅做佐证**，标记 T2，**绝不发起或加权 BUY**，须先用 track-forward 跑出自己的
->   Brier 才放行。
-> - **意义：** 此节弥合了此前"文档声称、代码未做"的缺口,文档不再宣称代码不具备的拐点能力。
-
----
+> 历史 FCF 估值不能独自区分基本面改善与高历史收益率的衰退企业。已实现的 T1 轨迹和峰值污染
+> 检查只能将 BUY 降为 WATCH，不能产生 BUY。P16 比较基本面与过去 6/12 个月价格，P17 记录
+> 13D/13G 及尽力获取、注明时效的空头信息；P15 由 agent 从可用来源获取 T2 佐证。
+> 这些诊断均已与资格计算隔离，写在 `derived` 旁的 `signals` 中。快照供未来逐信号 Brier
+> 校准使用，不能据此认定预测有效；改变其资格作用需要单独审查方法规范。
 
 ## The generative test · 生成式检验
 
-Every future change to this skill, a new tool, a new invariant, a new kill-flag, must pass
-one test:
+Evaluate each proposed tool, rule or calculation against this question:
 
 > **"Does this move output closer to truth, or does it make the narrative more convincing
 > without moving closer to truth?"**
 
-Adding a tool that retrieves a genuinely distinct data signal: moves closer to truth.
-Adding a more sophisticated scoring formula without additional evidence: makes the narrative
-more convincing without moving closer to truth.
+A distinct, verifiable observation can improve the evidence. A more elaborate scoring
+formula without additional evidence may only increase apparent precision. If a proposed
+change conflicts with these principles, revise it or explicitly justify a change here.
 
-When the two conflict, the test result wins, or the principle is explicitly, deliberately
-revised here. Never quietly violated.
-
-> 未来每次改动,新工具、新不变量、新 kill-flag,都必须通过一个检验：
->
 > **"这让输出更接近真相，还是只让叙事更有说服力而没有更接近真相？"**
 >
-> 当两者冲突，检验结果胜出,或者在这里显式、审慎地修订原则。绝不悄悄违反。
-
-Configuration selection and retention follow the actual consuming capability. A PRIVATE boundary does not make every cache core, and a local readiness check does not prove a live integration. Exact storage ownership and lifecycle remain declared in CONFIG and the source contracts.
+> 新规则应提供可验证的证据或改善处理方法。若与上述原则冲突，应修改方案，或在此明确说明
+> 修订原则的理由。

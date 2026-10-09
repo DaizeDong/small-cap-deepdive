@@ -22,10 +22,10 @@ The default REPORTS directory combines that companion's output directory with th
   ...
 ```
 
-Install `tools/requirements.txt` and configure the companion as described in `CONFIG.md`.
-Working Git and authenticated `gh` commands are required to prove the canonical output
-destination belongs to a PRIVATE GitHub worktree. Visibility verification can use the
-network. PUBLIC, unknown, unusable, or unversioned destinations are refused before writing.
+Install `tools/requirements.txt` and follow [CONFIG.md](../CONFIG.md#secrets--pii-mode-b-e6)
+for PRIVATE storage and current visibility receipts. Refresh the receipt during setup
+when needed; ranking uses Git and the local receipt without invoking `gh` or the network.
+Filesystem aliases, PUBLIC or unproved routes, and unversioned destinations are refused.
 
 ---
 
@@ -78,10 +78,11 @@ falls back gracefully to all `report_*.md`.
 python tools/rank.py --input "${REPORTS_ROOT}" --output RANKING-rerun-02.md
 ```
 
-Initialize `REPORTS_ROOT` to the absolute PRIVATE run path as shown in `theme-run.md` before
-running this command. It reads `report_*.md` from that directory and writes the specified
-fresh ranking basename there. The actual destination repository must be PRIVATE, including
-when the supplied path contains a directory link.
+Set `REPORTS_ROOT` to the absolute path of an existing report directory in the PRIVATE
+companion, or select an existing active run. Do not run `new_run.py` for re-ranking:
+a new batch contains no prior reports. This command reads `report_*.md` from the selected
+directory and writes the fresh ranking basename there under the same CONFIG rules.
+Directory links and other filesystem aliases are refused.
 
 To finalize a run and rebuild its ranking, use `tools/finalize_run.py` with the same `--input`.
 Finalization chooses a fresh `RANKING.md` or `RANKING.finalized-<index>.md` artifact/receipt pair.
@@ -94,12 +95,12 @@ skips the ranking child.
 
 ## Interpreting the Funnel Summary
 
-The funnel summary at the bottom of every `rank.py` output is as important as the ranking
-table itself. The numbers are machine-verifiable truth computed from actual files present:
+Read the funnel summary with the ranking. Its counts describe the artifacts present in
+the selected directory; completeness still depends on the associated source and stage receipts:
 
 - **High sink rate (>50%):** Many deep-dive subjects rated AVOID or have kill-flags. Zero or
-  few shortlist survivors is a completely valid output, a theme's small-cap universe may
-  simply be structurally distressed.
+  few shortlist survivors can be a valid result for that observed set. Report scope and
+  missing work before drawing conclusions about the wider theme.
 - **Low candidate count:** Check FTS and configured SIC recall coverage, cheap-pass rejection
   reasons and explicit Gate 2 decisions. Gate 1 adds SIC review hints; it does not remove candidates.
 

@@ -7,7 +7,7 @@
 
 ## The Core Problem: Single-Keyword FTS Over-Recalls Severely
 
-SEC full-text search (`efts.sec.gov`) returns every 10-K filing that mentions your keyword anywhere in the document. This sounds useful. In practice, precision is catastrophically low for short natural-language terms.
+SEC full-text search (`efts.sec.gov`) matches terms throughout a filing. Short terms can return many unrelated companies, subject to pagination and retrieval limits.
 
 Short terms are ambiguous across sectors. For example, a materials term may also describe
 a treatment response, and a transport term may appear in a customer's logistics discussion.
@@ -16,8 +16,6 @@ These are semantic ambiguities, not evidence of theme membership or population e
 Gate 1 tags SIC review context without dropping candidates. Gate 2 independently evaluates
 the core business through its bound host result. A completed keyword search does not replace
 that evaluation, and a cap or failed page limits the recall that can be claimed.
-
-**Lesson: keyword match is not theme membership.** A company that mentions your keyword once in a risk factor or logistics discussion is not a theme member.
 
 ---
 
@@ -61,7 +59,29 @@ its self-test are stated once, in `SKILL.md` §Entry 1 step 1c.
 
 **SIC missing -> keep for LLM:** Retain companies without a SIC code and pass them to Gate 2. A missing or unusual classification does not establish that the operating business falls outside the theme.
 
-**Important:** These blocks are defaults and should be reviewed for each theme. A software theme has no business sending 737x to the `review` tier. The config key is **`sic_hard_exclude`** (`string[]` of SIC prefixes); there is no key named `sic_exclusion_blocks`. It is global, with no per-theme override: to run a theme against a different list, point `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` at a second config dir whose `config.json` sets its own `sic_hard_exclude`. See `CONFIG.md`.
+Review these defaults for each theme, including whether 737x needs additional review for a software theme. The config key is **`sic_hard_exclude`** (`string[]` of SIC prefixes); there is no key named `sic_exclusion_blocks`. It is global, with no per-theme override: to run a theme against a different list, select a separate PRIVATE worktree root whose `config.json` sets its own `sic_hard_exclude`. Follow [CONFIG.md](../CONFIG.md#switching-between-two-configs-hot-swap-e5) so higher-priority DATA or CONFIG selectors do not override it.
+
+### SIC reverse-recall floor
+
+For themes with dedicated codes in `filter_by_sic.THEME_SIC`, `discover.py --sic-reverse`
+enumerates registrants through EDGAR browse-by-SIC and unions them with FTS results.
+Rows retain `recall_channel` as `fts`, `sic_reverse` or `both`. This is opt-in; `run_theme.py`
+does not request it. Mapping uses `--out-slug` when supplied, otherwise the first theme
+phrase. The slug must contain a configured `THEME_SIC` key: `railcar-leasing` matches,
+while `railcar` has no mapping and leaves recall FTS-only even with the flag.
+The manual route uses the [theme runbook stage call](../runbooks/theme-run.md#step-3-gate-1-sic-coarse-review)
+to bind the selected universe and cheap-pass CSVs into a candidate artifact before Gate 2.
+Every member of the union still requires Gate 2 review. FTS is capped at 1000 hits;
+`track_forward` reports cap warnings. The SIC arm improves recall for configured codes
+but does not establish an uncapped population census.
+
+### Sidecar isolation
+
+Keep SIC-floor sidecars under the active `SMALLCAP_RUN` and slug, outside the
+`candidates_*.json` glob. Active runs use a run-scoped `_run_state.txt`; unbatched
+execution uses `_run_state_<pid>.txt`. Processes sharing one active run share its state
+file, so use distinct runs for independent concurrent themes. Ownership is implemented
+by `tools/filter_by_sic.py`, `tools/_common.py` and `tools/new_run.py`.
 
 ### Gate 2, LLM Theme-Fit (`workflows/theme-fit-gate.js` through the Workflow host)
 

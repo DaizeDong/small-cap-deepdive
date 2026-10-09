@@ -9,7 +9,7 @@ Secrets stay outside the tool source; runtime DATA is versioned only in PRIVATE 
 
 `load_config()` builds the effective config as:
 
-> **`reference/config.example.json` defaults**  ◁overlaid by◁  **your `config.json`**  ◁then◁  **`SMALLCAP_*` env scalar overrides`**
+> `reference/config.example.json` defaults → selected private `config.json` → `SMALLCAP_*` scalar environment overrides
 
 The pinned `guards/tools/datadir.py` resolver selects one root for configuration,
 reports, initialization and tracking. The order is `SMALL_CAP_DEEPDIVE_DATA_DIR`,
@@ -31,7 +31,9 @@ Importing shared code and writers does not load configuration or create director
 the absolute canonical PRIVATE reports root without creating output. Relative
 `output_dir` values are relative to the companion; absolute paths and
 `SMALLCAP_OUTPUT_DIR` undergo the same actual-destination proof, including links.
-Runtime data is retained and versioned in PRIVATE companions.
+`make_report.py --out` can select a different verified PRIVATE companion, subject to the
+same destination proof and declared report-artifact ownership. Runtime DATA remains
+versioned in PRIVATE companions.
 
 Per-scalar env overrides apply on top of whichever `config.json` won: `SMALLCAP_<KEY>` (UPPER_SNAKE of
 the field), e.g. `SMALLCAP_MARKET_CAP_MAX=1000000000`. Run batching uses `SMALLCAP_RUN` (see SKILL.md).
@@ -76,6 +78,13 @@ automatically load arbitrary `.env` files. The `twitterapi.io` credential is **r
 Configuration and real runtime DATA belong in a versioned PRIVATE companion, outside the public tool source. Commit and push them there to retain history and recovery copies. Public-source ignore rules are only a backstop; they do not make a public directory private.
 
 The destination proof resolves the actual enclosing Git worktree and checks all effective fetch and push URLs for every configured remote. It uses the shared current visibility receipt and resolves Git destinations locally; no network request is part of artifact admission. No configured remotes, PUBLIC visibility and unknown visibility are errors. Existing `config.json` links, reparse points and hardlinks are refused before replacement.
+
+SSH companion origins may use aliases declared by ordinary `Host` and `HostName github.com`
+rules in `~/.ssh/config`. Verification reads the file locally, uses the first matching
+`HostName`, and never runs SSH or configured commands. Literal `github.com` hosts are also
+checked for local rewrites. Configurations using `Include`, `Match` or hostname
+canonicalization are refused; use a literal HTTPS GitHub origin in those cases. HTTPS
+origins must name `github.com` directly. Existing hardlinked output files are refused.
 
 ## First-time setup (E3)
 
@@ -153,8 +162,8 @@ The broad report core patterns protect files until that closure is proved;
 their presence is not a policy to archive every historical process file.
 Migration bundles require unique code and restoration conclusions to be retained
 by exact PRIVATE revision and receipt references before retirement review.
-No new report archive or migration copy is needed. No cleanup or restore occurs
-in this contract change. A budget excess remains a failed check until working
+Retirement review does not require a new report archive or migration copy and does not
+authorize cleanup or restoration. A budget excess remains a failed check until working
 storage meets its reviewed bound.
 
 The machine-readable lifecycle adapter is [config.contract.json](config.contract.json).

@@ -7,29 +7,11 @@
 
 ## Prerequisites
 
-Complete this once before any run:
-
-```bash
-pip install -r tools/requirements.txt
-gh repo create small-cap-deepdive-config --private
-gh repo clone small-cap-deepdive-config "$HOME/.small-cap-deepdive-config"
-export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
-python scripts/init_config.py
-```
-
-Open `~/.small-cap-deepdive-config/config.json` (the private config dir, never the repo) and set
-`"sec_user_agent"` to your real name and email:
-
-```json
-"sec_user_agent": "AcmeCorp user1@example.com"
-```
-
-EDGAR requires a valid `User-Agent` header on every request. Omission causes 403 errors.
-This is the only required field, all other keys have defaults.
-
----
-
-Keep config, observations and reports committed and pushed in this PRIVATE companion. The identity shown here is synthetic; replace it privately before live SEC use. Run `python scripts/verify_config.py --json` before starting.
+Complete [CONFIG.md setup](../CONFIG.md#first-time-setup-e3). The PRIVATE companion must have
+a committed HEAD and current visibility proof. Fill `sec_user_agent` privately, then run
+`python scripts/verify_config.py --json`. A blank or example identity is NOT READY; a local
+ready result does not establish live SEC, market or model availability. Keep configuration,
+observations and reports committed and pushed in that PRIVATE companion.
 
 ## Open a run batch (do this at the start of every run)
 
@@ -47,8 +29,7 @@ All outputs land in the absolute PRIVATE `$REPORTS_ROOT` directory with a `_run.
 ## Recommended: One-Command Theme Run
 
 The mechanical pipeline runs FTS discovery → cheap-pass → SIC review. `run_theme.py`
-does not request `--sic-reverse`. For a configured SIC union, run Steps 1 to 3 separately
-and add `--sic-reverse` to the `discover.py` command in Step 1.
+does not request `--sic-reverse`.
 
 ```bash
 python tools/run_theme.py --theme "railcar,railcar leasing" --slug railcar
@@ -56,6 +37,20 @@ python tools/run_theme.py --theme "railcar,railcar leasing" --slug railcar
 
 This runs Steps 1 to 3 below automatically and prints the "Next steps" handoff.
 Use `--micro` flag to apply the micro-cap ($500M) ceiling instead of the default small-cap ($2B).
+
+For a configured SIC union, run Steps 1 and 2 separately, then use the Step 3 library
+call. Step 1 must use the mapped slug `railcar-leasing`; `railcar` has no dedicated
+SIC mapping and remains FTS-only even with `--sic-reverse`:
+
+```bash
+python tools/discover.py --theme "railcar leasing" --out-slug railcar-leasing --sic-reverse
+```
+
+For this manual route, replace the default `railcar` slug in the examples below with
+`railcar-leasing`: Step 2's `--out-slug`, both CSV basenames in Steps 2 and 3, the third
+`stage_sic_filter` argument, Step 4's candidate basename, and Step 7's `--slug`. This
+produces `candidates_railcar-leasing.json` and its stage receipt. Keep the theme text
+as `railcar leasing` and retain the same active run throughout.
 
 ---
 
@@ -133,11 +128,30 @@ verify filing identity and source completion before treating a screen as complet
 
 ## Step 3, Gate 1: SIC Coarse Review
 
-After cheap-pass, Gate 1 is applied automatically by `run_theme.py` (via `filter_by_sic.sic_classify`).
-`filter_by_sic.py` is a library module, not a standalone pipeline step; its only CLI is
-`--selftest`.
+The one-command route applies Gate 1 through `run_theme.stage_sic_filter`, which calls
+`filter_by_sic.sic_classify`. For the manual SIC reverse-recall route, keep the same
+configuration and active `SMALLCAP_RUN` as Steps 1 and 2. From the tool checkout, call
+the existing stage function with those two CSVs; replace `<date>` with their actual date:
 
-To verify the SIC logic:
+```bash
+python - "${REPORTS_ROOT}/cheappass_railcar_<date>.csv" "${REPORTS_ROOT}/universe_railcar_<date>.csv" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, "tools")
+from run_theme import stage_sic_filter
+
+stage_sic_filter(Path(sys.argv[1]), Path(sys.argv[2]), "railcar", "railcar leasing")
+PY
+```
+
+This writes `candidates_railcar.json` and `candidates_railcar.json.stage.json` in the
+active report directory. It checks input identities and receipt bindings and carries
+upstream gaps into the candidate receipt. Preserve both CSVs and their receipts, then
+prepare the bound Gate 2 request in Step 4. Do not rerun the full driver over the same
+stage outputs; its fresh-output checks reject existing artifacts.
+
+`filter_by_sic.py` has only a `--selftest` CLI. The following command checks the SIC
+logic; it does not produce candidates or a pipeline receipt:
 
 ```bash
 python tools/filter_by_sic.py --selftest

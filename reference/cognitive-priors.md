@@ -1,8 +1,8 @@
 # Cognitive Priors, Invariant D
 
-> World-view commitments that govern how the skill is used and what it can honestly claim to do.
-> These are not aspirational statements, they are hard constraints derived from empirical evidence and two real production runs.
-> Anyone using this skill to generate investment ideas must internalize these before interpreting any output.
+> Research assumptions and operating constraints for interpreting the output. Empirical
+> reference notes and two historical production runs informed these choices; applying a
+> cited result still requires source verification and a matching population.
 
 ---
 
@@ -12,7 +12,7 @@
 
 A company that receives no analyst coverage and no retail investor attention is neglected. It is not, for that reason, undervalued.
 
-The efficient market for small-caps and micro-caps prices available information efficiently even at low coverage. What creates pricing inefficiency is delayed information diffusion, a meaningful improvement in fundamentals that the market has not yet priced. Finding neglected companies is the starting point; proving the market has not yet priced a fundamental change is the hard work.
+The working hypothesis is delayed information diffusion: a meaningful fundamental improvement may not yet be reflected in price. Neglect identifies companies to examine; a specific information gap still needs evidence.
 
 **Practical implication:** A company that screens well on neglect (low coverage, no media mentions, small market cap) has cleared a necessary but not sufficient condition. The report must identify a specific information gap, a financial improvement, a catalyst, a dislocation, not just assert that the company is "under the radar."
 
@@ -41,16 +41,16 @@ unrelated industries.
 
 After the two-stage precision gate, the companies that remain as true theme members are frequently small industrial, specialty chemical, or niche services companies that have always operated in this space. They did not get re-rated because the market already knew them. Their valuations reflect their historical cycle, not the theme premium.
 
-This is a feature, not a bug. A railcar manufacturing company trading at historical-cycle valuations with legitimate exposure to new tank car regulations is a better risk/reward than a startup that mentioned "sustainable rail logistics" in its press release.
+Established cyclical businesses remain valid research subjects. Verify both their operating exposure and valuation; a theme reference in a press release is insufficient for that comparison.
 
-**Implication for scoring:** A company that is a true pure-play (Gate 2 = `pure_play`) but is trading at fair cyclical value should still be analyzed rigorously. Fair value on fundamentals + real theme exposure = the sweet spot. Do not penalize it for lacking a "story premium."
+**Implication for scoring:** A company that is a true pure-play (Gate 2 = `pure_play`) but is trading at fair cyclical value should still be analyzed rigorously. Fair cyclical value and real theme exposure warrant analysis without adding a narrative premium or penalty.
 
 ### 4. Agent Edge Is Mechanical Discipline, Not Narrative Synthesis
 
-The skill's comparative advantage over unaided human analysis is:
-- Systematic coverage of more companies than a human can read in the time budget
-- Consistent application of the kill-flag rules, disclosure disciplines, and scoring rubric across all companies
-- Elimination of human attention bias (humans focus on companies they have heard of)
+The design objectives are:
+- Systematic coverage of the admitted candidate set within the stated budget
+- Consistent application of kill-flags, disclosure disciplines and scoring
+- Reduced selection bias from familiarity with particular companies
 
 The skill has **no** comparative advantage in:
 - Judging whether a founding team is exceptional
@@ -59,7 +59,7 @@ The skill has **no** comparative advantage in:
 
 Any part of the output that relies on narrative synthesis should be treated with suspicion. The parts that rely on systematic application of T1 data and mechanical rules are the parts worth trusting.
 
-**Evidence:** Adversarial stress testing during development established: "Agent's advantage is scaling structured quality signal across the full market, maintaining consistent discipline, not qualitative synthesis of people and narratives. The latter is the heaviest halo-bias zone."
+**Historical design rationale:** Adversarial development review proposed: "Agent's advantage is scaling structured quality signal across the full market, maintaining consistent discipline, not qualitative synthesis of people and narratives. The latter is the heaviest halo-bias zone."
 
 ### 5. Output Is a De-Risk Scanner, Not a Stock Picker
 
@@ -67,7 +67,7 @@ This skill does not identify the next ten-bagger. It identifies which companies 
 
 A batch ranking that produces "0 BUY, 3 WATCH, 7 AVOID" describes the observed candidates under the current policy. Report retrieval coverage, unavailable inputs and abstentions with those counts. Zero BUY alone proves neither low theme quality nor market efficiency; completeness and investment outcomes require separate evidence.
 
-**What a top-ranked name actually means:** it cleared every kill flag and has real theme exposure, so it now deserves full human due diligence. That is all it means. The value sits in the three classes the scan removes before an analyst spends any time: going-concern candidates, death-spiral diluters, and disclosure non-filers.
+**Interpreting rank:** Read the rating, kill-flags, source completion and evidence alongside rank. A high-ranked report supports human due diligence only to the extent those fields support it. Admission follows `cheap_pass.rejected`; a surviving individual risk flag can still block BUY.
 
 **Historical observations are hypotheses.** The earlier runs and post-run audits do not
 establish a market-wide relationship between theme choice, survivor quality and returns.
