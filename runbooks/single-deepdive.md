@@ -3,29 +3,17 @@
 > Entry mode 2, `ticker <代码> [--theme X]`. Use when you have a specific company and want
 > a rigorous, falsifiable deep-dive report without running a full theme screen.
 
-This is the highest-frequency entry point. You know the ticker; you want to know if it is worth
-owning. The tool mechanically eliminates it if it fails the kill-flags, and gives you a
-scored report if it survives.
+Use this entry to examine a known company. Mechanical screening determines admission,
+and the report records financial evidence, rubric results and unresolved work for human review.
 
 ---
 
 ## Prerequisites
 
-Complete this once before any run:
-
-```bash
-pip install -r tools/requirements.txt
-gh repo create small-cap-deepdive-config --private
-gh repo clone small-cap-deepdive-config "$HOME/.small-cap-deepdive-config"
-export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
-python scripts/init_config.py
-```
-
-Set `"sec_user_agent"` to `"AcmeCorp user1@example.com"` in that file (the private config dir,
-never the repo, your identity is yours, and an in-tree copy is a leak waiting to be committed).
-EDGAR blocks requests with a missing or obviously fake User-Agent.
-
-Keep config, observations and reports committed and pushed in this PRIVATE companion. The identity shown here is synthetic; replace it privately before live SEC use. Run `python scripts/verify_config.py --json` before starting.
+Complete [CONFIG.md setup](../CONFIG.md#first-time-setup-e3). Fill the SEC identity privately
+and run `python scripts/verify_config.py --json`. The companion needs a committed HEAD and
+current PRIVATE visibility proof. Keep configuration, observations and reports versioned
+there; a local readiness result does not establish live source availability.
 
 Then open a run batch (start of every run) so outputs stay grouped and version-comparable:
 
@@ -42,8 +30,9 @@ Outputs land in the absolute PRIVATE `$REPORTS_ROOT` directory with a `_run.json
 
 ## Step 1, Mechanical De-Risk First
 
-Always run `cheap_pass` before any qualitative work. If the company fails a hard kill-flag,
-stop, do not spend judgment budget on a structurally disqualified candidate.
+Run `cheap_pass` before qualitative work and use its `rejected` result. Stop when
+`rejected=true`; an individual risk flag does not necessarily reject a company, although
+it can still block BUY under the rubric.
 
 ```bash
 python tools/cheap_pass.py --universe "<validated-universe.csv>"
@@ -62,8 +51,7 @@ findings before interpreting admission. A clean observed filing and an unavailab
 different outcomes. The presence of a kill flag must be traced to the current source evidence;
 an empty result or transport failure cannot establish that no flag exists.
 
-**If eliminated:** Report the kill-flag and stop. The hard-rule is not an invitation to
-argue, it is a floor. The outcome base rate for companies with an auditor going-concern
+**If eliminated:** Report the screening reason and stop. The outcome base rate for companies with an auditor going-concern
 opinion is unknown here. Any empirical estimate requires a traceable study with a matching
 population, outcome definition and observation window; missing evidence does not relax the
 kill-flag exclusion policy.
@@ -149,7 +137,7 @@ if the weakness is temporary or structural. Do not infer "buy" from a 3.0 score.
 **Score 1 to 2:** Hard-rule ceiling in effect. A specific structural problem is capping the
 score. The report names it. Do not invest without independently resolving the named issue.
 
-**0 or eliminated:** The kill-flag fired in Step 1. Stop. Do not re-examine.
+**Eliminated:** Step 1 returned `rejected=true`. Report the reason and stop.
 
 ---
 
@@ -172,7 +160,9 @@ remains unknown and cannot establish a clear result. Check source completion bef
 
 ## Troubleshooting
 
-**EDGAR 403:** Set `sec_user_agent` to `"AcmeCorp user1@example.com"` in `~/.small-cap-deepdive-config/config.json` (the private config dir, never the repo).
+**EDGAR 403:** Check the selected private `config.json` and replace any blank or example
+`sec_user_agent` with the required real identity. Follow [CONFIG.md](../CONFIG.md); local
+validation alone does not prove SEC acceptance.
 
 **CIK unresolved:** Verify the ticker and CIK against a current issuer-identity source and
 retain the returned identity evidence. An unresolved or conflicting mapping remains unavailable.

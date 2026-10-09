@@ -6,47 +6,28 @@ allowed-tools: Read, Glob, Grep, Bash, Agent, Skill, WebSearch, WebFetch
 
 # small-cap-deepdive
 
-A disciplined orchestration layer for neglected small-cap equity research. It does **only what no
-plain web-search or LLM narrative pass can do**: enumerate the SEC-filing universe for a theme,
-apply hard mechanical kill-flags before any qualitative judgment begins, run forced disconfirmation,
-and produce a scored, ranked shortlist of candidates worth genuine attention.
+Research neglected small-cap equities through deterministic SEC retrieval, mechanical risk
+checks and evidence-based judgment. Choose an entry below and use its runbook for commands.
+Outputs are company reports or ranked candidates for human due diligence.
 
 ---
 
 ## World-View (read before interpreting any output)
 
-Four commitments govern every run. Full exposition and empirical citations: `reference/cognitive-priors.md`.
+Read [cognitive priors](reference/cognitive-priors.md) before interpreting results. Low coverage
+does not establish undervaluation; theme popularity does not establish a return opportunity.
+The cited thematic-ETF findings and base-rate table require population-matched verification
+before use. Consistent screening is a design objective, not proof of predictive performance.
+Report the observed scope and missing work even when no candidate reaches score 4.
 
-**1. 被忽视 ≠ 被低估 (Neglected does not equal undervalued).**
-A company receiving zero analyst coverage has cleared a necessary but not sufficient condition.
-Neglect is priced into small-caps efficiently, what creates inefficiency is delayed information
-diffusion around a real fundamental change. Every output of this skill is a shortlist of companies
-worth investigating, not a buy list.
-
-**2. 热点主题 = 赌场 (Hot themes are the casino, not the edge).**
-By the time a theme has a branded ETF and retail attention, the alpha has been captured.
-Thematic ETF data (Ben-David et al. 2023) shows approximately -6% risk-adjusted annual returns
-in the 5 years post-launch for themes that entered at peak popularity. The skill's value in a hot
-theme is separating the handful of true industrial beneficiaries from the concept-players who
-mentioned the theme keyword once in their investor-day deck.
-
-**3. Edge = 纪律，不是叙事 (Edge is mechanical discipline, not narrative synthesis).**
-The skill's advantage is systematic coverage (more companies than any human can read in the time
-budget), consistent kill-flag application across all candidates, and elimination of human attention
-bias. It has no advantage in judging founding teams, predicting market narrative resonance, or
-forecasting macro catalysts. Do not ask it to do those things.
-
-**4. 产出是避雷扫描器，不是买入清单 (Output is a landmine-scanner, not a buy list).**
-A score-5 company at the top of the ranked output means it survived all kill flags, has real theme
-exposure, and warrants full human due diligence. It does not mean buy it. The primary value of
-this skill is in what it eliminates, the going-concern candidates, the death-spiral diluters, the
-disclosure non-filers, before any analyst time is spent.
+[PHILOSOPHY.md](PHILOSOPHY.md) defines the data/judgment boundary and reference ownership.
+The user makes the investment decision.
 
 ---
 
 ## Four Entry Workflows
 
-> **Open a run batch first (all entries).** Before the first tool call of any run, open a
+> **Open a batch for research entries.** Before the first acquisition call, open a
 > timestamped batch so this run's candidates / cheappass / deepdive / valuation / report files
 > stay together and runs stay comparable across skill versions:
 > ```bash
@@ -58,11 +39,7 @@ disclosure non-filers, before any analyst time is spent.
 > ```
 > Leaving `SMALLCAP_RUN` unset uses the unbatched PRIVATE reports root. Expand `REPORTS_ROOT` to its absolute value before handing any output path to another agent.
 >
-> **Concurrency isolation.** Theme runs execute concurrently (the coverage harness fans out dozens
-> of agents at once), so the two shared paths are namespaced per run rather than clobbered: the
-> run-state file is **PID-unique / per-`SMALLCAP_RUN`**, the SIC-reverse-recall sidecar goes **under
-> the active run/slug**. Full statement, war-story and file list: "Sidecar isolation" under
-> "Two-Stage Precision Gate".
+> Concurrency and SIC sidecar ownership: [discovery contract](reference/discovery-engine.md#sidecar-isolation).
 
 ### Entry 1, `theme <主题>` (thematic universe screen)
 
@@ -165,12 +142,13 @@ See `runbooks/single-deepdive.md` for the standalone boundary.
 
 ### Entry 3, `rank` (re-rank existing scored outputs)
 
-**Use when:** you have already run a theme screen and want to re-sort or re-weight an existing
-scored candidate set without re-running discovery or deep-dive.
+**Use when:** you have scored company reports and want to re-sort them without repeating
+discovery or deep-dive. Ranking is optional for a single-company report.
 
 **Natural-language orchestration:**
 
-1. Locate the existing scored output directory from a prior `theme` run.
+1. Select the existing scored report directory and its active run or explicit `--input`.
+   Re-ranking uses that directory and does not require allocating a new research batch.
 2. Run `tools/rank.py [--slug <slug>] [--input <dir>] --output <fresh-ranking-name>.md` to produce a ranked table. Choose a new basename for every re-rank; existing artifacts are preserved.
 3. Report the ranking with kill-flag eliminations and explicit coverage gaps.
 
@@ -232,53 +210,16 @@ theme-fit gate needed, form-type enumeration replaces keyword over-recall):
 
 ## Two-Stage Precision Gate (Mandatory in Theme Flow)
 
-> Full spec: `reference/discovery-engine.md`. This section is a navigational summary only.
+Theme runs must complete both stages in order. Gate 1 tags SIC context and forwards every
+`keep` and `review` candidate; Gate 2 classifies the selected annual filing's business as
+`pure_play`, `partial` or `misrecall`. Only `misrecall` is excluded for theme fit. Stop if a
+hard-excluded SIC disappears before Gate 2.
 
-A full-text keyword hit does not establish theme membership. A filing can mention a term
-in risk factors, customer industries, or logistics while its core business belongs elsewhere.
-SIC provides a coarse review hint; the bound theme-fit stage must adjudicate each candidate.
-Read the gate contract in `reference/discovery-engine.md` before choosing keywords.
-
-**Gate 1, SIC coarse review + reverse-recall floor** (`filter_by_sic.sic_classify`, applied inline
-by `tools/run_theme.py`).
-
-RULE, and the only part of Gate 1 you need loaded to run one:
-
-- **Gate 1 never drops a company.** It only tags `sic_tier`. Every survivor of Gate 1, `keep` and
-  `review` alike, goes to Gate 2. If a run removes a name at Gate 1, that run is wrong.
-- **Test:** a name whose SIC is hard-excluded must still appear in the Gate 2 input set. If it does
-  not, stop and read `discovery-engine.md` §Gate 1 before continuing.
-- Which SIC blocks are hard-excluded, why `review` is not a verdict, the caller contract that makes
-  `review` safe to forward, and the `sic_hard_exclude` config key: `discovery-engine.md` §Gate 1.
-
-**SIC reverse-recall floor (P8).** For a theme that maps to dedicated SIC code(s), SIC is not used
-*only* as a precision coarse-review, it is also a recall **FLOOR**. `discover.py --sic-reverse`
-enumerates every registrant in the theme's dedicated SIC code(s) (`filter_by_sic.THEME_SIC`) via
-EDGAR browse-by-SIC, and UNIONs that set with the FTS keyword recall, tagging each row
-`recall_channel` as `fts` / `sic_reverse` / `both`. A true member with the right SIC but an unlucky
-keyword phrasing therefore cannot be lost by FTS recall alone. The union is the deep-dive universe,
-still passed through Gate 2 for theme-fit. The floor is **opt-in** (the theme needs a `THEME_SIC`
-entry and `discover.py` needs the flag) so a giant generic SIC is not enumerated on every run.
-**FTS top-1000 cap warning:** EDGAR full-text search caps at 1000 hits, so on a broad keyword the
-FTS arm may be truncated; the SIC reverse-recall arm is the floor that keeps recall from collapsing
-under that cap, and `track_forward` warns when the FTS arm hit the cap.
-
-**Sidecar isolation.** The SIC-floor sidecar file (the enumerated SIC candidate set the floor writes
-alongside the FTS recall) is namespaced under the **active run/slug**, written into the current
-`SMALLCAP_RUN` batch dir, slug-prefixed, never a fixed cross-theme path, and kept out of the
-`candidates_*.json` glob. Without that namespacing a stale cross-theme `candidates_<other-theme>.json`
-could land in the wrong run dir (a machinery run dir once picked up a 63-name
-`candidates_railcar_leasing.json`, which `finalize_run` would then have falsely demanded reports
-for). Each concurrent agent's floor output is isolated to its own run, and the run-state file is
-per-`SMALLCAP_RUN` / PID-unique rather than a shared `/tmp` path that concurrent agents clobber.
-Files: `tools/filter_by_sic.py` + `tools/_common.py` / `tools/new_run.py`.
-
-**Gate 2, LLM Theme-Fit Gate**
-For each Gate 1 survivor, prompt an LLM subagent with the company's 10-K business description.
-Classify: `pure_play` / `partial` / `misrecall`. Use the prompt template in
-`reference/discovery-engine.md §Gate 2`. Drop `misrecall` before any deep-dive computation.
-
-Both gates are mandatory. Neither can be skipped or merged into a single pass.
+[Discovery engine](reference/discovery-engine.md) owns SIC defaults, the opt-in reverse-recall
+union, the 1000-hit FTS cap, sidecar isolation, keyword design and coverage limits. Use the
+bound request/host/result sequence in [theme-run.md](runbooks/theme-run.md); an unbound
+classification list does not complete the stage. Ticker and event entries do not use these
+theme gates.
 
 ---
 
@@ -299,25 +240,16 @@ summary or rescaled 1 to 5 with one decimal, with ties broken by Dimension 1 (fi
 
 ## Environment Prerequisites
 
-Before running any tool, complete setup once:
+Follow [CONFIG.md setup](CONFIG.md#first-time-setup-e3) before running tools. The selected
+PRIVATE companion must have a committed HEAD and current visibility proof. Set its
+`sec_user_agent`, then run `python scripts/verify_config.py --json`; blank or example identity
+is NOT READY. This checks local prerequisites, not live provider or model availability.
 
-```bash
-# 1. Install Python dependencies
-pip install -r tools/requirements.txt
-
-# 2. Create or clone a PRIVATE companion before entering personal configuration.
-gh repo create small-cap-deepdive-config --private
-gh repo clone small-cap-deepdive-config "$HOME/.small-cap-deepdive-config"
-export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
-python scripts/init_config.py
-# After successful PRIVATE verification, set sec_user_agent in the private config.
-python scripts/verify_config.py --json
-# Commit and push config and runtime DATA in this PRIVATE companion.
-```
-
-Initialize the PRIVATE companion before running the tools. Set `sec_user_agent` there and
-use the supported configuration keys and scalar environment overrides in `CONFIG.md`.
-The runtime does not accept a generic `--config` flag or inline JSON configuration.
+Configuration and tracking use the same resolver. Alternate profiles require separate
+PRIVATE worktree roots. The runtime accepts the documented configuration keys and scalar
+environment overrides; it has no generic `--config` flag or inline JSON configuration.
+Keep configuration and DATA versioned privately. [CONFIG.md](CONFIG.md) also defines output
+artifact ownership and retention.
 
 ---
 
@@ -348,67 +280,17 @@ Full routing guide, rate-limit discipline, blind spots, and anti-recursion rule:
 
 ## Track-forward (Phase 6, Calibration Feedback Loop)
 
-After any deep-dive run, log all verdicts so they can be scored against realized returns when
-the horizon matures. This is the only way to determine if the rubric is correctly calibrated.
+Record every deep-dive verdict in the initialized PRIVATE companion. Follow
+[track-forward.md](reference/track-forward.md) for recording, scoring, scorecards, review
+receipts and the IWM benchmark. The resolver must never fall back to this public source.
 
-**Where the verdict log lives (read this before citing a path).** RULE: verdicts and the generated
-scorecard are real-run output, so they are written **outside this repo**, never into it. Never write
-a verdict to a repo-relative path, and never add an in-repo fallback if the resolver refuses.
-**Test:** if a path you are about to write starts with this repo's directory, you have the wrong
-path. The resolver, its exact search order, what it raises when uninitialized, and why the
-no-fallback rule exists: `reference/track-forward.md` §Where the verdict log lives.
+Score only after each verdict's own horizon matures. The existing minimum of approximately
+20 matured verdicts before considering rubric tuning is not evidence of adequate sample
+size or predictive performance. Include scored, pending, unavailable and unreviewed coverage;
+the full calibration conditions are in the reference.
 
-**Operational steps:**
-
-1. **After each deep-dive run:** record verdicts from the output JSON:
-   ```bash
-   python tools/track_forward.py --record "${REPORTS_ROOT}/deepdive_verdicts.json"
-   ```
-   Or record a single verdict via CLI flags:
-   ```bash
-   python tools/track_forward.py --record --ticker "$TICKER" --rating 观察 --theme "$THEME" \
-       --mos-pct null --mos-basis abstain --catalyst null
-   ```
-
-2. **Monthly (or ad hoc):** score matured verdicts (horizon elapsed) against realized prices:
-   ```bash
-   python tools/track_forward.py --score
-   ```
-
-3. **Generate calibration scorecard:**
-   ```bash
-   python tools/track_forward.py --scorecard   # writes <private data dir>/metrics/scorecard.md
-   python tools/track_forward.py --status      # quick count summary
-   ```
-
-4. **Tune the rubric ONLY when ≥~20 verdicts have matured.** Before that threshold the
-   calibration table is statistically meaningless. See `reference/track-forward.md` for
-   the full Brier / calibration methodology and the benchmark choice rationale (IWM, not SPY).
-
-5. **Recall@gold, keep final and discovery coverage separate.** `recall@gold` measures
-   eligible gold members retained in the final candidate set. `discovery_recall_at_gold`
-   measures eligible gold members surfaced by the observed discovery union. A final miss
-   can come from discovery, market-evidence availability, or a downstream gate; use the
-   reported loss attribution instead of labeling every miss a discovery failure.
-   Unresolved historical eligibility remains unresolved and must not be counted as proven
-   exclusion. Report FTS caps, failed pages, and any opt-in SIC reverse-recall coverage
-   alongside both measures; neither measure proves an uncapped population census.
-
-6. **Diagnostic signals remain inert.** Finalization writes a versioned
-   `signals_snapshot` containing the diagnostic namespace, issuer and verdict
-   identity, and the selected deepdive artifact's byte digest. Recording validates
-   and retains that snapshot for future calibration. It never changes the rating,
-   implied probability, or current scoring. Missing signals remain absent.
-
-**Calibration remains unknown until supported outcomes exist.** Each verdict has its own
-entry date and horizon. Report scored, pending, unavailable and unreviewed coverage from
-the current private ledger; do not assume a cohort date or a fixed scorecard result.
-
-**Run finalization, a Gate-2 misrecall is resolved, not missing.** `finalize_run` reads the run's
-`gate2_results.json` and treats names in the Gate-2 misrecall set as **resolved**, not "missing." A
-`band=deep` candidate dropped at Gate 2 for theme-fit is an intentional, auditable exclusion, not a
-forgotten deep-dive, so it does not count toward the "N missing" warning. The coverage denominator
-is therefore genuine deep-dive coverage rather than the raw `band=deep` row count, and no manual
-re-band or `--allow-missing` step is needed.
-
-Configuration and retention: [CONFIG.md](CONFIG.md). Shared DATA/CONFIG discovery, root-only profiles and required SEC identity readiness; output writers enforce source artifact ownership.
+Final recall and discovery recall measure different losses. Report their scope, historical
+eligibility gaps, FTS caps and failed pages. Diagnostic `signals_snapshot` records retain their issuer, verdict
+and artifact identities but do not change ratings, probabilities or scoring. Finalization
+treats an observed Gate-2 `misrecall` exclusion as resolved; it requires neither manual
+re-banding nor `--allow-missing`. Missing work must remain visible.

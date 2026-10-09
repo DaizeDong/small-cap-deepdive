@@ -1,39 +1,23 @@
 # Track-Forward Calibration, Phase 6
 
-> The epistemic spine of the skill's feedback loop.
-> Without this, the rubric is "confident garbage" risk: outputs are internally consistent but
-> never checked against realized outcomes.
-
----
+Track verdicts against realized outcomes to assess calibration. A low BUY count alone
+cannot distinguish effective screening from a rubric that is too strict or too loose.
+Brier scores, calibration tables, coverage and sample composition must be assessed together.
 
 ## Why This Exists
 
-A verdict stream with few BUY decisions can reflect either sound selectivity or a
-miscalibrated rubric. Forward outcome tracking is needed to distinguish them:
+The verdict ledger preserves the original decision and its evidence while outcome scoring
+adds realized returns. Internal consistency of a rubric does not establish predictive value.
+Current calibration remains unknown until supported outcomes exist.
 
-**(A) Correct**, the market is efficient for small-caps; real mis-pricings are genuinely rare
-and the rubric correctly identifies them; or
-
-**(B) Miscalibrated**, the rubric is too strict (or too loose in the AVOID direction), producing
-systematically biased verdicts that do not reflect actual return distributions.
-
-This ambiguity cannot be resolved by narrative argument, by examining the rubric for internal
-consistency, or by debating the efficient market hypothesis. **It can only be resolved by tracking
-verdicts forward against realized returns and computing a calibration measure.**
-
-The Brier score + calibration table is the instrument. Without a populated verdict log the skill is
-running blind on its own judgment quality.
-
-**Where the verdict log lives.** It is real-run output, so it is written **outside this repo**, never
-into it. `guards/tools/datadir.py:resolve_data_dir("small-cap-deepdive")` resolves the private store in
-order: `$SMALL_CAP_DEEPDIVE_DATA_DIR` → `~/.small-cap-deepdive-config/data/` →
-`~/.small-cap-deepdive-data/` → nothing, which raises `DataDirNotInitialized` with setup
-instructions. The two files are `<private data dir>/metrics/verdicts.jsonl` and
-`<private data dir>/metrics/scorecard.md`. There is deliberately **no in-repo fallback**.
-Real observations belong in the versioned PRIVATE companion. The repo's own metrics directory
-holds only the generated synthetic examples `verdicts.jsonl.example` and
-`scorecard.md.example`, which are the shape you are expected to produce. Every bare `metrics/...`
-path below is shorthand for the private path above.
+**Where the verdict log lives.** `guards/tools/datadir.py:resolve_data_dir("small-cap-deepdive")`
+selects `<companion>/data`; [CONFIG.md](../CONFIG.md#discovery-convention-how-the-skill-finds-your-config-e2)
+owns the shared DATA/CONFIG discovery order and PRIVATE proof. Uninitialized storage raises
+`DataDirNotInitialized` with setup instructions. There is no public-source fallback.
+The files are `<private data dir>/metrics/verdicts.jsonl` and
+`<private data dir>/metrics/scorecard.md`, versioned in the PRIVATE companion. Bare
+`metrics/...` paths below refer to this private directory. The public source contains only
+generated `verdicts.jsonl.example` and `scorecard.md.example` schemas.
 
 ---
 
@@ -349,9 +333,23 @@ realized_excess_pct = stock_total_return - IWM_total_return
    whose individual horizons have elapsed. Report observed, pending and unavailable outcomes.
    Review coverage remains a separate measure.
 
-4. **When outcomes are available:** run `--scorecard` and examine sample composition,
-   uncertainty, missing coverage and de-risk metrics. A fixed number of matured verdicts
-   alone does not justify rubric tuning or establish predictive performance.
+4. **When outcomes are available:** run `--scorecard` and `--status`; examine sample
+   composition, uncertainty, missing coverage and de-risk metrics. Do not consider rubric
+   tuning before approximately 20 verdicts have matured. That minimum alone does not
+   establish an adequate sample, justify tuning or prove predictive performance.
+
+For a single verdict, the recording interface is:
+
+```bash
+python tools/track_forward.py --record --ticker "$TICKER" --rating 观察 --theme "$THEME" \
+    --mos-pct null --mos-basis abstain --catalyst null
+```
+
+`recall@gold` measures eligible gold members retained in the final set;
+`discovery_recall_at_gold` measures those surfaced by the observed discovery union. Retain
+loss attribution across discovery, market evidence and downstream gates. Unresolved
+historical eligibility is not a proven exclusion. Report FTS caps, failed pages and any
+opt-in SIC coverage with both measures; neither proves an uncapped census.
 
 ---
 
@@ -378,4 +376,4 @@ current rate or live performance; retain their provenance for private review.
   in the repo at `metrics/scorecard.md.example`)
 - **`reference/cognitive-priors.md`**, epistemic priors that this calibration loop is designed to test
 - **`reference/judgment-rubric.md`**, the rubric whose outputs populate verdicts.jsonl
-- **`SKILL.md §Track-forward`**, operational instructions for running the loop
+- **`SKILL.md §Track-forward`**, entry workflow and tracking obligations

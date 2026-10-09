@@ -6,6 +6,11 @@ belong in the initialized, versioned PRIVATE companion.
 
 ## Current contracts
 
+- Configuration, reports and tracking use shared DATA/CONFIG discovery and separate PRIVATE
+  worktree roots for alternate profiles. Blank SEC identity is NOT READY. Writers enforce
+  source artifact ownership; [CONFIG.md](CONFIG.md) owns selection, readiness and retention.
+  Synthetic checks cover declared local behavior; live capability and protected-data
+  retirement require separate evidence.
 - Discovery records source scope and completion. SIC tagging forwards candidates for the
   bound theme-fit stage; it does not establish theme membership. Host results and ingestion
   receipts are required to complete the workflow stages.
@@ -70,5 +75,3 @@ Any change to the diagnostic role of a signal requires a separate evidence-based
 
 Automated theme selection remains deferred. Revisit it only through a defined comparison
 against an appropriate baseline with dated populations and realized outcomes.
-
-Configuration and storage repair: Shared DATA/CONFIG discovery, root-only profiles and required SEC identity readiness; output writers enforce source artifact ownership. Synthetic checks establish the declared local behavior; live capability and protected-data retirement still require their own evidence.

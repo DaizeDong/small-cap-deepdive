@@ -6,88 +6,53 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ### Configuration and storage contracts
 
-- Shared DATA/CONFIG discovery, root-only profiles and required SEC identity readiness; output writers enforce source artifact ownership.
+- Configuration, reports and tracking share DATA/CONFIG discovery, root-only PRIVATE
+  profiles and source-owned artifact admission. Blank SEC identity is NOT READY;
+  missing configuration or destination proof stops writes. The default report root is
+  companion-relative `./reports/smallcap`.
+- Remove the public-source configuration fallback and seal `reference/config.json` in
+  `.dataclass.json`. Initialization and verification refuse public-source destinations;
+  setup, selector precedence and retention now have one current contract in [CONFIG.md](CONFIG.md).
+- Declare imported ledger and scorecard files separately from two bounded migration
+  recovery inputs; recovery snapshots cannot become live ledger data.
 
-### Current evidence and completion contracts
+### Evidence, workflow and documentation
 
-- Replace the README Mermaid charts with compact color PNGs; retain matching Graphviz sources and a rendering script in `docs/diagrams/`.
-- Add matching English and Chinese workflow diagrams distinguishing candidate research from re-ranking; align single-ticker and Chinese screening guidance with the actual `rejected` result rather than any individual risk flag.
-- Declare imported ledger and scorecard files separately from two bounded
-  migration recovery inputs; recovery snapshots cannot become live ledger data.
-- Financial calculations retain dated source evidence, compatible annual periods and units;
-  missing inputs remain unavailable. Debt and lease evidence constrain EV and NAV calculations.
-- Discovery and theme-fit stages require scope and completion receipts. Finalization and ranking
-  preserve existing artifacts, and tracking separates missing outcomes from measured returns and
-  calibration coverage. A populated report or a zero-BUY result alone proves no predictive edge.
-- Configuration and new report output resolve to a verified, versioned PRIVATE companion. The
-  default report root is companion-relative `./reports/smallcap`; there is no public-source fallback.
-- Both README introductions explain the cost of conservative evidence requirements before setup.
+- Financial calculations retain dated evidence, compatible annual periods and units.
+  Missing inputs remain unavailable; debt and lease evidence constrain EV and NAV.
+- Discovery and theme-fit stages require scope and completion receipts. Gate 1 retains
+  both SIC tiers; the `sic_tier != "drop"` filter currently removes nothing. Screening
+  admission follows `cheap_pass.rejected`, not the presence of an individual risk flag.
+- Finalization and ranking preserve existing artifacts. Tracking separates unavailable
+  outcomes from measured returns, review coverage and calibration. A zero-BUY result
+  or populated report alone establishes no predictive advantage.
+- Both READMEs explain conservative evidence requirements and the four entry modes.
+  Matching color PNG diagrams retain Graphviz sources and the rendering helper in
+  `docs/diagrams/`, including theme-only checks and optional ranking.
+- Consolidate shared configuration, discovery, tracking and diagnostic guidance in their
+  authoritative documents. Keep English and Chinese rationale aligned and distinguish
+  current implementation from historical observations and planned work.
+
+### Prior documentation-check evidence
+
+A previous P7 pass reported duplicated prose falling from 5.82% to 0.27% against an
+unchanged 2.0% budget, starting with 185 of 3181 SKILL shingles also present in references.
+No directory was excluded. These are results for that earlier snapshot, not the current
+candidate. The change established reference ownership, corrected contradictory Gate-1
+removal guidance, and retained Chinese rationale rather than relying on an English-only path.
 
 ### Historical navigation
 
-The numbered releases below retain their original observations and dates. Their research paths
-are historical locations, not files supplied by the current public tool:
+Numbered releases retain their original observations and dates. Their research paths are
+historical locations, not files supplied by the current public tool:
 
 | Historical reference | Current reading path |
 |---|---|
-| `docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md` and its study directory | Real-run research artifacts are retained privately; the public [evidence status](docs/evidence-status.md) defines what current evidence can establish. |
-| `docs/coverage-test-2026-06-20/` and `docs/optimization-campaign-2026-06/` | Historical campaign locations, unavailable as current public artifacts. Use [evidence status](docs/evidence-status.md) for the present acceptance boundary. |
-| The planned v0.3.4 ROADMAP section cited in 0.3.3 | That release-specific section has been replaced by [Financial and forensic evidence](ROADMAP.md#financial-and-forensic-evidence). Source-mismatch and debt-quality policy changes still require review and validation. |
+| `docs/backtest-2026-06/ROOT_CAUSE_AND_DERISK_EDGE.md` and its study directory | Real-run research remains private; [evidence status](docs/evidence-status.md) defines current evidence limits. |
+| `docs/coverage-test-2026-06-20/` and `docs/optimization-campaign-2026-06/` | Historical campaign locations, unavailable as current public artifacts. Read [evidence status](docs/evidence-status.md). |
+| Planned v0.3.4 ROADMAP section cited in 0.3.3 | [Financial and forensic evidence](ROADMAP.md#financial-and-forensic-evidence) describes remaining review and validation work. |
 
-These navigation notes do not rerun, revalidate or supersede the historical measurements.
-
-
-### Changed
-- **P7 load budget is green: 5.82% duplicated prose to 0.27%, against a 2.0% budget.** The gate went
-  red on its first armed run (185 of 3181 SKILL.md shingles also present in a reference). One side
-  of each pair was cut and replaced with a pointer, per the layering rule: `reference/<topic>.md`
-  owns a methodology invariant, `SKILL.md` and `README.md` point at it and never restate it.
-  - `reference/discovery-engine.md` keeps the refractory war story, the `sic_classify` tri-state,
-    the caller contract, the SIC blocks, and the `sic_hard_exclude` naming note. `SKILL.md` keeps
-    only the always-loaded RULE ("Gate 1 never drops a company") plus its test, and points.
-  - `reference/track-forward.md` keeps the datadir resolution order and the no-in-repo-fallback
-    rule. `SKILL.md` keeps the RULE (never write a verdict to a repo-relative path) plus its test.
-  - `reference/cognitive-priors.md` keeps the world-view exposition; `README.md` points at §1 and
-    §5. `reference/event-driven.md` keeps both catalyst mechanisms; `README.md` points at it.
-    `CONFIG.md` keeps the config-discovery leak history; `README.md` points at it.
-  - `SKILL.md` §Entry 1 step 1c keeps the `filter_by_sic.py --selftest` invocation rule;
-    `discovery-engine.md` now points back to it instead of restating it.
-  - `runbooks/batch-rank.md` points at `SKILL.md` §Entry 3 for when to use entry mode 3.
-  - The 2.0% threshold was NOT raised, and no directory was excluded from the measurement.
-- **`README_CN.md` deliberately keeps its full world-view prose.** It is the only Chinese-language
-  statement of those commitments; cutting it would leave no path to the content in that language,
-  and the gate's word shingles do not see it either way.
-
-### Fixed
-- `reference/discovery-engine.md` §Real case contradicted its own §Refractory Case: Full
-  Reconstruction. It said "the SIC gate reduced the field substantially"; the reconstruction says
-  the field **does not shrink** at Gate 1, because a hard-excluded SIC yields `sic_tier="review"`
-  and a `review` company still passes to Gate 2. The reconstruction is right. Corrected in place,
-  in the shard that owns the invariant, before the duplicate copy in `SKILL.md` was removed.
-- `reference/discovery-engine.md` now records that the `sic_tier != "drop"` filter in
-  `run_theme.py` is a no-op today. That fact existed only in `SKILL.md`, so deleting the SKILL.md
-  copy would have lost it.
-
-### Security
-- **The in-repo config fallback is gone.** Config discovery used to end at `reference/config.json`,
-  documented in three docstrings and four docs as the "in-repo legacy/default" step 4. That is the
-  exact shape the data boundary bans (`tools/datadir.py`), and it is how a real SEC contact address
-  once got committed to this public repo. A fallback into the repo is not a convenience, it IS the
-  leak.
-  - `tools/_common.py:resolve_config_json()` returns `None` when nothing is found instead of a repo
-    path, and the new `config_json_path()` raises `ConfigNotInitialized` with setup instructions,
-    mirroring `tools/datadir.py:data_path()`. A read still degrades: `load_config()` falls back to
-    `config.example.json` defaults, never to a repo overlay.
-  - `scripts/verify_config.py` reports `NOT INITIALIZED` and FAILs, rather than validating a
-    phantom, gitignored, in-repo path. An in-repo `--config-dir` is now a FAIL too, replacing the
-    old "is the in-repo config at least gitignored?" check: gitignore is advisory, `git add -f`
-    walks through it.
-  - `scripts/init_config.py` defaults to `~/.small-cap-deepdive-config` and **refuses** a target
-    inside the repo (exit 2). A read may degrade; a write must fail hard.
-  - `reference/config.json` moves from `data` to `data_sealed` in `.dataclass.json`: a dead path,
-    still blocked from the index, no longer owed a schema.
-- Docs corrected to match: `README.md`, `README_CN.md`, `CONFIG.md`, `SKILL.md`. Setup now copies
-  the template to `~/.small-cap-deepdive-config/config.json`, never into the working tree.
+Navigation updates do not rerun or revalidate historical measurements.
 
 ## [0.3.3] - 2026-06-24
 

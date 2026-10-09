@@ -1,6 +1,6 @@
 # small-cap-deepdive
 
-Mechanically de-risk the SEC small-cap universe for a theme or ticker, kill the landmines, then deep-dive the survivors.
+Research small-cap and microcap US equities from SEC filings: discover candidates by theme or event, screen financial and disclosure risks, and prepare company reports for human due diligence.
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -15,119 +15,46 @@ Mechanically de-risk the SEC small-cap universe for a theme or ticker, kill the 
 
 ## Design philosophy
 
-**Being neglected is not the same as being undervalued.**
-
-Why that is true, and what it takes for a neglected name to also be mis-priced:
-[`reference/cognitive-priors.md`](reference/cognitive-priors.md) §1.
-
-**The output is a landmine-scanner, not a buy list.**
-
-What a top-ranked name does and does not entitle you to conclude:
-[`reference/cognitive-priors.md`](reference/cognitive-priors.md) §5.
-
-**An empty result is limited to the observed screen.**
-
-If no candidate reaches score 4 or higher, report that result with the retrieved population, missing
-work, coverage limits and rating policy. It does not establish that the theme has no clean
-beneficiaries or investment opportunities. Incomplete retrieval and model abstention must
-remain visible alongside the candidate count.
-
-The one-sentence version: **the tool's edge is mechanical discipline applied consistently
-across the full candidate set, not narrative synthesis on any individual company.** Every tool,
-invariant, and hard rule in this repo exists because of four principles, root-cause design (not
-symptom patching), Hybrid-not-thin (the data layer earns its keep), discipline-as-moat, and a
-single source of truth in `reference/`.
+Low analyst coverage alone does not establish undervaluation. The research hypothesis is that
+a fundamental change can take time to reach market prices. The tool applies the same filing
+checks and disconfirmation procedure to each admitted candidate so that company selection
+depends on documented evidence. The rationale and empirical reference notes are in
+[cognitive priors](reference/cognitive-priors.md).
 
 Conservative eligibility rules can withhold a rating from a sound company when evidence is
-missing or incompatible. That cost is deliberate: dated periods, units and source provenance
-must support the calculation before a numeric ranking is useful. The report must retain missing
-work and retrieval limits, and predictive claims require a separate evaluation of a dated
-population. Passing these checks establishes the documented screening conditions only.
+missing or incompatible. Calculations require dated periods, compatible units and source
+provenance. A high rank identifies a candidate for human diligence; it does not establish an
+investment advantage. If no candidate reaches score 4, report the observed population,
+missing work and coverage limits with that result. An empty shortlist cannot establish that
+a theme has no suitable companies or investment opportunities.
 
-📜 **[Read the full design philosophy → PHILOSOPHY.md](PHILOSOPHY.md)**
+[PHILOSOPHY.md](PHILOSOPHY.md) explains the data/judgment boundary, the reason for bundling
+deterministic filing tools, consistent screening, and reference ownership.
 
 ---
 
 ## What it is (and isn't)
 
-Given an investment theme or a single ticker, the skill enumerates the SEC-filing universe,
-applies hard mechanical kill-flags, runs falsifiable deep-dive due diligence with forced
-disconfirmation, and ranks surviving candidates. What it does, step by step:
+The skill accepts a theme, ticker, event route, or existing scored reports. Its stages are:
 
-0. **Open a run batch** (`new_run.py`): every run writes into the initialized PRIVATE companion's
-   `reports/smallcap/<date>_<label>/` directory
-   with a `_run.json` manifest (skill git commit + valuation config snapshot) so runs stay
-   comparable across versions. Stop if allocation fails, then export the returned selector:
+| Stage | Behavior and authoritative detail |
+|---|---|
+| Run allocation | `new_run.py` creates a PRIVATE report batch and `_run.json` with the source revision and valuation-config snapshot. See [Quick start](#quick-start). |
+| Theme discovery | EDGAR FTS with optional `discover.py --sic-reverse` recall; unpriced candidates retain `band="unknown"`. [Discovery engine](reference/discovery-engine.md) defines scope and completion. |
+| Mechanical screening | `cheap_pass.py` checks going concern, death-spiral convertibles, material weaknesses and concentration. Its `rejected` result determines admission; an individual flag can survive screening while blocking BUY. |
+| Theme-fit review | Theme runs require SIC review followed by a bound LLM business review. Both SIC tiers continue; only `misrecall` is removed for theme fit. |
+| Financial data | `deepdive_data.py` retrieves XBRL, insider trades and disclosure events, with debt, entity, period and source-integrity checks. [Mechanical checks](reference/mechanical-checks.md) and [data sources](reference/data-sources.md) define these guards. |
+| Valuation | Reverse-DCF, EV/EBITDA, cyclical normalization and NAV use the applicable evidence. BUY requires `mos_basis∈{fcf_cap,nav}`, active MoS ≥ 30%, `buy_eligible == true`, zero kill-flags and no T3 thesis. The catalyst MoS waiver remains frozen. See [valuation](reference/valuation.md). |
+| Judgment and reporting | The [rubric](reference/judgment-rubric.md) requires reference-class priors, disconfirmation, evidence tiers and a seven-dimension scorecard. Reports include data quality, unresolved work and optional ranking. |
+| Forward tracking | `track_forward.py` records verdicts in PRIVATE `data/metrics/`, then scores mature outcomes against IWM with Brier and de-risk measures. See [tracking](reference/track-forward.md). |
+| Diagnostics | `signals.py` records price divergence and ownership for future calibration. Diagnostic fields do not affect BUY eligibility. See [data sources](reference/data-sources.md). |
 
-   ```bash
-   SMALLCAP_RUN="$(python tools/new_run.py --label "Synthetic research")" || exit 1
-   export SMALLCAP_RUN
-   ```
-
-1. **Enumerates the SEC universe** for a theme using EDGAR full-text search (FTS), optionally
-   UNIONed with a **SIC reverse-recall floor** (`discover.py --sic-reverse`, which calls into
-   `filter_by_sic.py`): for a theme with a dedicated SIC code, every registrant in that SIC is
-   enumerated so low-keyword-density true members are not missed. The floor is opt-in per theme.
-   Market cap is resolved with a fallback chain (SEC shares×price when yfinance is null); names that
-   still can't be priced flow through as `band="unknown"` instead of being silently dropped.
-
-2. **Mechanical de-risk** (`cheap_pass.py`): hard kill-flags from SEC filings, going-concern
-   auditor paragraphs, death-spiral convertibles, ICFR material weaknesses, magnitude-based
-   customer/government-program concentration. Eliminated companies do not proceed to judgment.
-
-3. **Two-stage precision gate (mandatory).** Gate 1 (`filter_by_sic.sic_classify`, applied inline by
-   `run_theme.py`): a coarse SIC **review tier**, not an exclusion. A hard-excluded SIC tags the
-   company `sic_tier="review"` and it still passes to Gate 2; Gate 1 never drops anything. Gate 2
-   (LLM) reads each company's 10-K business description and classifies it `pure_play / partial /
-   misrecall`, and dropping `misrecall` is the only theme-fit removal in the pipeline. The canonical
-   failure mode without Gate 2: keyword `refractory` for a railcar insulation theme swept the entire
-   oncology biotech sector, zero railcar companies, and Gate 1 forwarded every one of them because a
-   pharma SIC only earns `review`. Recall is *measured* via `recall@gold` against hand-built
-   true-member lists, not assumed.
-
-4. **Deep-dive data pull** (`deepdive_data.py`): XBRL financials (with EBIT concept cascade, debt
-   and shares fallbacks), Form 4 insider trades, shelf/ATM status, dilution history, material event
-   timeline. Data-integrity guards: debt-truncation, wrong-entity, low-revenue-loss, and a
-   **second-source cross-check** (SEC vs yfinance, a >2.5× disagreement is flagged and blocks BUY).
-
-5. **Valuation + mechanical `buy_eligible` gate** (`valuation.py`): reverse-DCF (normalized FCF),
-   EV/EBITDA multiples, cyclical-trough EBITDA, and asset-heavy NAV path. A BUY requires
-   `mos_basis∈{fcf_cap,nav}` AND margin of safety ≥ 30% AND **`buy_eligible == true`** AND 0
-   kill-flags AND no T3 thesis. `buy_eligible` ANDs in every guard, extreme-MoS, large-cap-ceiling,
-   FCF-sustainability, financial-SIC / insurance exclusion, debt-truncation, cross-source-mismatch,
-   concentration-kill, and the **V-shape value-trap vetoes** (`fundamental_decline_flag` for monotone
-   decline + `peak_contamination_flag` for trough→peak→rollover). Closed-list catalyst modifier
-   (currently frozen to WATCH pending mechanism calibration).
-
-6. **Forced-disconfirmation judgment**: base-rate priors anchored before scoring, mandatory
-   disconfirmation WebSearch for each candidate, 7-dimension scorecard with hard ceiling rules.
-   Evidence is tier-tagged (T1 first-party SEC filings / T2 independent third-party / T3 company-sourced); T3 evidence cannot support
-   a buy recommendation.
-
-7. **Finalize + rank** (`finalize_run.py`, `make_report.py`, `rank.py`): deterministic per-ticker
-   reports with a data-quality **trust banner** under each rating, an auto-emitted verdict fed into the
-   track-forward loop, and `RANKING.md` with funnel counts, kill-flag eliminations, and coverage gaps.
-
-8. **Track-forward calibration** (`track_forward.py`): verdicts logged to
-   `<private data dir>/metrics/verdicts.jsonl` (resolved **outside** this repo by `guards/tools/datadir.py`,
-   never into it; the repo carries only `metrics/verdicts.jsonl.example` as the schema),
-   Brier-scored vs IWM at maturity, with de-risk-native metrics (blowup-avoidance / downside-capture).
-
-9. **Diagnostic signals, firewalled** (`signals.py`): a strictly diagnostic side-channel that
-   measures the *delayed-information-diffusion* thesis, **price-divergence** (fundamental trajectory
-   vs trailing price return → `unpriced_improvement` / `melting_ice_cube_priced` / `aligned`) and
-   **ownership** (13D/13G + short interest). It **never** touches `buy_eligible` or the BUY decision;
-   it is recorded for future per-signal calibration only.
-
-**What it does not do:**
-
-- Factor/quant screening or backtesting, empirical evidence that factor alpha evaporates
-  net of transaction costs is baked into the design; that decision space is out of scope.
-- Trading signals, execution, or portfolio management.
-- Real-time data, all data is from SEC filings (1 to 4 day lag typical).
-- Large-cap or sell-side coverage; the tool targets micro/small-cap names with
-  no or minimal analyst coverage.
-- Automated buy recommendations, every output ends with "merits human diligence," not "buy."
+The tool targets companies with little or no analyst coverage. Factor/quant screening,
+trading execution, portfolio management, large-cap coverage and automatic investment
+decisions are outside its scope. Filing-derived data is not real time (a typical filing
+lag is 1 to 4 days); market prices and other convenience data have separate source limits.
+Reports support human decisions. Historical research scripts are described in the
+[documentation index](docs/README.md); they do not establish a factor strategy.
 
 ### Evidence and evaluation
 
@@ -229,30 +156,22 @@ test -f "$skill_alias/SKILL.md" || exit 1
 
 ## Config
 
-`small-cap-deepdive` is **config-bearing**, every tool reads its tuning parameters and the one
-required EDGAR identity (`sec_user_agent`) from a JSON config. Full field-by-field contract:
-[CONFIG.md](CONFIG.md).
+[CONFIG.md](CONFIG.md) owns field definitions, DATA/CONFIG precedence, destination proof,
+profile switching and retention. Configuration, reports and tracking share a verified
+PRIVATE companion. Each alternate profile must select a separate Git worktree root;
+nested profiles are refused. Missing configuration or unproved visibility stops writes.
 
-- **Config discovery:** the pinned `guards/tools/datadir.py` resolver selects the companion.
-  DATA override precedes `SMALL_CAP_DEEPDIVE_CONFIG`, then `SMALL_CAP_DEEPDIVE_CONFIG_DIR`;
-  the resolver also supports its sibling-companion and home-directory conventions.
-  The selected directory must belong to a verified PRIVATE Git repository and contain
-  `config.json`. Missing configuration or unproved visibility fails without selecting another output home.
-- **First time:**
-  ```bash
-  python scripts/init_config.py      # verify the existing PRIVATE companion, then initialize
-  # edit that config.json: set "sec_user_agent" to your real name + email (the only hard requirement)
-  python scripts/verify_config.py --json  # local config, PRIVATE root and dependency checks
-  ```
-- **Switch configs (hot-swap):** point the env var at another config dir, configs are self-contained
-  (`output_dir` relative to the resolved PRIVATE companion). Each selected directory must be an existing PRIVATE Git worktree root; nested profiles are refused.
-- **Secrets / PII:** keep `config.json` and runtime DATA versioned in the verified PRIVATE
-  companion, outside this public tool source. The tool's ignore rules are only a backstop;
-  they do not replace the private boundary or the companion's history and backup.
-  Initialization and verification reject a config destination inside the public tool and
-  verify every remote fetch and push destination; PUBLIC or unknown visibility stops writes.
-  Commit and push configuration and runtime DATA in the PRIVATE companion. Replace the
-  synthetic identity above only in that private configuration before live use.
+After initialization, set the private `sec_user_agent` value and run:
+
+```bash
+python scripts/verify_config.py --json
+```
+
+A blank or example identity returns NOT READY. The doctor checks local configuration,
+destination proof and dependencies; live SEC, market and model readiness requires separate
+verification. Commit and push configuration and runtime DATA in the PRIVATE companion.
+The 64 MiB storage threshold requires dependency review when exceeded and never authorizes
+discarding protected records. See [retention](CONFIG.md#companion-storage-and-retention).
 
 ---
 
@@ -262,9 +181,7 @@ Allocate a batch with `python tools/new_run.py --label <name> [--input-hash <SHA
 
 Resume explicitly with `--resume <RUN_ID> --input-hash <SHA256>`. The manifest's input hash, run identity and configured reports root must match before any mutation; successful resume preserves existing bytes. For compatible allocations without a supplied hash, the tool hashes canonical JSON containing the label, note and nonsecret valuation config snapshot; `tools/new_run.py` documents the exact encoding.
 
-Reports, backtests and run state belong in a verified PRIVATE Git companion. Relative `output_dir` values resolve against that companion; absolute values and `SMALLCAP_OUTPUT_DIR` pass the same proof. `make_report.py --out` may select a different verified PRIVATE companion. The doctor checks local configuration and dependencies; it does not establish live SEC, market or model readiness.
-
-SSH companion origins can use an alias declared by ordinary `Host` and `HostName github.com` rules in `~/.ssh/config`. Verification reads that file locally, respects the first matching `HostName`, and never runs SSH or configured commands. This also checks local rewrites of the literal `github.com` host. SSH configurations using `Include`, `Match`, or hostname canonicalization are refused; use a literal HTTPS GitHub origin for these configurations. HTTPS origins must name `github.com` directly. Every effective fetch and push destination must pass the PRIVATE visibility check. Existing hardlinked output files are refused.
+Output destinations and SSH-origin verification follow [CONFIG.md](CONFIG.md#secrets--pii-mode-b-e6).
 
 There are four entry modes.
 
@@ -295,7 +212,7 @@ Expected token budget: ~10k to 15k tokens per company, <$0.02.
 
 ### 3. Re-rank existing scores
 
-To re-sort or re-weight a prior run's outputs without re-running discovery:
+To re-sort a prior run's scored reports without re-running discovery:
 
 ```bash
 python tools/rank.py --output RANKING-rerun-01.md
@@ -305,9 +222,10 @@ python tools/rank.py --input "<private-companion>/reports/smallcap/<run>" --outp
 
 Choose a fresh output basename for each re-rank. Existing ranking artifacts are preserved.
 
-The default uses the configured PRIVATE companion and active run. Explicit inputs must
-also belong to a separate PRIVATE GitHub worktree. Git and `gh` verify the canonical
-destination before output is written; unknown visibility is refused.
+The default uses existing reports in the configured PRIVATE companion and active run;
+re-ranking does not create a research batch. Explicit inputs must select an existing
+report directory. [CONFIG.md](CONFIG.md#secrets--pii-mode-b-e6) defines the local
+PRIVATE receipt check and refusal of filesystem aliases before output is written.
 
 Full step-by-step: **[runbooks/batch-rank.md](runbooks/batch-rank.md)**
 
@@ -325,12 +243,11 @@ python tools/discover_events.py --spinoffs
 python tools/discover_events.py --insider-clusters
 ```
 
-Both axes hunt a forced-trading or conviction catalyst rather than a keyword. The mechanism
-behind each one, and the honest caveats on both, are stated once in
+These routes enumerate forced-trading or insider-conviction candidates. Mechanisms and
+source limitations are described in
 [`reference/event-driven.md`](reference/event-driven.md).
 
-No theme-fit gate needed, form-type enumeration is structurally precise. Kill-flag scan
-still mandatory (`cheap_pass.py --universe <candidates_event_*.json>`). Pre-listing spinoffs
+Events skip the theme-fit gates. Source validation and the kill-flag scan remain mandatory (`cheap_pass.py --universe <candidates_event_*.json>`). Pre-listing spinoffs
 (no ticker yet) are processed via CIK, in the `band="unknown"` cohort.
 
 Expected token budget: ~300k tokens for a full event-mode run with deep-dives.
@@ -364,7 +281,7 @@ Each candidate is rated mechanically. The scorecard quick reference:
 | 4 to 5 | Survived all gates, real theme exposure, no structural red flags | Merits full human diligence |
 | 3 | Borderline, one weak dimension | Read dimension detail before deciding |
 | 1 to 2 | Hard-rule ceiling applied | Named structural problem; do not invest without resolving it |
-| Eliminated | Kill-flag fired at `cheap_pass` | Stop, do not re-examine |
+| Eliminated | `cheap_pass` returned `rejected=true` | Stop, do not re-examine |
 
 The rating is mechanical: `rating = f(MoS / NAV-MoS, kill-flags, hard-ceilings, buy_eligible)`. The
 7-dimension scorecard is a diagnostic `/35` summary (no hidden weights), not the rating driver; hard
@@ -397,16 +314,14 @@ diagnostic side-channel (firewalled — recorded, never drives BUY)
 thin judgment layer (LLM — reads JSON, applies rubric, never computes financials)
   SKILL.md          — orchestration + world-view + hard rules
   reference/*.md    — methodology invariants (single source of truth)
-  workflows/theme-fit-gate.js  — optional: parallel Gate 2 fan-out accelerator
-  workflows/deepdive-fanout.js — optional: parallel deep-dive accelerator
+  workflows/theme-fit-gate.js  — required host workflow for theme Gate 2
+  workflows/deepdive-fanout.js — required for theme runs; optional for standalone DD
 ```
 
-**Two firm boundaries.** (1) `tools/*.py` never produces investment judgments (only data); the
-judgment layer never computes financials (only reads JSON). (2) The diagnostic `signals` layer is
-firewalled, `valuation.py` / `buy_eligible` / the BUY trigger contain **zero** references to any
-signal (`buy_eligible` is byte-identical with vs without signals). The data/judgment split was
-validated across two production-bug rounds (all bugs were in the data layer, contained by the
-boundary); the signals firewall was grep-verified each iteration.
+The deterministic layer supplies financial data and eligibility checks. The judgment layer
+reads that output and applies the rubric without computing financials. Diagnostic `signals`
+remain outside `valuation.py`, `buy_eligible` and the BUY trigger. The rationale and historical
+development context are in [PHILOSOPHY.md](PHILOSOPHY.md).
 
 ---
 
@@ -454,9 +369,7 @@ English (`README.md`, authoritative) · 中文 ([`README_CN.md`](README_CN.md))
 
 See [ROADMAP.md](ROADMAP.md) · [PHILOSOPHY.md](PHILOSOPHY.md) · [CHANGELOG.md](CHANGELOG.md) · [LICENSE](LICENSE) (MIT).
 
-Contributing: see the design spec in `docs/` for architectural invariants. The core invariant
+Contributing: see [PHILOSOPHY.md](PHILOSOPHY.md) and the [documentation index](docs/README.md) for architectural invariants. The core invariant
 is the data/judgment boundary: the data layer (`tools/*.py`) never produces investment judgment;
 the judgment layer never computes financials. Changes that blur this boundary require explicit
 justification in [PHILOSOPHY.md](PHILOSOPHY.md).
-
-Configuration and tracking share one root; see [CONFIG.md](CONFIG.md) for exact DATA/CONFIG precedence and separate-worktree profile switching. Blank SEC identity is NOT READY. The 64 MiB storage review remains unresolved while protected evidence or retirement holds exceed it.

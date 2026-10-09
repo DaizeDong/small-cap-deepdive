@@ -106,41 +106,31 @@ These are explicitly out of scope for the free-source tier. If a judgment requir
 | Glassdoor employee sentiment | Anti-scraping measures + litigation risk as of 2026 | Use insider trades + compensation instead |
 | LinkedIn data | Anti-scraping enforcement | Use Form 4 + DEF 14A instead |
 
-**Correction, free coarse alt-data exists (philosophy-neutral note).** The blind-spots table above
-is about *panel-grade* paid alt-data. It is NOT true that all between-quarters demand signal is
-paid-vendors-only. Free, session-level sources of coarse demand/attention proxies exist and are live:
+**Free coarse alternative data.**
 
-- **TrendsMCP** (free tier), growth-rate (not just level) across Google Search / News / Shopping /
-  YouTube / Wikipedia / TikTok / Amazon / app-downloads / Steam / npm / news-sentiment / news-volume.
-- **GDELT**, global news tone and volume, ~15-minute cadence, free.
-- **google-news-trends-mcp** and free app/play-store scrapers, coarse rank/review/volume signal.
+The table distinguishes paid panels from coarse free proxies. Potential session-level
+sources include:
 
-These are coarse and noisy relative to paid panels, but they exist for free. **Stating that they
-exist is philosophy-neutral and is corrected here.** The firewalled diagnostic side-channel that
-consumes between-filings signal (corroboration-only, never originates or up-weights a BUY,
-track-forward-gated until it has its own Brier) was **APPROVED in iteration 1 (§5-Q2) and is now
-BUILT in iteration 4**, see "The Firewalled Diagnostic Side-Channel" below. It does NOT change
-the firewall: the mechanical decision layer (valuation.py + `buy_eligible` + the BUY trigger)
-remains strictly T1-only (EDGAR/XBRL + the mktcap denominator). The side-channel lives in a
-SEPARATE top-level `signals` namespace and is read only as labeled T2 context. See
-`PHILOSOPHY.md` ("Operationalizing the diffusion thesis") for the conservative/expansive split.
+- TrendsMCP (free tier): growth-rate rather than level across Google Search / News / Shopping,
+  YouTube, Wikipedia, TikTok, Amazon, app-downloads, Steam, npm, news-sentiment and news-volume.
+- GDELT: global news tone and volume, approximately 15-minute cadence.
+- google-news-trends-mcp and free app/play-store scrapers: coarse rank, review and volume data.
+
+Verify current tools and credentials before use. These sources provide noisy corroborating
+context, not panel-grade revenue reconstruction. P15 below defines their diagnostic use.
 
 ---
 
 ## The Firewalled Diagnostic Side-Channel (iteration 4, §5-Q2 approved)
 
-> The between-filings signal layer. **DIAGNOSTIC-ONLY.** This is the single most important
-> invariant of the layer: every signal here lives in a SEPARATE top-level `signals` namespace in
-> the deepdive output (a sibling of `derived`, NEVER inside it). `valuation.py`, the `buy_eligible`
-> composite, and the BUY trigger **MUST NOT read any `signals.*` field.** A BUY stays anchored to
-> T1 filing-derived valuation + zero kill-flags + `buy_eligible`. Signals may be READ by an
-> analyst/agent as labeled T2 context and snapshotted by `track_forward` for FUTURE per-signal
-> Brier calibration, they can NEVER originate or up-weight a BUY. This is how the diffusion thesis
-> gets operationalized WITHOUT rebuilding the confident-but-wrong narrative engine.
+Diagnostic observations belong in the top-level `signals` namespace, alongside `derived`.
+`valuation.py`, `buy_eligible` and the BUY trigger must not read `signals.*`. Analysts may
+use these observations as labeled T2 context, and `track_forward` retains snapshots for
+future per-signal Brier calibration. They cannot originate or increase a BUY rating.
 
-The layer has three signals. Two are **programmatic** (computed in `tools/signals.py`, written under
-the deepdive's top-level `signals` key by `tools/deepdive_data.py`). One is **agent-gathered** (the
-MCP sources are not callable from Python; the agent reads them at analysis time).
+P16 and P17 are computed by `tools/signals.py` and written by `tools/deepdive_data.py`.
+P15 is gathered by the agent through available session tools. The design rationale is in
+[PHILOSOPHY.md](../PHILOSOPHY.md#operationalizing-the-diffusion-thesis--让信息扩散论点落地).
 
 ### P16, Fundamental-vs-Price divergence (programmatic, `tools/signals.py`)
 
@@ -201,10 +191,6 @@ the report's T2 diagnostic section so the snapshot can be calibrated later.
   `never_affects_buy: true`, `sources`, `notes`) so the invariant is machine-readable.
 - The deepdive writes this under a TOP-LEVEL `signals` key (sibling of `derived`). Nothing in the
   decision path (`valuation.py`, `buy_eligible`, the BUY trigger) references the `signals` namespace.
-
-> All three signals are strictly diagnostic. They exist to let an analyst weigh between-filings
-> evidence and to let `track_forward` accumulate per-signal predictive value for FUTURE calibration.
-> Until each signal has its own Brier score, none of them gates anything.
 
 ---
 
