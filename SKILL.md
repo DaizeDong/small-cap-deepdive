@@ -133,8 +133,9 @@ Optionally pass `--theme X` to anchor the theme-fit scoring.
 1. **Mechanical de-risk first.** Save a one-company universe in the private run directory, then run
    `tools/cheap_pass.py --universe <path-to-json-or-csv>`. JSON must be a list of objects with
    `ticker`, `cik` and `name` keys; CSV also requires boolean `smallcap_candidate`. Event rows may
-   retain blank ticker/CIK values; optional `mktcap` and `price` values must be numeric. If any hard
-   kill-flag fires, report it and stop before full deep-dive. Exit 0 means the requested work is
+   retain blank ticker/CIK values; optional `mktcap` and `price` values must be numeric. Use the
+   returned `rejected` field: if true, report the reason and stop before full deep-dive; a single
+   risk flag does not necessarily reject a company. Exit 0 means the requested work is
    complete; exit 2 means partial, unavailable or invalid, so inspect coverage before proceeding.
    Nonempty manual input without its `<artifact>.stage.json` completion receipt remains partial;
    empty input without completion evidence is unavailable. Keep each artifact with its receipt,
