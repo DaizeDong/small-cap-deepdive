@@ -7,6 +7,7 @@ import math
 import os
 from pathlib import Path
 import re
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -192,11 +193,41 @@ class _LazyReports(os.PathLike):
 
 
 REPORTS = _LazyReports()
+_EDGAR_CACHE_PATHS = None
 
 
 def init_edgar() -> None:
+    global _EDGAR_CACHE_PATHS
+    identity = CFG['sec_user_agent']
+    cache = _companion_root() / 'data' / 'edgar-cache'
+    defaults = {
+        'EDGAR_LOCAL_DATA_DIR': (cache, {Path.home() / '.edgar', Path.home() / '.cache' / 'edgar'}),
+        'EDGAR_CACHE_DIR': (cache / 'derived', {Path.home() / '.edgar_cache'}),
+        'EDGAR_TEST_DIR': (cache / 'tests', {Path.home() / '.edgar_test'}),
+    }
+    paths = {}
+    for name, (default, retired) in defaults.items():
+        selected = Path(os.environ[name]).expanduser() if os.environ.get(name) else default
+        if not selected.is_absolute():
+            raise ConfigNotInitialized(name + ' must select an absolute PRIVATE cache path')
+        paths[name] = prove_output_path(default if selected in retired else selected)
+    if 'edgar' in sys.modules and _EDGAR_CACHE_PATHS != paths:
+        raise ConfigNotInitialized(
+            'EDGAR was loaded before this private cache was selected. '
+            'Run this tool in a fresh Python process so its HTTP cache uses the companion.')
+    paths['EDGAR_LOCAL_DATA_DIR'].mkdir(parents=True, exist_ok=True)
+    # Configure all library storage before import, including inherited stale environments.
+    os.environ.update({name: str(prove_output_path(path)) for name, path in paths.items()})
     from edgar import set_identity
-    set_identity(CFG['sec_user_agent'])
+    set_identity(identity)
+    _EDGAR_CACHE_PATHS = paths
+
+
+def edgar_company(*args, **kwargs):
+    """Construct a company after selecting the private cache, without eager imports."""
+    init_edgar()
+    from edgar import Company
+    return Company(*args, **kwargs)
 
 
 def run_state_path(run: str | None = None, pid: int | None = None) -> Path:

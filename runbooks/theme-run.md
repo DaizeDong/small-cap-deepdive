@@ -274,7 +274,7 @@ and filing length. Large themes (500+ raw candidates) scale linearly with Gate 2
 
 ## Troubleshooting
 
-**EDGAR 403 error:** `sec_user_agent` in `~/.small-cap-deepdive-config/config.json` (private config dir) is missing or malformed. Must be
+**EDGAR 403 error:** `sec_user_agent` in the private companion's `config.json` (`small-cap-deepdive-config` beside this repository) is missing or malformed. Must be
 `"Name email@domain.com"` format.
 
 **Zero FTS hits:** Keyword too specific. Try the single most distinctive word of the theme.

@@ -31,7 +31,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-from edgar import Company
 
 # Import _common exports
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -39,6 +38,7 @@ from _common import (
     init_edgar, REPORTS, slug, today, CFG, http_get,
     resolve_mktcap, band_for,  # P5, mktcap fallback + band tagging (resolve ceiling here)
 )
+from _common import edgar_company as Company
 # P3, magnitude-based concentration (extractor + flag composer live in deepdive_data,
 # the P3 owner). cheap_pass already reads the 10-K full text in killflag_scan, so we reuse
 # the same deterministic extractor on that text to surface the kill-flag BEFORE the expensive

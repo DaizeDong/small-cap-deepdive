@@ -25,6 +25,7 @@ def callers(monkeypatch):
     common.CFG = {}
     common.today = lambda: FIX['filing_date']
     common.http_get = blocked
+    common.edgar_company = blocked
     common.slug = lambda value: value
     common.resolve_mktcap = blocked
     common.band_for = blocked

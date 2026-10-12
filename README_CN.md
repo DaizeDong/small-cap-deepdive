@@ -99,12 +99,11 @@ git clone --recurse-submodules https://github.com/DaizeDong/small-cap-deepdive.g
 cd ~/.claude/plugins/small-cap-deepdive
 pip install -r tools/requirements.txt
 gh repo create small-cap-deepdive-config --private --add-readme
-gh repo clone small-cap-deepdive-config ~/.small-cap-deepdive-config
-export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
+gh repo clone small-cap-deepdive-config ../small-cap-deepdive-config   # 放在本仓旁边
 python scripts/init_config.py
 ```
 
-打开 `~/.small-cap-deepdive-config/config.json`，将 `"sec_user_agent"` 设为你的真实姓名和邮箱：
+打开 `../small-cap-deepdive-config/config.json`，将 `"sec_user_agent"` 设为你的真实姓名和邮箱：
 
 ```json
 "sec_user_agent": "AcmeCorp user1@example.com"

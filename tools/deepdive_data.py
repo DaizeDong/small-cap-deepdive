@@ -34,11 +34,11 @@ import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from edgar import Company
 
 # sys.path shim so this script can be run directly from tools/
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import init_edgar, UA, REPORTS, today, CFG, http_get
+from _common import edgar_company as Company
 from filter_by_sic import (stage_completion, stage_work, stage_receipt_path,
                            prepare_stage_output, write_stage_receipt, read_stage_receipt)
 from _cash_flow_evidence import paired_annual_sum_evidence

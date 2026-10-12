@@ -28,6 +28,7 @@ def debt_module(monkeypatch):
         raise AssertionError("External data is outside this generated debt test")
 
     common.http_get = blocked
+    common.edgar_company = blocked
     monkeypatch.setitem(sys.modules, "_common", common)
     monkeypatch.setitem(sys.modules, "edgar", SimpleNamespace(Company=blocked))
     monkeypatch.setitem(sys.modules, "signals", SimpleNamespace(

@@ -112,12 +112,11 @@ Then install the data-layer dependencies and configure once:
 cd ~/.claude/plugins/small-cap-deepdive
 pip install -r tools/requirements.txt
 gh repo create small-cap-deepdive-config --private --add-readme
-gh repo clone small-cap-deepdive-config ~/.small-cap-deepdive-config
-export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
+gh repo clone small-cap-deepdive-config ../small-cap-deepdive-config   # beside this repository
 python scripts/init_config.py
 ```
 
-Open `~/.small-cap-deepdive-config/config.json` and set `"sec_user_agent"` to your real name and email:
+Open `../small-cap-deepdive-config/config.json` and set `"sec_user_agent"` to your real name and email:
 
 ```json
 "sec_user_agent": "AcmeCorp user1@example.com"

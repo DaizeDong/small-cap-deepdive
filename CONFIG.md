@@ -13,9 +13,9 @@ Secrets stay outside the tool source; runtime DATA is versioned only in PRIVATE 
 
 The pinned `guards/tools/datadir.py` resolver selects one root for configuration,
 reports, initialization and tracking. The order is `SMALL_CAP_DEEPDIVE_DATA_DIR`,
-`SMALL_CAP_DEEPDIVE_CONFIG`, `SMALL_CAP_DEEPDIVE_CONFIG_DIR`, a sibling
-`small-cap-deepdive-config`, `~/.small-cap-deepdive-config`, then
-`~/.small-cap-deepdive-data`. A DATA override must name the exact `data/` child;
+`SMALL_CAP_DEEPDIVE_CONFIG`, `SMALL_CAP_DEEPDIVE_CONFIG_DIR`, then a sibling
+`small-cap-deepdive-config`. There is no home-directory location; with none of these present the
+tool is uninitialized and writers fail with setup instructions. A DATA override must name the exact `data/` child;
 root lookup removes that terminal component. Tracking always uses
 `<companion>/data/metrics`, even before `data/` exists. Explicit initializer
 `--out` and doctor `--config-dir` select the root for that command before the environment.
@@ -93,8 +93,8 @@ Run from the tool checkout. Create or clone the PRIVATE companion first; initial
 ```bash
 pip install -r tools/requirements.txt
 gh repo create small-cap-deepdive-config --private --add-readme
-gh repo clone small-cap-deepdive-config "$HOME/.small-cap-deepdive-config"
-export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$HOME/.small-cap-deepdive-config"
+gh repo clone small-cap-deepdive-config ../small-cap-deepdive-config
+export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$(cd ../small-cap-deepdive-config && pwd -P)"
 python scripts/init_config.py
 # After successful PRIVATE verification, edit sec_user_agent in the private config.
 python scripts/verify_config.py --json
