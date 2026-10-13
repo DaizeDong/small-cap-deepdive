@@ -415,7 +415,7 @@ def _ledger_lock(target):
     it behind: verify no tracker writer is running before manually removing it.
     There is deliberately no automatic stale-lock deletion.
     """
-    lock_path = prepare_output(target.with_name(f".{target.name}.lock"), artifact_id='verdict-lock')
+    lock_path = prepare_output(target.with_name(f".{target.name}.lock"))
     try:
         stream = lock_path.open("x", encoding="ascii")
     except FileExistsError as exc:
@@ -437,7 +437,7 @@ def _save_verdicts(rows: list[dict]) -> None:
     Reload and retry the command to score or backfill the current set of rows.
     """
     content = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
-    target = prepare_output(VERDICTS_FILE, artifact_id='verdicts')
+    target = prepare_output(VERDICTS_FILE)
     with _ledger_lock(target):
         try:
             current = target.read_bytes()
@@ -471,8 +471,7 @@ def _validate_adjudication_writes(previous, rows):
 
 def _replace_verdicts(target, content):
     """Replace the entire ledger while the caller holds its exclusive lock."""
-    tmp_path = prepare_output(target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp"),
-                              artifact_id='verdict-staging')
+    tmp_path = prepare_output(target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp"))
     created = False
     try:
         with tmp_path.open("x", encoding="utf-8") as stream:
@@ -480,7 +479,6 @@ def _replace_verdicts(target, content):
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        prepare_output(target, artifact_id='verdicts')
         os.replace(tmp_path, target)
     finally:
         if created:
@@ -490,7 +488,7 @@ def _replace_verdicts(target, content):
 def _append_verdict(row: dict) -> bool:
     """Atomically deduplicate and append; return whether a new row was recorded."""
     _require_adjudication_receipt(row)
-    target = prepare_output(VERDICTS_FILE, artifact_id='verdicts')
+    target = prepare_output(VERDICTS_FILE)
     with _ledger_lock(target):
         rows = _load_verdicts()
         if not isinstance(rows, _VerdictSnapshot) or rows.source_path != target:
@@ -1300,7 +1298,7 @@ def cmd_scorecard(args) -> None:
         if earliest_maturity and scored:
             lines += ["", f"*Earliest pending maturity: {earliest_maturity.strftime('%Y-%m-%d')}*"]
 
-    prepare_output(destination, artifact_id='scorecard').write_text("\n".join(lines) + "\n", encoding="utf-8")
+    prepare_output(destination).write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Scorecard written: {SCORECARD_FILE}")
     print(f"Scored: {len(scored)} | Pending: {len(pending)}")
 

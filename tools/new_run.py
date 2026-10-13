@@ -108,13 +108,12 @@ def main(argv=None):
         input_hash = supplied_hash or hashlib.sha256(canonical).hexdigest()
         created = today()
         commit, dirty = _git_version(_REPO)
-        authorize_output(root, directory=True, artifact_id='current-reports')
+        root = authorize_output(root, directory=True)
         root.mkdir(parents=True, exist_ok=True)
-        root = prove_output_path(root)
         for attempt in range(8):
             name = f'{created}_{label}_{uuid.uuid4().hex}'
             directory = _run_directory(root, name)
-            authorize_output(directory, directory=True, artifact_id='current-reports')
+            authorize_output(directory, directory=True)
             try:
                 directory.mkdir(exist_ok=False)
                 break
@@ -128,7 +127,7 @@ def main(argv=None):
         for filename, text in (
                 ('_run.json', json.dumps(manifest, indent=2, ensure_ascii=False)+'\n'),
                 ('_run_state.txt', name+'\n')):
-            target = authorize_output(directory/filename, artifact_id='current-reports')
+            target = authorize_output(directory/filename)
             if target.parent != directory:
                 raise ValueError('allocated run metadata escaped its directory')
             with target.open('x', encoding='utf-8') as stream:

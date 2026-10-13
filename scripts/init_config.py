@@ -39,10 +39,8 @@ def check_config_target(target):
 
 
 def write_config(target, text):
-    """Replace only after a complete write and a fresh destination path check."""
-    authorize_output(target, artifact_id='config')
-    temporary = authorize_output(target.parent / ('.config-' + uuid.uuid4().hex + '.tmp'),
-                                 artifact_id='config-staging')
+    """Replace ``target`` (already checked by ``main``) only after a complete write."""
+    temporary = authorize_output(target.parent / ('.config-' + uuid.uuid4().hex + '.tmp'))
     descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
         with os.fdopen(descriptor, 'w', encoding='utf-8', newline='\n') as stream:
@@ -50,8 +48,6 @@ def write_config(target, text):
             stream.flush()
             os.fsync(stream.fileno())
         check_config_target(target)
-        if authorize_output(target, artifact_id='config') != target:
-            raise OutputPathError('config destination changed during initialization')
         os.replace(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
@@ -65,7 +61,6 @@ def main():
     try:
         out_dir = prove_companion_root(resolve_out(args.out))
         target = out_dir / 'config.json'
-        authorize_output(target, artifact_id='config')
         check_config_target(target)
         if prove_output_path(target) != target:
             raise OutputPathError('config destination must remain in the selected directory')

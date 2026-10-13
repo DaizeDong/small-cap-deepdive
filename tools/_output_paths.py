@@ -81,19 +81,16 @@ def prove_companion_root(requested):
     return path
 
 
-def authorize_output(requested, *, directory=False, artifact_id=None):
-    """Path-only admission; ``directory`` and ``artifact_id`` are kept for callers."""
+def authorize_output(requested, *, directory=False):
+    """Return the checked target; ``directory`` also refuses an existing file there."""
     path = _prove_output_path(requested)[0]
     if directory and path.exists() and not path.is_dir():
         raise OutputPathError('directory output exists as a file')
     return path
 
 
-def prepare_output(requested, *, artifact_id='current-reports'):
-    """Recheck the path and its worktree after creating the destination's parents."""
-    path, before = _prove_output_path(requested)
+def prepare_output(requested):
+    """Check the destination, then create its parent directories."""
+    path = _prove_output_path(requested)[0]
     path.parent.mkdir(parents=True, exist_ok=True)
-    final, after = _prove_output_path(path)
-    if final != path or before != after:
-        raise OutputPathError('PRIVATE output destination changed while preparing its parent')
-    return final
+    return path
