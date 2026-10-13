@@ -135,20 +135,14 @@ def input_file(directory, data=None):
     return path
 
 
-@pytest.mark.parametrize('kind', ['unversioned', 'source', 'public', 'hardlinked'])
-def test_unproved_mutating_input_is_refused_before_live_work(cli, state, tmp_path, monkeypatch, kind):
+@pytest.mark.parametrize('kind', ['unversioned', 'source', 'hardlinked'])
+def test_unchecked_mutating_input_is_refused_before_live_work(cli, state, tmp_path, monkeypatch, kind):
     outputs = importlib.import_module('_output_paths')
     directory = tmp_path
     if kind == 'source':
         directory = tmp_path / FIX['cli']['tool_name']
         directory.mkdir()
         monkeypatch.setattr(outputs, 'SOURCE_ROOT', directory)
-    elif kind == 'public':
-        directory = tmp_path / FIX['cli']['public_name']
-        directory.mkdir()
-        (directory / '.git').mkdir()
-        state['origins'][str(directory)] = FIX['cli']['public_origin']
-        state['visibility'][FIX['cli']['public_identity']] = 'PUBLIC'
     elif kind == 'hardlinked':
         directory = Path(state['companion'])
     source = input_file(directory)
@@ -218,18 +212,15 @@ def test_invalid_document_fails_before_live_work(cli, state, data):
     assert not Path(state['root']).exists()
 
 
-def test_unproved_report_destination_fails_before_live_work(cli, state, tmp_path, monkeypatch):
+def test_unmanaged_report_destination_fails_before_live_work(cli, state, tmp_path, monkeypatch):
     source = input_file(Path(state['companion']))
     before = source.read_bytes()
     directory = tmp_path / FIX['cli']['public_name']
     directory.mkdir()
-    (directory / '.git').mkdir()
-    state['origins'][str(directory)] = FIX['cli']['public_origin']
-    state['visibility'][FIX['cli']['public_identity']] = 'PUBLIC'
     monkeypatch.setenv('SMALLCAP_OUTPUT_DIR', str(directory))
     invoke, calls = cli
     with pytest.raises((RuntimeError, ValueError, SystemExit)):
         invoke(source)
     assert not calls
     assert source.read_bytes() == before
-    assert list(directory.iterdir()) == [directory / '.git']
+    assert list(directory.iterdir()) == []

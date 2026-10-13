@@ -7,8 +7,8 @@
 
 ## Prerequisites
 
-Complete [CONFIG.md setup](../CONFIG.md#first-time-setup-e3). The PRIVATE companion must have
-a committed HEAD and current visibility proof. Fill `sec_user_agent` privately, then run
+Complete [CONFIG.md setup](../CONFIG.md#first-time-setup-e3). The PRIVATE companion must be
+an existing Git worktree outside this source. Fill `sec_user_agent` privately, then run
 `python scripts/verify_config.py --json`. A blank or example identity is NOT READY; a local
 ready result does not establish live SEC, market or model availability. Keep configuration,
 observations and reports committed and pushed in that PRIVATE companion.

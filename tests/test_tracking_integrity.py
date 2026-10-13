@@ -32,13 +32,12 @@ def test_bad_ledger_is_not_silently_dropped_before_rewrite(tracker, content):
 
 
 @pytest.mark.parametrize('operation', ['append', 'save', 'scorecard'])
-@pytest.mark.parametrize('visibility', ['PUBLIC', None])
-def test_unproved_tracker_write_preserves_all_existing_bytes(tracker, state, operation, visibility):
+def test_unmanaged_tracker_write_preserves_all_existing_bytes(tracker, state, operation):
     tracker.METRICS_DIR.mkdir(parents=True)
     tracker.VERDICTS_FILE.write_text(CASE['prior_bytes'], encoding='utf-8')
-    state['visibility']['example/synthetic-smallcap-config'] = visibility
+    (Path(state['companion']) / '.git').rmdir()
     before = {p.name: p.read_bytes() for p in tracker.METRICS_DIR.iterdir()}
-    with pytest.raises(RuntimeError, match='PRIVATE|PUBLIC|visibility|verification'):
+    with pytest.raises(RuntimeError, match='PRIVATE|worktree'):
         if operation == 'append':
             tracker._append_verdict(CASE['unreviewed'][0])
         elif operation == 'save':

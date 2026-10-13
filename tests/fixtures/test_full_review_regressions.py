@@ -79,19 +79,15 @@ def test_older_oos_cli_reads_current_private_artifact(research, state, monkeypat
 
 
 @pytest.mark.parametrize("extractor", [0, 1])
-@pytest.mark.parametrize("visibility", ["PUBLIC", None])
-def test_unproved_research_destination_preserves_public_sentinel(
-        research, state, monkeypatch, tmp_path, extractor, visibility):
+def test_unmanaged_research_destination_preserves_public_sentinel(
+        research, state, monkeypatch, tmp_path, extractor):
     public = tmp_path / "synthetic public source"
-    (public / ".git").mkdir(parents=True)
     sentinel = public / "docs" / "backtest-2026-06" / "distress_features.json"
     sentinel.parent.mkdir(parents=True)
     sentinel.write_text(CASE["sentinel"], encoding="utf-8")
-    state["origins"][str(public)] = "https://github.com/example/synthetic-public.git"
-    state["visibility"]["example/synthetic-public"] = visibility
     monkeypatch.setattr(research[0], "output_root", lambda: public / "reports" / "smallcap")
     monkeypatch.setattr(research[extractor], "ROOT", str(public))
-    with pytest.raises(RuntimeError, match="PRIVATE|PUBLIC|visibility|verification"):
+    with pytest.raises(RuntimeError, match="PRIVATE|worktree"):
         (research[extractor].main if extractor == 0 else research[extractor].run)()
     assert sentinel.read_text(encoding="utf-8") == CASE["sentinel"]
     assert not (public / "reports").exists()
@@ -109,13 +105,13 @@ def test_uninitialized_research_writer_fails_before_pull(research, state, monkey
     assert not Path(state["root"]).exists()
 
 
-def test_each_research_checkpoint_reproves_destination(research, state):
+def test_each_research_checkpoint_rechecks_destination(research, state):
     trusted = research[0]
     trusted.write_features([CASE["feature"]])
     destination = trusted.features_path()
     before = destination.read_bytes()
-    state["visibility"]["example/synthetic-smallcap-config"] = "PUBLIC"
-    with pytest.raises(RuntimeError, match="PRIVATE|PUBLIC"):
+    (Path(state["companion"]) / ".git").rmdir()
+    with pytest.raises(RuntimeError, match="PRIVATE|worktree"):
         trusted.write_features([])
     assert destination.read_bytes() == before
 

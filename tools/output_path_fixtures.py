@@ -1,11 +1,5 @@
-"""Generate synthetic repositories and receipts for PRIVATE output controls."""
-from datetime import datetime, timezone
+"""Generate synthetic repositories for companion output path controls."""
 from pathlib import Path
-
-
-def visibility_receipt(states):
-    """Create a fresh receipt containing only caller-supplied synthetic identities."""
-    return {"_refreshed": datetime.now(timezone.utc).isoformat(), **states}
 
 
 def output_path_security_case(root):
@@ -13,7 +7,6 @@ def output_path_security_case(root):
     identities = {
         "public": "example-owner/public-tool",
         "private": "example-owner/private-companion",
-        "unknown": "example-owner/unknown-companion",
     }
     return {
         "root": root,
@@ -22,8 +15,5 @@ def output_path_security_case(root):
         "identities": identities,
         "origins": {name: "https://github.com/" + identity + ".git"
                     for name, identity in identities.items()},
-        "visibility": {identities["public"]: "PUBLIC", identities["private"]: "PRIVATE"},
         "output": Path("reports/smallcap/output.json"),
-        "incompatible_api": "def prove_private_companion(destination):\n    return None\n",
-        "changed_signature": "synthetic-changed-configuration",
     }

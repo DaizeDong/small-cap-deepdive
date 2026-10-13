@@ -241,7 +241,7 @@ summary or rescaled 1 to 5 with one decimal, with ties broken by Dimension 1 (fi
 ## Environment Prerequisites
 
 Follow [CONFIG.md setup](CONFIG.md#first-time-setup-e3) before running tools. The selected
-PRIVATE companion must have a committed HEAD and current visibility proof. Set its
+PRIVATE companion must be an existing Git worktree outside this source. Set its
 `sec_user_agent`, then run `python scripts/verify_config.py --json`; blank or example identity
 is NOT READY. This checks local prerequisites, not live provider or model availability.
 

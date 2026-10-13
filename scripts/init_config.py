@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Initialize deterministic configuration in a verified, versioned PRIVATE companion.
+"""Initialize deterministic configuration in a versioned PRIVATE companion worktree.
 
 Explicit --out takes precedence over the supported config environment selectors.
 Otherwise use the same companion discovery as the runtime. An existing PRIVATE
@@ -39,7 +39,7 @@ def check_config_target(target):
 
 
 def write_config(target, text):
-    """Replace only after a complete write and a fresh destination proof."""
+    """Replace only after a complete write and a fresh destination path check."""
     authorize_output(target, artifact_id='config')
     temporary = authorize_output(target.parent / ('.config-' + uuid.uuid4().hex + '.tmp'),
                                  artifact_id='config-staging')
@@ -68,7 +68,7 @@ def main():
         authorize_output(target, artifact_id='config')
         check_config_target(target)
         if prove_output_path(target) != target:
-            raise OutputPathError('config destination must remain in the verified directory')
+            raise OutputPathError('config destination must remain in the selected directory')
         template = json.loads(_EXAMPLE.read_text(encoding='utf-8'))
         if not isinstance(template, dict):
             raise ValueError('config template must be a JSON object')
@@ -83,7 +83,7 @@ def main():
         print('Create or clone a PRIVATE Git companion with an origin remote, then select it with --out or SMALL_CAP_DEEPDIVE_CONFIG_DIR.')
         return 2
 
-    print('Verified PRIVATE configuration directory: ' + str(out_dir))
+    print('PRIVATE configuration directory: ' + str(out_dir))
     print('Set sec_user_agent privately in config.json before live EDGAR requests.')
     print('Retain configuration and runtime history in the PRIVATE companion with commit and push.')
     print('Use SMALL_CAP_DEEPDIVE_CONFIG_DIR to select this directory for subsequent commands.')

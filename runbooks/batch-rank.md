@@ -23,9 +23,8 @@ The default REPORTS directory combines that companion's output directory with th
 ```
 
 Install `tools/requirements.txt` and follow [CONFIG.md](../CONFIG.md#secrets--pii-mode-b-e6)
-for PRIVATE storage and current visibility receipts. Refresh the receipt during setup
-when needed; ranking uses Git and the local receipt without invoking `gh` or the network.
-Filesystem aliases, PUBLIC or unproved routes, and unversioned destinations are refused.
+for PRIVATE storage. Ranking checks destination paths only, without invoking Git, `gh`
+or the network. Filesystem aliases and destinations outside a Git worktree are refused.
 
 ---
 
@@ -36,7 +35,7 @@ Filesystem aliases, PUBLIC or unproved routes, and unversioned destinations are 
 | Flag | Default | Description |
 |---|---|---|
 | `--slug <s>` | (none) | Filter to `report_<slug>_*.md` files; falls back to all `report_*.md` if none match |
-| `--input <dir>` | REPORTS from config | Initialized absolute path to the reports directory in a verified PRIVATE companion |
+| `--input <dir>` | REPORTS from config | Initialized absolute path to the reports directory in the PRIVATE companion |
 | `--output <name>` | `RANKING.md` | Fresh ranking basename within that run; the artifact and its receipt must not already exist |
 
 **AVOID/kill-flag sink logic:** Candidates rated AVOID or with kill-flag count ≥ 2 are

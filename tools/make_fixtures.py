@@ -12,11 +12,6 @@ def output_path_security_case(root):
     return generate(root)
 
 
-def output_visibility_receipt(states):
-    from output_path_fixtures import visibility_receipt
-    return visibility_receipt(states)
-
-
 def filing_disclosure_scenarios():
     """Invented filing statements exercise polarity, timing and unresolved evidence."""
     rows = [
@@ -120,46 +115,6 @@ def filing_negation_scenarios():
     ])
     return [{'id': name, 'topic': topic, 'text': text, 'flag': flag, 'status': status}
             for name, topic, text, flag, status in rows]
-
-
-def ssh_alias_scenarios():
-    """Ordinary SSH aliases and conservative unsupported-config controls."""
-    alias = 'synthetic-gh'
-    identity = 'example/synthetic-smallcap-config'
-    ordinary = 'Host synthetic-gh\n  HostName github.com\n'
-    return {'alias': alias, 'identity': identity, 'origin': 'git@'+alias+':'+identity+'.git',
-            'ordinary': ordinary, 'cases': [
-                ['scp', 'git@'+alias+':'+identity+'.git', ordinary, True],
-                ['ssh-url', 'ssh://git@'+alias+'/'+identity+'.git', ordinary, True],
-                ['multiple-hosts', 'git@'+alias+':'+identity+'.git', 'Host unused synthetic-gh\n HostName github.com\n', True],
-                ['inline-comment', 'git@'+alias+':'+identity+'.git', 'Host synthetic-gh\n HostName = "github.com" # synthetic\n', False],
-                ['active-commands', 'git@'+alias+':'+identity+'.git', ordinary+' ProxyCommand synthetic-no-execute\n LocalCommand synthetic-no-execute\n', False],
-                ['literal-https', 'https://github.com/'+identity+'.git', None, True],
-                ['literal-ssh', 'git@github.com:'+identity+'.git', None, True],
-                ['literal-host-rewrite', 'git@github.com:'+identity+'.git', 'Host github.com\n HostName example.com\n', False],
-                ['literal-global-rewrite', 'git@github.com:'+identity+'.git', 'HostName example.com\n', False],
-                ['literal-unmatched-config', 'git@github.com:'+identity+'.git', 'Host unrelated\n HostName example.com\n', True],
-                ['unknown', 'git@unknown-synthetic:'+identity+'.git', ordinary, False],
-                ['missing', 'git@'+alias+':'+identity+'.git', None, False],
-                ['unrelated', 'git@'+alias+':'+identity+'.git', 'Host synthetic-gh\n HostName example.com\n', False],
-                ['lookalike', 'git@'+alias+':'+identity+'.git', 'Host synthetic-gh\n HostName github.com.example.com\n', False],
-                ['first-value', 'git@'+alias+':'+identity+'.git', 'Host *\n HostName example.com\n'+ordinary, False],
-                ['negated', 'git@'+alias+':'+identity+'.git', 'Host * !synthetic-gh\n HostName github.com\n', False],
-                ['match-exec', 'git@'+alias+':'+identity+'.git', ordinary+'Match exec "synthetic-no-execute"\n', False],
-                ['include', 'git@'+alias+':'+identity+'.git', 'Include synthetic-config\n'+ordinary, False],
-                ['malformed', 'git@'+alias+':'+identity+'.git', 'Host "synthetic-gh\n HostName github.com\n', False],
-                ['https-alias', 'https://'+alias+'/'+identity+'.git', ordinary, False],
-                ['bad-slug', 'git@'+alias+':example/repo/extra.git', ordinary, False],
-                ['wildcard', 'git@'+alias+':'+identity+'.git', 'Host synthetic-*\n HostName github.com\n', True],
-                ['later-hostname-conflict', 'git@'+alias+':'+identity+'.git', ordinary+'Host *\n HostName example.com\n', False],
-                ['compact-equals', 'git@'+alias+':'+identity+'.git', 'Host=synthetic-gh\n HostName=github.com\n', True],
-                ['global-hostname', 'git@'+alias+':'+identity+'.git', 'HostName github.com\n', True],
-                ['mixed-case-host-pattern', 'git@SYNTHETIC-GH:'+identity+'.git', 'hOsT Synthetic-Gh\n HOSTNAME GitHub.com\n', False],
-                ['case-insensitive-directives', 'git@SYNTHETIC-GH:'+identity+'.git', 'hOsT synthetic-gh\n HOSTNAME GitHub.com\n', True],
-                ['literal-brackets', 'git@'+alias+':'+identity+'.git', 'Host [s]ynthetic-gh\n HostName github.com\n', False],
-                ['canonicalization', 'git@'+alias+':'+identity+'.git', ordinary+' CanonicalizeHostname yes\n', False],
-                ['empty-host', 'git@'+alias+':'+identity+'.git', 'Host\n HostName github.com\n', False],
-            ]}
 
 
 def private_run_scenario():
@@ -274,16 +229,8 @@ def malformed_ranking_scenarios():
 def initialization_scenarios():
     """Synthetic setup destinations and metadata without an EDGAR identity."""
     return {
-        'destinations': [('private', 'PRIVATE', True), ('public', 'PUBLIC', False),
-                         ('unknown', None, False), ('unversioned', 'PRIVATE', False)],
+        'destinations': [('private', True), ('unversioned', False)],
         'existing_config': '{"synthetic_preserved": true}\n',
-        'ambient_host': 'example.com',
-        'public_origin': 'https://github.com/example/synthetic-public.git',
-        'public_identity': 'example/synthetic-public',
-        'remote_cases': [('push-public', 'PUBLIC', False), ('push-unknown', None, False),
-                         ('extra-public', 'PUBLIC', False), ('extra-unknown', None, False),
-                         ('extra-private', 'PRIVATE', True), ('multi-public', 'PUBLIC', False),
-                         ('multi-private', 'PRIVATE', True)],
     }
 
 
@@ -804,8 +751,6 @@ def sic_recall_scenarios():
         'sic': [{'cik': '42', 'name': 'AcmeCorp', 'sic': '1234'},
                 {'cik': '0000000043', 'name': 'AcmeCorp', 'sic': '1234'}],
         'invalid_ciks': [None, '', True, 0, -42, 1.2, 'invalid', '12.3', '10000000000'],
-        'public_origin': 'https://github.com/example/synthetic-public',
-        'public_identity': 'example/synthetic-public',
     }
 
 
@@ -1743,19 +1688,15 @@ def test_older_oos_cli_reads_current_private_artifact(research, state, monkeypat
 
 
 @pytest.mark.parametrize("extractor", [0, 1])
-@pytest.mark.parametrize("visibility", ["PUBLIC", None])
-def test_unproved_research_destination_preserves_public_sentinel(
-        research, state, monkeypatch, tmp_path, extractor, visibility):
+def test_unmanaged_research_destination_preserves_public_sentinel(
+        research, state, monkeypatch, tmp_path, extractor):
     public = tmp_path / "synthetic public source"
-    (public / ".git").mkdir(parents=True)
     sentinel = public / "docs" / "backtest-2026-06" / "distress_features.json"
     sentinel.parent.mkdir(parents=True)
     sentinel.write_text(CASE["sentinel"], encoding="utf-8")
-    state["origins"][str(public)] = "https://github.com/example/synthetic-public.git"
-    state["visibility"]["example/synthetic-public"] = visibility
     monkeypatch.setattr(research[0], "output_root", lambda: public / "reports" / "smallcap")
     monkeypatch.setattr(research[extractor], "ROOT", str(public))
-    with pytest.raises(RuntimeError, match="PRIVATE|PUBLIC|visibility|verification"):
+    with pytest.raises(RuntimeError, match="PRIVATE|worktree"):
         (research[extractor].main if extractor == 0 else research[extractor].run)()
     assert sentinel.read_text(encoding="utf-8") == CASE["sentinel"]
     assert not (public / "reports").exists()
@@ -1773,13 +1714,13 @@ def test_uninitialized_research_writer_fails_before_pull(research, state, monkey
     assert not Path(state["root"]).exists()
 
 
-def test_each_research_checkpoint_reproves_destination(research, state):
+def test_each_research_checkpoint_rechecks_destination(research, state):
     trusted = research[0]
     trusted.write_features([CASE["feature"]])
     destination = trusted.features_path()
     before = destination.read_bytes()
-    state["visibility"]["example/synthetic-smallcap-config"] = "PUBLIC"
-    with pytest.raises(RuntimeError, match="PRIVATE|PUBLIC"):
+    (Path(state["companion"]) / ".git").rmdir()
+    with pytest.raises(RuntimeError, match="PRIVATE|worktree"):
         trusted.write_features([])
     assert destination.read_bytes() == before
 

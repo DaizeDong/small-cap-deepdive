@@ -504,7 +504,7 @@ def write_sic_floor_sidecar(theme_slug: str, sic_rows: list[dict],
                             run_dir: Path | None = None) -> Path:
     """Write the SIC-floor recall rows to the active-run, slug-namespaced sidecar.
 
-    Proves the final destination belongs to verified PRIVATE storage before creating
+    Checks the final destination is inside the PRIVATE companion worktree before creating
     directories or writing. Explicit run directories require the same proof as defaults.
     """
     path = sic_floor_sidecar_path(theme_slug, run_dir)

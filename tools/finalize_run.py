@@ -777,9 +777,6 @@ def _selftest() -> None:
     import copy
     import tempfile
     from contextlib import contextmanager
-    from types import SimpleNamespace
-    from unittest.mock import patch
-    import _output_paths
     from make_fixtures import downstream_completion_scenarios
     from run_theme import prepare_gate2_request, persist_gate2_result
 
@@ -799,15 +796,9 @@ def _selftest() -> None:
             run = root / "reports" / "smallcap" / fixture["run_name"]
             run.mkdir(parents=True)
 
-            proof = SimpleNamespace(root=str(root), repositories=(fixture["private_identity"],),
-                                    signature=fixture["private_origin"])
-            boundary = SimpleNamespace(prove_private_companion=lambda destination: proof,
-                                       GitError=RuntimeError)
-            # Native Git tests cover the shared proof; this seam isolates downstream contracts.
-            # Destination, ancestor, file and repeated-proof checks still run.
-            with patch.object(_output_paths, "_guard_module", lambda: boundary):
-                prove_output_path(run)
-                yield run
+            # The synthetic worktree marker satisfies the path-only destination checks.
+            prove_output_path(run)
+            yield run
 
     def json_artifact(path, value):
         out = prepare_stage_output(path)

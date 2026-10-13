@@ -22,18 +22,16 @@ root lookup removes that terminal component. Tracking always uses
 
 Each selected configuration root must be the exact root of an existing PRIVATE
 Git worktree. Nested configuration profiles are unsupported and are refused
-before writes. All physical and effective fetch/push destinations need current
-PRIVATE receipts. Missing explicit directories, config, resolver or proof fail.
+before writes. Missing explicit directories, config or resolver fail.
 Initialize the kit with `git submodule update --init --recursive -- guards`.
 
 Importing shared code and writers does not load configuration or create directories.
 `load_config()` explicitly requires initialized configuration. `output_root()` returns
 the absolute canonical PRIVATE reports root without creating output. Relative
 `output_dir` values are relative to the companion; absolute paths and
-`SMALLCAP_OUTPUT_DIR` undergo the same actual-destination proof, including links.
-`make_report.py --out` can select a different verified PRIVATE companion, subject to the
-same destination proof and declared report-artifact ownership. Runtime DATA remains
-versioned in PRIVATE companions.
+`SMALLCAP_OUTPUT_DIR` undergo the same actual-destination path checks, including links.
+`make_report.py --out` can select a different PRIVATE companion worktree, subject to the
+same path checks. Runtime DATA remains versioned in PRIVATE companions.
 
 Per-scalar env overrides apply on top of whichever `config.json` won: `SMALLCAP_<KEY>` (UPPER_SNAKE of
 the field), e.g. `SMALLCAP_MARKET_CAP_MAX=1000000000`. Run batching uses `SMALLCAP_RUN` (see SKILL.md).
@@ -53,7 +51,7 @@ Only `sec_user_agent` is required at runtime; every other field has a default in
 |---|---|---|---|---|
 | `schema_version` | int | no | `1` | Config-spec contract tag (E1; mirrors `registry.json`'s `schema_version`). Pins config major version; `verify_config.py` fails if it is not `1`. |
 | `sec_user_agent` | string | **yes** (runtime) | none (placeholder in example) | EDGAR `User-Agent`; **PII** = real name + email, e.g. the synthetic `"AcmeCorp user1@example.com"`. Placeholder/empty → 403 from `efts.sec.gov`. `verify_config.py` returns **NOT READY** for a blank or example identity without echoing its value. Fill it privately before live EDGAR use; offline readiness does not establish SEC acceptance. |
-| `output_dir` | string | no | `./reports/smallcap` | Report root, relative to the verified PRIVATE companion by default. `SMALLCAP_RUN` adds a per-run subdir. |
+| `output_dir` | string | no | `./reports/smallcap` | Report root, relative to the PRIVATE companion by default. `SMALLCAP_RUN` adds a per-run subdir. |
 | `market_cap_max` | int | no | `2000000000` | Deep-dive band ceiling (USD). |
 | `watch_band_max` | int | no | `5000000000` | Watch band ceiling (USD). |
 | `micro_cap_max` | int | no | `500000000` | Micro-cap tag threshold (USD). |
@@ -68,7 +66,7 @@ Only `sec_user_agent` is required at runtime; every other field has a default in
 | `cyclical_cv_threshold` | float | no | `0.25` | Cyclicality CV gate for normalization. |
 
 Optional API-key slots (`finnhub`, `fmp`, `alpha_vantage`) are documented in `reference/data-sources.md`
-and are **not** part of `config.example.json`. Keep optional credentials in the verified PRIVATE
+and are **not** part of `config.example.json`. Keep optional credentials in the PRIVATE
 companion and configure the provider through its supported interface; this skill does not
 automatically load arbitrary `.env` files. The `twitterapi.io` credential is **reused from the
 `market-intel` companion config**, see `reference/data-sources.md §market-intel`.
@@ -77,14 +75,10 @@ automatically load arbitrary `.env` files. The `twitterapi.io` credential is **r
 
 Configuration and real runtime DATA belong in a versioned PRIVATE companion, outside the public tool source. Commit and push them there to retain history and recovery copies. Public-source ignore rules are only a backstop; they do not make a public directory private.
 
-The destination proof resolves the actual enclosing Git worktree and checks all effective fetch and push URLs for every configured remote. It uses the shared current visibility receipt and resolves Git destinations locally; no network request is part of artifact admission. No configured remotes, PUBLIC visibility and unknown visibility are errors. Existing `config.json` links, reparse points and hardlinks are refused before replacement.
+The destination checks are path-only and start no process: the canonical path must sit inside an existing Git worktree that is separate from this tool source, with no links, reparse points, hardlinks or Git metadata components. Repository visibility is not checked at runtime; the commit and push hooks and CI enforce PRIVATE publication of the companion. A destination outside any worktree is an error, and there is no in-repo fallback. Existing `config.json` links, reparse points and hardlinks are refused before replacement.
 
-SSH companion origins may use aliases declared by ordinary `Host` and `HostName github.com`
-rules in `~/.ssh/config`. Verification reads the file locally, uses the first matching
-`HostName`, and never runs SSH or configured commands. Literal `github.com` hosts are also
-checked for local rewrites. Configurations using `Include`, `Match` or hostname
-canonicalization are refused; use a literal HTTPS GitHub origin in those cases. HTTPS
-origins must name `github.com` directly. Existing hardlinked output files are refused.
+Remote URLs, SSH aliases and SSH configuration are not inspected at runtime. Existing
+hardlinked output files are refused.
 
 ## First-time setup (E3)
 
@@ -96,7 +90,7 @@ gh repo create small-cap-deepdive-config --private --add-readme
 gh repo clone small-cap-deepdive-config ../small-cap-deepdive-config
 export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$(cd ../small-cap-deepdive-config && pwd -P)"
 python scripts/init_config.py
-# After successful PRIVATE verification, edit sec_user_agent in the private config.
+# After initialization succeeds, edit sec_user_agent in the private config.
 python scripts/verify_config.py --json
 ```
 
@@ -108,13 +102,13 @@ After editing, commit and push the configuration in the PRIVATE companion. Runti
 
 Each profile belongs to a separate PRIVATE worktree root. For example, select
 `~/configs/smallcap-conservative` or `~/configs/smallcap-aggressive` after creating
-and proving each independent PRIVATE worktree. Do not place these as subdirectories
+and initializing each independent PRIVATE worktree. Do not place these as subdirectories
 inside one companion. Unset DATA and unused CONFIG aliases when switching, then set
 `SMALL_CAP_DEEPDIVE_CONFIG` to the intended root. Initialize with `--out`, fill
 `sec_user_agent` privately, and run `verify_config.py --config-dir <root> --json`.
 
 The JSON doctor returns `ready`, `status`, `resolved_root`, `reports_root` and named `checks`. A ready result
-covers local configuration, PRIVATE destination proof and declared dependency versions.
+covers local configuration, the companion destination path checks and declared dependency versions.
 It does not claim live SEC, market or model readiness. No run or report directories
 are created by these checks.
 
@@ -167,11 +161,9 @@ authorize cleanup or restoration. A budget excess remains a failed check until w
 storage meets its reviewed bound.
 
 The machine-readable lifecycle adapter is [config.contract.json](config.contract.json).
-Writers call the pinned Guards artifact admission before creating a destination:
-undeclared, retired and ignored durable paths fail. Configuration and verdict
-staging files have narrow transient owners; they remain protected while a writer
-or interrupted recovery needs them. Supported report writes stay within declared
-`reports/smallcap/**`; custom locations need a reviewed source contract first.
-Report writers are bound to the current-report artifact and cannot replace
-configuration or tracking files. Configuration and tracking writers bind their
-own artifact IDs. Path aliases are refused before canonical path resolution.
+Writers check each destination path before creating it (inside the companion
+worktree, outside this source); they do not run the Guards artifact admission at
+runtime. Configuration and verdict staging files have narrow transient owners; they
+remain protected while a writer or interrupted recovery needs them. Supported report
+writes stay within declared `reports/smallcap/**`; custom locations need a reviewed
+source contract first. Path aliases are refused before canonical path resolution.

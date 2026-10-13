@@ -19,23 +19,17 @@ def module(state, monkeypatch):
     return importlib.import_module('filter_by_sic')
 
 
-@pytest.mark.parametrize('kind', ['unversioned', 'public', 'unknown'])
-def test_explicit_sidecar_refuses_unproved_destination_before_creation(module, state, tmp_path, kind):
-    parent = tmp_path / kind
+def test_explicit_sidecar_refuses_unmanaged_destination_before_creation(module, state, tmp_path):
+    parent = tmp_path / 'unversioned'
     parent.mkdir()
-    if kind != 'unversioned':
-        (parent / '.git').mkdir()
-        state['origins'][str(parent)] = FIX['public_origin']
-        state['visibility'][FIX['public_identity']] = 'PUBLIC' if kind == 'public' else None
     destination = parent / 'not-created'
     with pytest.raises(RuntimeError):
         module.write_sic_floor_sidecar(FIX['theme'], FIX['sic'], destination)
     assert not destination.exists()
 
 
-def test_default_sidecar_rechecks_companion_visibility(module, state):
-    identity = next(iter(state['visibility']))
-    state['visibility'][identity] = 'PUBLIC'
+def test_default_sidecar_rechecks_companion_worktree(module, state):
+    (Path(state['companion']) / '.git').rmdir()
     with pytest.raises(RuntimeError):
         module.write_sic_floor_sidecar(FIX['theme'], FIX['sic'])
     assert not Path(state['root']).exists()

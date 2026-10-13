@@ -1,39 +1,20 @@
-"""Canonical PRIVATE destinations backed by the pinned shared proof API."""
-from functools import lru_cache
-import importlib.util
+"""Canonical companion destinations, checked by path only.
+
+Every check is a filesystem check and starts no process: no aliases, hard links or
+Git metadata; outside this tool source; inside a separate Git worktree (the PRIVATE
+companion). Repository visibility is not checked at runtime; commit-time hooks and
+CI enforce PRIVATE publication. An unresolved destination raises; there is no
+in-repo fallback.
+"""
 import os
 from pathlib import Path
 import stat
-import sys
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 
 class OutputPathError(RuntimeError):
-    """A destination could not be proved safe for private runtime data."""
-
-
-@lru_cache(maxsize=1)
-def _guard_module():
-    """Load only the pinned kit; missing or incompatible dependencies fail closed."""
-    path = SOURCE_ROOT / 'guards/tools/data_boundary.py'
-    if not path.is_file():
-        raise OutputPathError('Initialize pinned guards with git submodule update --init --recursive -- guards')
-    spec = importlib.util.spec_from_file_location('_smallcap_output_boundary', path)
-    if spec is None or spec.loader is None:
-        raise OutputPathError('Cannot load the pinned PRIVATE companion proof')
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-        error_type = getattr(module, 'GitError', None)
-        if (not callable(getattr(module, 'prove_private_companion', None))
-                or not isinstance(error_type, type) or not issubclass(error_type, Exception)):
-            raise OutputPathError('Pinned guards lacks the supported PRIVATE companion proof API')
-    except BaseException:
-        sys.modules.pop(spec.name, None)
-        raise
-    return module
+    """A destination is not a safe companion path for private runtime data."""
 
 
 def _nearest_repository(existing):
@@ -79,69 +60,40 @@ def _prove_output_path(requested):
             existing = existing.parent
         elif not stat.S_ISDIR(info.st_mode):
             raise OutputPathError('runtime output requires an ordinary file or directory')
-        nearest = _nearest_repository(existing)
-        boundary = _guard_module()
-        try:
-            proof = boundary.prove_private_companion(str(existing))
-        except boundary.GitError as exc:
-            raise OutputPathError('Cannot prove PRIVATE output destination: ' + str(exc)) from exc
-        repository = Path(proof.root).resolve()
-        if repository != nearest:
-            raise OutputPathError('nearest Git marker does not identify its enclosing worktree')
+        repository = _nearest_repository(existing).resolve()
         if not path.is_relative_to(repository) or SOURCE_ROOT.is_relative_to(repository):
             raise OutputPathError('runtime output requires a separate PRIVATE worktree')
-        return path, proof
+        return path, repository
     except (OSError, ValueError) as exc:
-        raise OutputPathError('cannot prove PRIVATE output destination: ' + str(exc)) from exc
+        raise OutputPathError('cannot check output destination: ' + str(exc)) from exc
 
 
 def prove_output_path(requested):
-    """Return the canonical target after proving its actual enclosing repository PRIVATE."""
+    """Return the canonical target once it passes the companion path checks."""
     return _prove_output_path(requested)[0]
 
 
 def prove_companion_root(requested):
     """Configuration profiles are separate PRIVATE worktree roots, never subdirectories."""
-    path, proof = _prove_output_path(requested)
-    if path != Path(proof.root).resolve():
+    path, repository = _prove_output_path(requested)
+    if path != repository:
         raise OutputPathError('Select a PRIVATE worktree root; nested configuration profiles are unsupported')
     return path
 
 
-@lru_cache(maxsize=1)
-def _storage_module():
-    path = SOURCE_ROOT / 'guards/tools/storage_contract.py'
-    spec = importlib.util.spec_from_file_location('_smallcap_storage_contract', path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-    except (OSError, ImportError, AttributeError) as exc:
-        raise OutputPathError('Initialize pinned guards storage admission') from exc
-    return module
-
-
 def authorize_output(requested, *, directory=False, artifact_id=None):
-    path, proof = _prove_output_path(requested)
-    try:
-        admission = _storage_module().authorize_artifact_write(
-            SOURCE_ROOT, proof.root, path.relative_to(proof.root).as_posix(),
-            directory=directory, artifact_id=artifact_id)
-        if (proof.root, proof.repositories, proof.signature) != (
-                admission.proof.root, admission.proof.repositories, admission.proof.signature):
-            raise OutputPathError('PRIVATE output proof changed before artifact admission')
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise OutputPathError('Storage contract refused output: ' + str(exc)) from exc
-    return admission.path
+    """Path-only admission; ``directory`` and ``artifact_id`` are kept for callers."""
+    path = _prove_output_path(requested)[0]
+    if directory and path.exists() and not path.is_dir():
+        raise OutputPathError('directory output exists as a file')
+    return path
 
 
 def prepare_output(requested, *, artifact_id='current-reports'):
-    """Recheck path and publication identity after creating the destination's parents."""
+    """Recheck the path and its worktree after creating the destination's parents."""
     path, before = _prove_output_path(requested)
-    authorize_output(path, artifact_id=artifact_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     final, after = _prove_output_path(path)
-    if final != path or (before.root, before.repositories, before.signature) != (
-            after.root, after.repositories, after.signature):
+    if final != path or before != after:
         raise OutputPathError('PRIVATE output destination changed while preparing its parent')
-    return authorize_output(final, artifact_id=artifact_id)
+    return final

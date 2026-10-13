@@ -5,7 +5,7 @@ belong in an initialized, versioned PRIVATE companion outside the public tool ch
 
 Follow [the configuration setup](../CONFIG.md#first-time-setup-e3) to select and verify that
 companion. Its `config.json` holds the EDGAR `sec_user_agent`. Optional provider credentials may
-be stored in a `secrets/` directory inside the verified PRIVATE companion and loaded through the
+be stored in a `secrets/` directory inside the PRIVATE companion and loaded through the
 provider's supported configuration interface. The skill does not automatically load arbitrary
 `.env` files. Public-source ignore rules do not establish private storage.
 

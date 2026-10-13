@@ -4,6 +4,9 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ## [Unreleased]
 
+### Removed
+- Runtime PRIVATE proof. `tools/_output_paths.py` no longer loads Guards `prove_private_companion` or `storage_contract.authorize_artifact_write`, and no writer reads visibility receipts or runs Git/`gh` to inspect remotes. Destinations are checked by path only: no links, hardlinks or Git metadata, outside the tool source, inside a separate Git worktree. An unresolved companion still fails and there is no in-repo fallback. Commit-time hooks and CI keep enforcing PRIVATE publication. Proof-only tests (SSH alias, visibility, remote routes, artifact ownership) and their generators were removed.
+
 ### Configuration and storage contracts
 
 - Configuration, reports and tracking share DATA/CONFIG discovery, root-only PRIVATE

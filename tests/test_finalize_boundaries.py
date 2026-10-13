@@ -47,27 +47,17 @@ def invoke(module, arguments, monkeypatch):
 
 
 @pytest.mark.parametrize('module', ['finalize_run', 'rank'])
-@pytest.mark.parametrize('destination', ['public', 'unknown', 'broken'])
-def test_explicit_destination_is_proved_before_any_repairs_or_writes(state, monkeypatch, tmp_path, module, destination):
+def test_explicit_destination_is_checked_before_any_repairs_or_writes(state, monkeypatch, tmp_path, module):
     outside = tmp_path/'other companion'
     run = outside/'reports/smallcap'/FIX['run']
     nested = run/'reports/smallcap'/FIX['run']
     report(run)
     nested.mkdir(parents=True)
     (nested/'valuation_SYNTB.json').write_text(FIX['duplicate'], encoding='utf-8')
-    (outside/'.git').mkdir()
-    state['origins'][str(outside)] = FIX['other_origin']
-    state['visibility']['example/synthetic-other-config'] = 'PUBLIC' if destination == 'public' else None
-    if destination == 'broken':
-        metadata = subprocess.run
-        def reject_broken(argv, **kwargs):
-            if argv[:3] == ['git', '-C', str(outside)] and '--show-toplevel' in argv:
-                return subprocess.CompletedProcess(argv, 128, '', 'synthetic unusable worktree')
-            return metadata(argv, **kwargs)
-        monkeypatch.setattr(subprocess, 'run', reject_broken)
+    # No Git worktree encloses this destination, so the path check refuses it.
     before = inventory(outside)
     arguments = ['--input', str(run), *(['--no-rank'] if module == 'finalize_run' else [])]
-    with pytest.raises(RuntimeError, match='PRIVATE|PUBLIC|worktree|verification'):
+    with pytest.raises(RuntimeError, match='PRIVATE|worktree'):
         invoke(module, arguments, monkeypatch)
     assert inventory(outside) == before
 
@@ -86,14 +76,13 @@ def test_configured_private_default_produces_usable_output(state, monkeypatch, m
 
 
 @pytest.mark.parametrize('module', ['finalize_run', 'rank'])
-@pytest.mark.parametrize('visibility', ['PUBLIC', None])
-def test_configured_unproved_default_preserves_existing_tree(state, monkeypatch, module, visibility):
+def test_configured_unmanaged_default_preserves_existing_tree(state, monkeypatch, module):
     run = Path(state['root'])/FIX['run']
     report(run/'reports/smallcap'/FIX['run'])
     monkeypatch.setenv('SMALLCAP_RUN', FIX['run'])
-    state['visibility']['example/synthetic-smallcap-config'] = visibility
+    (Path(state['companion'])/'.git').rmdir()
     before = inventory(Path(state['companion']))
-    with pytest.raises(RuntimeError, match='PRIVATE|PUBLIC|visibility'):
+    with pytest.raises(RuntimeError, match='PRIVATE|worktree'):
         invoke(module, ['--no-rank'] if module == 'finalize_run' else [], monkeypatch)
     assert inventory(Path(state['companion'])) == before
 
@@ -176,8 +165,6 @@ def test_explicit_directory_link_uses_the_destination_repository(state, monkeypa
     outside = tmp_path/'public companion'
     report(outside)
     (outside/'.git').mkdir()
-    state['origins'][str(outside)] = FIX['other_origin']
-    state['visibility']['example/synthetic-other-config'] = 'PUBLIC'
     alias = Path(state['companion'])/'linked-output'
     junction(alias, outside)
     before = inventory(outside)

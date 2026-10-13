@@ -140,9 +140,9 @@ test -f "$skill_alias/SKILL.md" || exit 1
 
 ## 配置
 
-[CONFIG.md](CONFIG.md) 统一定义字段、DATA/CONFIG 选择顺序、目标验证、配置切换和保留规则。
-配置、报告和跟踪共用已核验的 PRIVATE 伴生仓。每套备用配置必须选择独立 Git 工作树的根目录，
-不接受嵌套 profile；缺少配置或无法证明私有可见性时停止写入。
+[CONFIG.md](CONFIG.md) 统一定义字段、DATA/CONFIG 选择顺序、目标路径检查、配置切换和保留规则。
+配置、报告和跟踪共用同一个 PRIVATE 伴生仓。每套备用配置必须选择独立 Git 工作树的根目录，
+不接受嵌套 profile；缺少配置或目标不在伴生仓工作树内时停止写入。
 
 初始化后，在私有配置中填写 `sec_user_agent`，再运行：
 
@@ -150,7 +150,7 @@ test -f "$skill_alias/SKILL.md" || exit 1
 python scripts/verify_config.py --json
 ```
 
-身份为空或仍为示例时返回 NOT READY。doctor 检查本地配置、目标证明和依赖；SEC、行情与模型
+身份为空或仍为示例时返回 NOT READY。doctor 检查本地配置、目标路径和依赖；SEC、行情与模型
 服务是否可用需要另行实测。配置和运行 DATA 在 PRIVATE 伴生仓提交并推送。超过 64 MiB 的存储
 检查阈值时须审查文件依赖，不能为达标删除受保护记录。详见[保留规则](CONFIG.md#companion-storage-and-retention)。
 
@@ -162,7 +162,7 @@ python scripts/verify_config.py --json
 
 恢复批次需显式传入 `--resume <RUN_ID> --input-hash <SHA256>`。工具会先核对清单中的输入哈希、目录名称和报告根目录；不匹配时退出，不改动已有文件。新批次未传哈希时，会对标签、备注和非敏感估值配置快照的规范 JSON 计算 SHA256，具体格式见 `tools/new_run.py`。
 
-输出目标和 SSH 远端验证见 [CONFIG.md](CONFIG.md#secrets--pii-mode-b-e6)。
+输出目标检查见 [CONFIG.md](CONFIG.md#secrets--pii-mode-b-e6)。
 
 共有四种入口模式。
 
@@ -206,7 +206,7 @@ python tools/rank.py --input "<private-companion>/reports/smallcap/<run>" --outp
 
 默认读取已配置 PRIVATE 伴生仓中当前批次的已有报告；重排不会创建研究批次。
 显式输入须指向已有报告目录的绝对路径。写入前按
-[CONFIG.md](CONFIG.md#secrets--pii-mode-b-e6) 检查本地 PRIVATE 可见性记录，拒绝文件系统别名。
+[CONFIG.md](CONFIG.md#secrets--pii-mode-b-e6) 检查目标路径，拒绝文件系统别名。
 
 完整步骤：**[runbooks/batch-rank.md](runbooks/batch-rank.md)**
 

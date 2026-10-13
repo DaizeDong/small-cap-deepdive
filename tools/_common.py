@@ -408,7 +408,7 @@ def _selftest() -> None:
     assert band_for(_mcb, 2e9, 5e9) == "large", (
         "P12: an oversize reconstruction is excluded after resolution")
 
-    # Path-isolation math remains offline; generated regressions exercise PRIVATE proof.
+    # Path-isolation math remains offline; generated regressions exercise the companion path checks.
     import tempfile
     from unittest.mock import patch
     with tempfile.TemporaryDirectory(prefix='smallcap-state-control-') as temporary:

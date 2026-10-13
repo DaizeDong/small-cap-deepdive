@@ -20,23 +20,7 @@ REAL_RUN = subprocess.run
 
 
 def install_metadata(state, patch):
-    from make_fixtures import output_visibility_receipt
-    outputs = importlib.import_module('_output_paths')
-    boundary = outputs._guard_module()
-    fixture_root = Path(state['companion']).parent
-    receipt = fixture_root / ('synthetic-visibility-' + str(os.getpid()) + '.json')
-    ssh_paths = [str(fixture_root / '.ssh/config'), str(fixture_root / 'ssh_config')]
-    patch(boundary, '_ssh_config_sources', lambda: {'paths': ssh_paths, 'chains': [ssh_paths]})
-
-    def prove(destination, visibility_map=None):
-        receipt.write_text(json.dumps(output_visibility_receipt(state['visibility'])), encoding='utf-8')
-        return boundary.prove_private_companion(destination, visibility_map=receipt)
-
-    facade = types.SimpleNamespace(prove_private_companion=prove, GitError=boundary.GitError,
-                                   read_private_companion_git=boundary.read_private_companion_git)
-    patch(outputs, '_guard_module', lambda: facade)
-    patch(outputs._storage_module(), 'load_boundary', lambda: facade)
-
+    """Answer only the tool's own revision query; destination checks must start no process."""
     def execute(argv, **kwargs):
         argv = [str(value) for value in argv]
         if argv[0] == 'git':
@@ -45,44 +29,7 @@ def install_metadata(state, patch):
             elif 'status' in argv:
                 answer = ''
             else:
-                requested = Path(argv[argv.index('-C')+1] if '-C' in argv else kwargs['cwd']).resolve()
-                repository = next((node for node in (requested, *requested.parents)
-                                   if (node/'.git').exists()), None)
-                if repository is None:
-                    return subprocess.CompletedProcess(argv, 1, '', 'not a repository')
-                remote_map = state.get('remotes', {}).get(str(repository))
-                if remote_map is None:
-                    origin = state['origins'].get(str(repository), '')
-                    remote_map = {'origin': {'fetch': [origin], 'push': [origin]}} if origin else {}
-                if '--show-toplevel' in argv:
-                    answer = str(repository)
-                elif 'rev-parse' in argv and '--verify' in argv:
-                    answer = '0123456789abcdef0123456789abcdef01234567'
-                elif 'check-ignore' in argv:
-                    return subprocess.CompletedProcess(argv, 1, '', '')
-                elif '--absolute-git-dir' in argv:
-                    answer = str(repository / '.git')
-                elif 'config' in argv and '--list' in argv:
-                    answer = ''.join('remote.' + name + '.' + role + '\n' + url + '\0'
-                                     for name, directions in remote_map.items()
-                                     for role, urls in (('url', directions.get('fetch', [])),
-                                                        ('pushurl', directions.get('push', [])))
-                                     for url in urls)
-                elif 'remote' in argv:
-                    if 'get-url' not in argv:
-                        answer = '\n'.join(remote_map)
-                    else:
-                        directions = remote_map.get(argv[-1], {})
-                        urls = directions.get('push' if '--push' in argv else 'fetch', [])
-                        answer = '\n'.join(urls if '--all' in argv else urls[:1])
-                else:
-                    raise AssertionError('unexpected Git query: '+repr(argv))
-        elif argv[0] == 'gh':
-            identity = argv[3].removeprefix('https://github.com/') if argv[1:3] == ['repo', 'view'] else ''
-            visibility = state['visibility'].get(identity)
-            if visibility is None:
-                return subprocess.CompletedProcess(argv, 1, '', 'unknown synthetic visibility')
-            answer = json.dumps({'visibility': visibility})
+                raise AssertionError('unexpected Git query: '+repr(argv))
         else:
             raise AssertionError('external process refused: '+argv[0])
         return subprocess.CompletedProcess(argv, 0, answer, '')
@@ -123,9 +70,7 @@ def state(tmp_path, monkeypatch):
     monkeypatch.setenv('SMALL_CAP_DEEPDIVE_CONFIG_DIR', str(companion))
     monkeypatch.setenv('HOME', str(tmp_path))
     monkeypatch.setenv('USERPROFILE', str(tmp_path))
-    value = {'companion': str(companion), 'root': str(companion/'reports/smallcap'),
-             'origins': {str(companion): SAMPLE['origin']},
-             'visibility': {'example/synthetic-smallcap-config': 'PRIVATE'}}
+    value = {'companion': str(companion), 'root': str(companion/'reports/smallcap')}
     install_metadata(value, monkeypatch.setattr)
     finance_stubs(monkeypatch.setitem)
     for name in ('_common', 'new_run', 'make_report', 'backtest'):
@@ -162,14 +107,6 @@ def test_output_root_is_absolute_lazy_and_companion_relative(state):
     path = Path(state['companion'])/'config.json'
     path.write_text(json.dumps(SAMPLE['config']), encoding='utf-8')
     assert common().output_root() == Path(state['root'])
-    assert not Path(state['root']).exists()
-
-
-@pytest.mark.parametrize('visibility', ['PUBLIC', None])
-def test_unproved_visibility_refuses_before_creation(state, visibility):
-    state['visibility']['example/synthetic-smallcap-config'] = visibility
-    with pytest.raises(RuntimeError):
-        common().output_root()
     assert not Path(state['root']).exists()
 
 
@@ -271,18 +208,17 @@ def test_report_default_uses_shared_active_root(state, monkeypatch, tmp_path):
     assert not (tmp_path/'report_SYNTH.md').exists()
 
 
-@pytest.mark.parametrize('visibility', ['PRIVATE', 'PUBLIC', None])
-def test_explicit_report_proves_actual_other_companion(state, monkeypatch, tmp_path, visibility):
+@pytest.mark.parametrize('managed', [True, False])
+def test_explicit_report_checks_actual_other_companion(state, monkeypatch, tmp_path, managed):
     other = tmp_path/'other companion'
     other.mkdir()
-    (other/'.git').mkdir()
-    state['origins'][str(other)] = SAMPLE['other_origin']
-    state['visibility']['example/synthetic-other-config'] = visibility
+    if managed:
+        (other/'.git').mkdir()
     source = tmp_path/'input.json'
     source.write_text(json.dumps(SAMPLE['report']), encoding='utf-8')
     destination = other/'reports/smallcap/nested/report.md'
     monkeypatch.setattr(sys, 'argv', ['make_report.py', '--json', str(source), '--out', str(destination)])
-    if visibility == 'PRIVATE':
+    if managed:
         importlib.import_module('make_report').main()
         assert destination.is_file()
     else:
@@ -302,9 +238,10 @@ def test_backtest_writer_uses_same_unbatched_root(state):
     assert path.is_file()
 
 
-@pytest.mark.parametrize('visibility', ['PRIVATE', 'PUBLIC'])
-def test_doctor_json_uses_same_root_without_output(state, monkeypatch, capsys, visibility):
-    state['visibility']['example/synthetic-smallcap-config'] = visibility
+@pytest.mark.parametrize('managed', [True, False])
+def test_doctor_json_uses_same_root_without_output(state, monkeypatch, capsys, managed):
+    if not managed:
+        (Path(state['companion'])/'.git').rmdir()
     config_path = Path(state['companion']) / 'config.json'
     config = json.loads(config_path.read_text(encoding='utf-8'))
     config['sec_user_agent'] = 'Synthetic Analyst user1@example-employer.com'
@@ -317,9 +254,9 @@ def test_doctor_json_uses_same_root_without_output(state, monkeypatch, capsys, v
     spec.loader.exec_module(module)
     status = module.main()
     report = json.loads(capsys.readouterr().out)
-    assert report['status'] == ('ready' if visibility == 'PRIVATE' else 'not_ready')
-    assert (status == 0) == (visibility == 'PRIVATE')
-    if visibility == 'PRIVATE':
+    assert report['status'] == ('ready' if managed else 'not_ready')
+    assert (status == 0) == managed
+    if managed:
         assert report['reports_root'] == state['root']
     assert report['checks']
     assert not Path(state['root']).exists()

@@ -51,26 +51,6 @@ def test_nested_profile_is_refused_before_initializer_creates_it(selected_roots,
     assert not nested.exists()
 
 
-@pytest.mark.parametrize('relative', ['undeclared/result.json', 'reports/smallcap/ignored.json'])
-def test_report_writer_refuses_undeclared_or_ignored_artifacts(selected_roots, relative):
-    _, first, _ = selected_roots
-    (first / '.gitignore').write_text('reports/smallcap/ignored.json\n', encoding='utf-8')
-    from _output_paths import prepare_output, OutputPathError
-    with pytest.raises(OutputPathError):
-        prepare_output(first / relative)
-    assert not (first / relative).exists()
-
-
-def test_report_output_cannot_replace_configuration(selected_roots):
-    _, first, _ = selected_roots
-    from _output_paths import prepare_output, OutputPathError
-    target = first / 'config.json'
-    before = target.read_bytes() if target.exists() else None
-    with pytest.raises(OutputPathError, match='different producer'):
-        prepare_output(target)
-    assert (target.read_bytes() if target.exists() else None) == before
-
-
 def test_report_alias_is_rejected_before_path_resolution(selected_roots):
     case, first, _ = selected_roots
     real = first / 'reports/smallcap/real'

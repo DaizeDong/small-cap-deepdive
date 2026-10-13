@@ -11,8 +11,8 @@ and the report records financial evidence, rubric results and unresolved work fo
 ## Prerequisites
 
 Complete [CONFIG.md setup](../CONFIG.md#first-time-setup-e3). Fill the SEC identity privately
-and run `python scripts/verify_config.py --json`. The companion needs a committed HEAD and
-current PRIVATE visibility proof. Keep configuration, observations and reports versioned
+and run `python scripts/verify_config.py --json`. The companion must be a PRIVATE Git
+worktree outside this source. Keep configuration, observations and reports versioned
 there; a local readiness result does not establish live source availability.
 
 Then open a run batch (start of every run) so outputs stay grouped and version-comparable:

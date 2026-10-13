@@ -24,11 +24,10 @@ def invoke(module, monkeypatch, *args):
     return module.main()
 
 
-@pytest.mark.parametrize('label,visibility,accepted', FIX['destinations'])
-def test_init_proves_destination_before_identity_instructions(state, monkeypatch, capsys, label, visibility, accepted):
+@pytest.mark.parametrize('label,accepted', FIX['destinations'])
+def test_init_checks_destination_before_identity_instructions(state, monkeypatch, capsys, label, accepted):
     companion = Path(state['companion'])
     (companion / 'config.json').unlink()
-    state['visibility']['example/synthetic-smallcap-config'] = visibility
     if label == 'unversioned':
         (companion / '.git').rmdir()
     destination = companion

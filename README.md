@@ -155,10 +155,11 @@ test -f "$skill_alias/SKILL.md" || exit 1
 
 ## Config
 
-[CONFIG.md](CONFIG.md) owns field definitions, DATA/CONFIG precedence, destination proof,
-profile switching and retention. Configuration, reports and tracking share a verified
+[CONFIG.md](CONFIG.md) owns field definitions, DATA/CONFIG precedence, destination checks,
+profile switching and retention. Configuration, reports and tracking share one
 PRIVATE companion. Each alternate profile must select a separate Git worktree root;
-nested profiles are refused. Missing configuration or unproved visibility stops writes.
+nested profiles are refused. Missing configuration or a destination outside the companion
+worktree stops writes.
 
 After initialization, set the private `sec_user_agent` value and run:
 
@@ -167,7 +168,7 @@ python scripts/verify_config.py --json
 ```
 
 A blank or example identity returns NOT READY. The doctor checks local configuration,
-destination proof and dependencies; live SEC, market and model readiness requires separate
+destination path checks and dependencies; live SEC, market and model readiness requires separate
 verification. Commit and push configuration and runtime DATA in the PRIVATE companion.
 The 64 MiB storage threshold requires dependency review when exceeded and never authorizes
 discarding protected records. See [retention](CONFIG.md#companion-storage-and-retention).
@@ -180,7 +181,7 @@ Allocate a batch with `python tools/new_run.py --label <name> [--input-hash <SHA
 
 Resume explicitly with `--resume <RUN_ID> --input-hash <SHA256>`. The manifest's input hash, run identity and configured reports root must match before any mutation; successful resume preserves existing bytes. For compatible allocations without a supplied hash, the tool hashes canonical JSON containing the label, note and nonsecret valuation config snapshot; `tools/new_run.py` documents the exact encoding.
 
-Output destinations and SSH-origin verification follow [CONFIG.md](CONFIG.md#secrets--pii-mode-b-e6).
+Output destination checks follow [CONFIG.md](CONFIG.md#secrets--pii-mode-b-e6).
 
 There are four entry modes.
 
@@ -223,8 +224,8 @@ Choose a fresh output basename for each re-rank. Existing ranking artifacts are 
 
 The default uses existing reports in the configured PRIVATE companion and active run;
 re-ranking does not create a research batch. Explicit inputs must select an existing
-report directory. [CONFIG.md](CONFIG.md#secrets--pii-mode-b-e6) defines the local
-PRIVATE receipt check and refusal of filesystem aliases before output is written.
+report directory. [CONFIG.md](CONFIG.md#secrets--pii-mode-b-e6) defines the path checks
+and refusal of filesystem aliases before output is written.
 
 Full step-by-step: **[runbooks/batch-rank.md](runbooks/batch-rank.md)**
 

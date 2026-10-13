@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check local config, PRIVATE output proof and dependencies without writing DATA.
+"""Check local config, companion output paths and dependencies without writing DATA.
 
 --json prints one object. Offline checks do not establish live SEC, market or
 model readiness. Config values containing identity are never echoed.
