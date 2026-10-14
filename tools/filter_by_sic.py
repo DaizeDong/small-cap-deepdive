@@ -703,7 +703,7 @@ def _selftest():
         assert "candidates_" not in p_mach.name, "#10: sidecar must stay out of the candidates_*.json glob"
         assert p_mach.parent == run_machinery, "#10: sidecar must land under the ACTIVE run dir"
         # Temporary directories are not initialized PRIVATE destinations. Positive
-        # writer coverage lives in tests/test_sic_recall.py with proved synthetic repos.
+        # writer coverage is not exercised here.
         from make_fixtures import sic_recall_scenarios
         from _output_paths import OutputPathError
         rows = sic_recall_scenarios()["sic"]

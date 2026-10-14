@@ -92,41 +92,9 @@
     "reference/config.json"
   ],
   "fixture": [
-    "tests/fixtures/private_runs.json",
-    "tests/fixtures/manifest.json",
-    "tests/fixtures/finalizer.json",
-    "tests/fixtures/test_full_review_regressions.py",
-    "tests/fixtures/source22_contracts.json",
-    "tests/fixtures/test_source22_contracts.py",
-    "tests/fixtures/source23_contracts.json",
-    "tests/fixtures/test_source23_contracts.py",
-    "tests/fixtures/source24_contracts.json",
-    "tests/fixtures/test_source24_contracts.py",
-    "tests/fixtures/source25_contracts.json",
-    "tests/fixtures/test_source25_contracts.py",
-    "tests/fixtures/source26_contracts.json",
-    "tests/fixtures/test_source26_contracts.py",
-    "tests/fixtures/source27_contracts.json",
-    "tests/fixtures/test_source27_contracts.py",
-    "tests/fixtures/source28_contracts.json",
-    "tests/fixtures/test_source28_contracts.py",
-    "tests/fixtures/source29_contracts.json",
-    "tests/fixtures/test_source29_contracts.py",
-    "tests/fixtures/source30_contracts.json",
-    "tests/fixtures/test_source30_contracts.py",
-    "tests/fixtures/source31_contracts.json",
-    "tests/fixtures/test_source31_contracts.py",
-    "tests/fixtures/source32_contracts.json",
-    "tests/fixtures/test_source32_contracts.py",
     "reference/config.example.json",
     "metrics/verdicts.jsonl.example",
-    "metrics/scorecard.md.example",
-    "tests/fixtures/source33_contracts.json",
-    "tests/fixtures/test_source33_contracts.py",
-    "tests/fixtures/source34_contracts.json",
-    "tests/fixtures/test_source34_contracts.py",
-    "tests/fixtures/test_source35_contracts.py",
-    "tests/fixtures/test_source36_contracts.py"
+    "metrics/scorecard.md.example"
   ],
   "_data_home": "<companion>/data/ of the PRIVATE small-cap-deepdive-config companion beside this repository (override with $SMALL_CAP_DEEPDIVE_CONFIG or $SMALL_CAP_DEEPDIVE_DATA_DIR); no home-directory location",
   "_nested_fixture_owners": {
@@ -138,7 +106,6 @@
     "docs/diagrams/workflow-en.png",
     "docs/diagrams/workflow-cn.png",
     "docs/diagrams/render.py",
-    "tools/output_path_fixtures.py",
-    "tests/test_output_proof_selectors.py"
+    "tools/output_path_fixtures.py"
   ]
 }
