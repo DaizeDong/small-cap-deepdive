@@ -4,10 +4,10 @@
     "TOOL    = code, SKILL.md, docs. Public, hand-written, contains no data.",
     "FIXTURE = tests and examples. Public, but SYNTHETIC and produced by tools/make_fixtures.py.",
     "DATA    = anything a real run produced. Versioned in the PRIVATE companion, never here.",
-    "          Resolve the companion through guards/tools/datadir.py. The tool ships only schemas.",
+    "          Resolve the companion through fleet_guards.runtime.companion_resolver. The tool ships only schemas.",
     "SEALED  = a path that held real data once and must stay dead. No code resolves it any more,",
     "          so it is owed no schema, only the guarantee that it never comes back.",
-    "Enforced by tools/data_boundary.py, in .githooks and in CI."
+    "Enforced by tools/data_boundary.py from the fleet-guards checkout (git config fleet.guards), through .githooks."
   ],
   "_readme_diagrams": "docs/diagrams/ Graphviz sources, PNGs and render.py are TOOL documentation, not real-run output.",
   "data": [
@@ -97,9 +97,6 @@
     "metrics/scorecard.md.example"
   ],
   "_data_home": "<companion>/data/ of the PRIVATE small-cap-deepdive-config companion beside this repository (override with $SMALL_CAP_DEEPDIVE_CONFIG or $SMALL_CAP_DEEPDIVE_DATA_DIR); no home-directory location",
-  "_nested_fixture_owners": {
-    "style": "style/.dataclass.json (independent style/tools/make_fixtures.py)"
-  },
   "tool": [
     "docs/diagrams/workflow-en.dot",
     "docs/diagrams/workflow-cn.dot",

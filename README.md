@@ -103,7 +103,7 @@ never set BUY eligibility or execute trades. Details are in the
 Or clone manually:
 
 ```bash
-git clone --recurse-submodules https://github.com/DaizeDong/small-cap-deepdive.git ~/.claude/plugins/small-cap-deepdive
+git clone https://github.com/DaizeDong/small-cap-deepdive.git ~/.claude/plugins/small-cap-deepdive
 ```
 
 Then install the data-layer dependencies and configure once:
@@ -111,6 +111,7 @@ Then install the data-layer dependencies and configure once:
 ```bash
 cd ~/.claude/plugins/small-cap-deepdive
 pip install -r tools/requirements.txt
+pip install -e "$(git config --get fleet.guards)"   # companion resolver
 gh repo create small-cap-deepdive-config --private --add-readme
 gh repo clone small-cap-deepdive-config ../small-cap-deepdive-config   # beside this repository
 python scripts/init_config.py

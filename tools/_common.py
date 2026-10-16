@@ -1,7 +1,6 @@
 """Lazy shared configuration and PRIVATE output paths for small-cap tools."""
 from __future__ import annotations
 from collections.abc import MutableMapping
-import importlib.util
 import json
 import math
 import os
@@ -26,27 +25,21 @@ class ConfigNotInitialized(RuntimeError):
 CONFIG_SETUP_HINT = (
     "small-cap-deepdive is UNINITIALIZED. Set SMALL_CAP_DEEPDIVE_CONFIG_DIR to your "
     "versioned PRIVATE companion containing config.json, copied from "
-    "reference/config.example.json. Initialize the pinned resolver with "
-    "git submodule update --init --recursive -- guards. "
+    "reference/config.example.json. "
     "Runtime output never falls back to the tool source, cwd or system Temp."
 )
 
 
 def _companion_root():
-    """Use the pinned resolver, bound to this consumer including linked worktrees."""
-    path = _REPO/'guards/tools/datadir.py'
-    if not path.is_file():
-        raise ConfigNotInitialized(CONFIG_SETUP_HINT)
-    spec = importlib.util.spec_from_file_location('_smallcap_pinned_datadir', path)
-    if spec is None or spec.loader is None:
-        raise ConfigNotInitialized('cannot load pinned guards resolver; '+CONFIG_SETUP_HINT)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    module._own_repo_root = lambda: str(_REPO)
+    """Use the installed fleet-guards resolver, bound to this consumer including linked worktrees."""
+    try:
+        from fleet_guards.runtime import companion_resolver
+    except ImportError as exc:
+        raise ImportError('fleet_guards is not installed; run: pip install -e "$(git config --get fleet.guards)"') from exc
     for selector in (*_CONFIG_DIR_ENV_VARS, 'SMALL_CAP_DEEPDIVE_DATA_DIR'):
         if os.environ.get(selector) and not Path(os.environ[selector]).expanduser().is_dir():
             raise ConfigNotInitialized(selector+' names a missing companion directory')
-    companion = module.resolve_companion_root('small-cap-deepdive')
+    companion = companion_resolver(source_root=_REPO).resolve_companion_root('small-cap-deepdive')
     if companion is None:
         raise ConfigNotInitialized(CONFIG_SETUP_HINT)
     selected_data = os.environ.get('SMALL_CAP_DEEPDIVE_DATA_DIR')

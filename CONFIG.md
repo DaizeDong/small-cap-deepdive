@@ -11,7 +11,7 @@ Secrets stay outside the tool source; runtime DATA is versioned only in PRIVATE 
 
 > `reference/config.example.json` defaults → selected private `config.json` → `SMALLCAP_*` scalar environment overrides
 
-The pinned `guards/tools/datadir.py` resolver selects one root for configuration,
+The installed fleet-guards resolver (`fleet_guards.runtime.companion_resolver`) selects one root for configuration,
 reports, initialization and tracking. The order is `SMALL_CAP_DEEPDIVE_DATA_DIR`,
 `SMALL_CAP_DEEPDIVE_CONFIG`, `SMALL_CAP_DEEPDIVE_CONFIG_DIR`, then a sibling
 `small-cap-deepdive-config`. There is no home-directory location; with none of these present the
@@ -23,7 +23,7 @@ root lookup removes that terminal component. Tracking always uses
 Each selected configuration root must be the exact root of an existing PRIVATE
 Git worktree. Nested configuration profiles are unsupported and are refused
 before writes. Missing explicit directories, config or resolver fail.
-Initialize the kit with `git submodule update --init --recursive -- guards`.
+Install it with `pip install -e "$(git config --get fleet.guards)"`.
 
 Importing shared code and writers does not load configuration or create directories.
 `load_config()` explicitly requires initialized configuration. `output_root()` returns
@@ -162,7 +162,7 @@ storage meets its reviewed bound.
 
 The machine-readable lifecycle adapter is [config.contract.json](config.contract.json).
 Writers check each destination path before creating it (inside the companion
-worktree, outside this source); they do not run the Guards artifact admission at
+worktree, outside this source); they do not run the fleet-guards artifact admission at
 runtime. Configuration and verdict staging files have narrow transient owners; they
 remain protected while a writer or interrupted recovery needs them. Supported report
 writes stay within declared `reports/smallcap/**`; custom locations need a reviewed

@@ -10,7 +10,7 @@ The verdict ledger preserves the original decision and its evidence while outcom
 adds realized returns. Internal consistency of a rubric does not establish predictive value.
 Current calibration remains unknown until supported outcomes exist.
 
-**Where the verdict log lives.** `guards/tools/datadir.py:resolve_data_dir("small-cap-deepdive")`
+**Where the verdict log lives.** `fleet_guards.runtime.companion_resolver(source_root=...).resolve_data_dir("small-cap-deepdive")`
 selects `<companion>/data`; [CONFIG.md](../CONFIG.md#discovery-convention-how-the-skill-finds-your-config-e2)
 owns the shared DATA/CONFIG discovery order and destination checks. Uninitialized storage raises
 `DataDirNotInitialized` with setup instructions. There is no public-source fallback.
