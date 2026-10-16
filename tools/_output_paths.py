@@ -2,9 +2,9 @@
 
 Every check is a filesystem check and starts no process: no aliases, hard links or
 Git metadata; outside this tool source; inside a separate Git worktree (the PRIVATE
-companion). Repository visibility is not checked at runtime; commit-time hooks and
-CI enforce PRIVATE publication. An unresolved destination raises; there is no
-in-repo fallback.
+companion). Repository visibility is not checked at runtime; this repository's
+.githooks (data_boundary) keep DATA out of it, and keeping the companion private is
+the owner's job. An unresolved destination raises; there is no in-repo fallback.
 """
 import os
 from pathlib import Path

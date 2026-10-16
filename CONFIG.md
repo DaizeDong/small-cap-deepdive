@@ -75,7 +75,7 @@ automatically load arbitrary `.env` files. The `twitterapi.io` credential is **r
 
 Configuration and real runtime DATA belong in a versioned PRIVATE companion, outside the public tool source. Commit and push them there to retain history and recovery copies. Public-source ignore rules are only a backstop; they do not make a public directory private.
 
-The destination checks are path-only and start no process: the canonical path must sit inside an existing Git worktree that is separate from this tool source, with no links, reparse points, hardlinks or Git metadata components. Repository visibility is not checked at runtime; the commit and push hooks and CI enforce PRIVATE publication of the companion. A destination outside any worktree is an error, and there is no in-repo fallback. Existing `config.json` links, reparse points and hardlinks are refused before replacement.
+The destination checks are path-only and start no process: the canonical path must sit inside an existing Git worktree that is separate from this tool source, with no links, reparse points, hardlinks or Git metadata components. Repository visibility is not checked at runtime: this repository's `.githooks` (data_boundary) keep DATA out of it at commit and push time, and keeping the companion private is the owner's responsibility. A destination outside any worktree is an error, and there is no in-repo fallback. Existing `config.json` links, reparse points and hardlinks are refused before replacement.
 
 Remote URLs, SSH aliases and SSH configuration are not inspected at runtime. Existing
 hardlinked output files are refused.
