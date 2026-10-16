@@ -63,7 +63,7 @@ from typing import Any
 
 # Add tools dir to path for _common import
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import CFG, today, _companion_root
+from _common import CFG, ConfigNotInitialized, today, _companion_root
 from _output_paths import prove_output_path, prepare_output
 
 # v0.3.3 refactor, the scoring MATH and the P8 recall-floor audit were extracted into sibling
@@ -105,38 +105,6 @@ def _verdicts_file() -> Path:
 def _scorecard_file() -> Path:
     return _metrics_dir() / "scorecard.md"
 
-
-class _LazyPath:
-    """A Path that resolves at USE time, not import time.
-
-    Every existing consumer reads `track_forward.VERDICTS_FILE` as a plain Path, and there is no
-    path at all until a private data dir exists -- so resolving at import would make merely
-    importing this module explode on a fresh clone. Defer it: importing stays free, and the
-    DataDirNotInitialized (with instructions) fires only when something actually reaches for a file.
-    """
-
-    def __init__(self, fn):
-        self._fn = fn
-
-    def __fspath__(self):
-        return os.fspath(self._fn())
-
-    def __getattr__(self, name):
-        return getattr(self._fn(), name)
-
-    def __truediv__(self, other):
-        return self._fn() / other
-
-    def __str__(self):
-        return str(self._fn())
-
-    def __repr__(self):
-        return "_LazyPath(%s)" % self._fn()
-
-
-METRICS_DIR = _LazyPath(_metrics_dir)
-VERDICTS_FILE = _LazyPath(_verdicts_file)
-SCORECARD_FILE = _LazyPath(_scorecard_file)
 
 DEFAULT_HORIZON_MONTHS = 12
 DEFAULT_BENCHMARK = "IWM"  # Russell 2000 small-cap ETF, correct universe comparison
@@ -386,8 +354,8 @@ class _VerdictSnapshot(list):
 
 def _load_verdicts() -> list[dict]:
     try:
-        path = Path(VERDICTS_FILE).resolve()
-    except DataDirNotInitialized:
+        path = _verdicts_file().resolve()
+    except ConfigNotInitialized:
         return []
     try:
         content = path.read_bytes()
@@ -437,7 +405,7 @@ def _save_verdicts(rows: list[dict]) -> None:
     Reload and retry the command to score or backfill the current set of rows.
     """
     content = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
-    target = prepare_output(VERDICTS_FILE)
+    target = prepare_output(_verdicts_file())
     with _ledger_lock(target):
         try:
             current = target.read_bytes()
@@ -488,7 +456,7 @@ def _replace_verdicts(target, content):
 def _append_verdict(row: dict) -> bool:
     """Atomically deduplicate and append; return whether a new row was recorded."""
     _require_adjudication_receipt(row)
-    target = prepare_output(VERDICTS_FILE)
+    target = prepare_output(_verdicts_file())
     with _ledger_lock(target):
         rows = _load_verdicts()
         if not isinstance(rows, _VerdictSnapshot) or rows.source_path != target:
@@ -856,7 +824,7 @@ def cmd_record(args) -> None:
               f"entry={price_str} | {DEFAULT_BENCHMARK}={bm_str} | horizon={row['horizon_months']}m")
 
     print(f"\nRecorded {added} new verdict(s). {warned} duplicate(s) skipped.")
-    print(f"Verdicts file: {VERDICTS_FILE}")
+    print(f"Verdicts file: {_verdicts_file()}")
 
 
 # ---------------------------------------------------------------------------
@@ -1093,7 +1061,7 @@ def cmd_score(args) -> None:
 
 def cmd_scorecard(args) -> None:
     """--scorecard: aggregate scored verdicts and write metrics/scorecard.md."""
-    destination = prove_output_path(SCORECARD_FILE)
+    destination = prove_output_path(_scorecard_file())
     rows = _load_verdicts()
     today_str = _today()
 
@@ -1299,7 +1267,7 @@ def cmd_scorecard(args) -> None:
             lines += ["", f"*Earliest pending maturity: {earliest_maturity.strftime('%Y-%m-%d')}*"]
 
     prepare_output(destination).write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Scorecard written: {SCORECARD_FILE}")
+    print(f"Scorecard written: {destination}")
     print(f"Scored: {len(scored)} | Pending: {len(pending)}")
 
 
