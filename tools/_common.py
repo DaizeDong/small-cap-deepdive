@@ -15,7 +15,6 @@ from _output_paths import prove_output_path, prove_companion_root, prepare_outpu
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent
 _REF = _REPO / "reference"
-_CONFIG_DIR_ENV_VARS = ("SMALL_CAP_DEEPDIVE_CONFIG", "SMALL_CAP_DEEPDIVE_CONFIG_DIR")
 
 
 class ConfigNotInitialized(RuntimeError):
@@ -23,7 +22,7 @@ class ConfigNotInitialized(RuntimeError):
 
 
 CONFIG_SETUP_HINT = (
-    "small-cap-deepdive is UNINITIALIZED. Set SMALL_CAP_DEEPDIVE_CONFIG_DIR to your "
+    "small-cap-deepdive is UNINITIALIZED. Set SMALL_CAP_DEEPDIVE_CONFIG to your "
     "versioned PRIVATE companion containing config.json, copied from "
     "reference/config.example.json. "
     "Runtime output never falls back to the tool source, cwd or system Temp."
@@ -36,7 +35,7 @@ def _companion_root():
         from fleet_guards.runtime import companion_resolver
     except ImportError as exc:
         raise ImportError('fleet_guards is not installed; run: pip install -e "$(git config --get fleet.guards)"') from exc
-    for selector in (*_CONFIG_DIR_ENV_VARS, 'SMALL_CAP_DEEPDIVE_DATA_DIR'):
+    for selector in ('SMALL_CAP_DEEPDIVE_CONFIG', 'SMALL_CAP_DEEPDIVE_DATA_DIR'):
         if os.environ.get(selector) and not Path(os.environ[selector]).expanduser().is_dir():
             raise ConfigNotInitialized(selector+' names a missing companion directory')
     companion = companion_resolver(source_root=_REPO).resolve_companion_root('small-cap-deepdive')

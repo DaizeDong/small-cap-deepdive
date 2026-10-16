@@ -14,5 +14,5 @@ see [data sources](../reference/data-sources.md). Do not duplicate that credenti
 
 Commit and push operational configuration and credentials only in the PRIVATE companion to retain
 history and a recovery copy. Restore that private repository on a new machine, select it through
-`SMALL_CAP_DEEPDIVE_CONFIG_DIR`, and run `python scripts/verify_config.py`. Never copy its real
+`SMALL_CAP_DEEPDIVE_CONFIG`, and run `python scripts/verify_config.py`. Never copy its real
 configuration or credential files into this source directory.

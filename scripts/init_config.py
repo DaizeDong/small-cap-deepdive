@@ -75,13 +75,13 @@ def main():
             print('Config initialized.')
     except (OSError, RuntimeError, ValueError) as error:
         print('ERROR: ' + str(error))
-        print('Create or clone a PRIVATE Git companion with an origin remote, then select it with --out or SMALL_CAP_DEEPDIVE_CONFIG_DIR.')
+        print('Create or clone a PRIVATE Git companion with an origin remote, then select it with --out or SMALL_CAP_DEEPDIVE_CONFIG.')
         return 2
 
     print('PRIVATE configuration directory: ' + str(out_dir))
     print('Set sec_user_agent privately in config.json before live EDGAR requests.')
     print('Retain configuration and runtime history in the PRIVATE companion with commit and push.')
-    print('Use SMALL_CAP_DEEPDIVE_CONFIG_DIR to select this directory for subsequent commands.')
+    print('Use SMALL_CAP_DEEPDIVE_CONFIG to select this directory for subsequent commands.')
     print('Then verify: python scripts/verify_config.py --json')
     return 0
 

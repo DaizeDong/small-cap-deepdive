@@ -11,14 +11,12 @@
     "discovery_document": "CONFIG.md",
     "environment": "SMALL_CAP_DEEPDIVE_CONFIG",
     "aliases": [
-      "SMALL_CAP_DEEPDIVE_CONFIG_DIR",
       "SMALL_CAP_DEEPDIVE_DATA_DIR"
     ],
     "precedence": [
       "Explicit --out or --config-dir for that command",
       "SMALL_CAP_DEEPDIVE_DATA_DIR (exact companion data/ child)",
       "SMALL_CAP_DEEPDIVE_CONFIG",
-      "SMALL_CAP_DEEPDIVE_CONFIG_DIR",
       "Sibling small-cap-deepdive-config"
     ],
     "required_fields": [

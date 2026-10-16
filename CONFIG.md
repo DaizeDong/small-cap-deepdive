@@ -13,7 +13,7 @@ Secrets stay outside the tool source; runtime DATA is versioned only in PRIVATE 
 
 The installed fleet-guards resolver (`fleet_guards.runtime.companion_resolver`) selects one root for configuration,
 reports, initialization and tracking. The order is `SMALL_CAP_DEEPDIVE_DATA_DIR`,
-`SMALL_CAP_DEEPDIVE_CONFIG`, `SMALL_CAP_DEEPDIVE_CONFIG_DIR`, then a sibling
+`SMALL_CAP_DEEPDIVE_CONFIG`, then a sibling
 `small-cap-deepdive-config`. There is no home-directory location; with none of these present the
 tool is uninitialized and writers fail with setup instructions. A DATA override must name the exact `data/` child;
 root lookup removes that terminal component. Tracking always uses
@@ -56,7 +56,7 @@ Only `sec_user_agent` is required at runtime; every other field has a default in
 | `watch_band_max` | int | no | `5000000000` | Watch band ceiling (USD). |
 | `micro_cap_max` | int | no | `500000000` | Micro-cap tag threshold (USD). |
 | `min_dollar_vol` | int | no | `100000` | Min avg daily dollar volume liquidity floor. |
-| `sic_hard_exclude` | string[] | no | (regulated/biotech/financial SIC list) | SIC prefixes that put a company in Gate 1's **`review` tier**, not a kill-list: a match still passes to Gate 2 (`filter_by_sic.sic_classify`; SKILL.md §Two-Stage Precision Gate). **Global, with no per-theme key.** To run a theme against a different list, point `$SMALL_CAP_DEEPDIVE_CONFIG_DIR` at a second config dir (see "Switching between two configs"). |
+| `sic_hard_exclude` | string[] | no | (regulated/biotech/financial SIC list) | SIC prefixes that put a company in Gate 1's **`review` tier**, not a kill-list: a match still passes to Gate 2 (`filter_by_sic.sic_classify`; SKILL.md §Two-Stage Precision Gate). **Global, with no per-theme key.** To run a theme against a different list, point `$SMALL_CAP_DEEPDIVE_CONFIG` at a second config dir (see "Switching between two configs"). |
 | `python_cmd` | string | no | `python` | Interpreter used for spawned sub-tools. |
 | `insider_source` | string | no | `openinsider` | `openinsider` (default, tested) or `edgar` (roadmap stub). |
 | `wacc` | float | no | `0.10` | Reverse-DCF discount rate. |
@@ -88,7 +88,7 @@ Run from the tool checkout. Create or clone the PRIVATE companion first; initial
 pip install -r tools/requirements.txt
 gh repo create small-cap-deepdive-config --private --add-readme
 gh repo clone small-cap-deepdive-config ../small-cap-deepdive-config
-export SMALL_CAP_DEEPDIVE_CONFIG_DIR="$(cd ../small-cap-deepdive-config && pwd -P)"
+export SMALL_CAP_DEEPDIVE_CONFIG="$(cd ../small-cap-deepdive-config && pwd -P)"
 python scripts/init_config.py
 # After initialization succeeds, edit sec_user_agent in the private config.
 python scripts/verify_config.py --json

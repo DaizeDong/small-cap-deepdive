@@ -16,7 +16,7 @@ Philosophy:
   block and acts; this module never tells them what to do.
 
 Private path setup:
-    Initialize a versioned PRIVATE companion with SMALL_CAP_DEEPDIVE_CONFIG_DIR.
+    Initialize a versioned PRIVATE companion with SMALL_CAP_DEEPDIVE_CONFIG.
     Set REPORTS_ROOT to the absolute path returned by _common.reports_dir():
         python -c "import sys; sys.path.insert(0, 'tools'); from _common import reports_dir; print(reports_dir())"
     The resolver includes SMALLCAP_RUN when set and fails if initialization is missing.

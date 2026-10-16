@@ -31,8 +31,7 @@ def main(argv=None):
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
     if args.config_dir:
-        for name in ('SMALL_CAP_DEEPDIVE_DATA_DIR', 'SMALL_CAP_DEEPDIVE_CONFIG_DIR'):
-            os.environ.pop(name, None)
+        os.environ.pop('SMALL_CAP_DEEPDIVE_DATA_DIR', None)
         os.environ['SMALL_CAP_DEEPDIVE_CONFIG'] = args.config_dir
     checks = []
     reports_root = None

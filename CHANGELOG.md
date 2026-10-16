@@ -5,6 +5,7 @@ All notable changes to this project are documented here (Keep a Changelog style)
 ## [Unreleased]
 
 ### Removed
+- The `SMALL_CAP_DEEPDIVE_CONFIG_DIR` alias. `SMALL_CAP_DEEPDIVE_CONFIG` names the companion root everywhere the docs, setup hints and doctor used the old spelling.
 - The guards and style submodules, the gate workflows (pii-guard, dash-guard, doc-contract, load-budget) and fleet-sync. `.githooks` forwards to the local fleet-guards and fleet-style checkouts named by `git config fleet.guards` and `fleet.style` and blocks when either is unset or missing; commits also run the dash check on added lines. `tools/_common.py` resolves the companion through the installed `fleet_guards.runtime.companion_resolver` (`pip install -e "$(git config --get fleet.guards)"`).
 - The pytest suite (`tests/`, `pytest.ini`). Confirmed-working features keep no tests; the tool `--selftest` commands remain.
 - Runtime PRIVATE proof. `tools/_output_paths.py` no longer loads Guards `prove_private_companion` or `storage_contract.authorize_artifact_write`, and no writer reads visibility receipts or runs Git/`gh` to inspect remotes. Destinations are checked by path only: no links, hardlinks or Git metadata, outside the tool source, inside a separate Git worktree. An unresolved companion still fails and there is no in-repo fallback. Commit-time hooks and CI keep enforcing PRIVATE publication. Proof-only tests (SSH alias, visibility, remote routes, artifact ownership) and their generators were removed.
