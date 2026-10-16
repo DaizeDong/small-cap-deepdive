@@ -35,9 +35,6 @@ def _companion_root():
         from fleet_guards.runtime import companion_resolver
     except ImportError as exc:
         raise ImportError('fleet_guards is not installed; run: pip install -e "$(git config --get fleet.guards)"') from exc
-    for selector in ('SMALL_CAP_DEEPDIVE_CONFIG', 'SMALL_CAP_DEEPDIVE_DATA_DIR'):
-        if os.environ.get(selector) and not Path(os.environ[selector]).expanduser().is_dir():
-            raise ConfigNotInitialized(selector+' names a missing companion directory')
     companion = companion_resolver(source_root=_REPO).resolve_companion_root('small-cap-deepdive')
     if companion is None:
         raise ConfigNotInitialized(CONFIG_SETUP_HINT)
