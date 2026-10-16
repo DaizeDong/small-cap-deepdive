@@ -42,7 +42,7 @@ from datetime import date
 # Add tools dir to path for _common import
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import REPORTS, today
+from _common import reports_dir as active_reports_dir, today
 from _output_paths import prove_output_path
 from filter_by_sic import (stage_completion, stage_work, read_stage_receipt,
                            prepare_stage_output, write_stage_receipt, stage_receipt_path)
@@ -690,7 +690,7 @@ def main() -> int:
         description="finalize_run.py — assert reports complete, emit verdict block, rebuild RANKING."
     )
     ap.add_argument("--input", default="",
-                    help="run directory (default: REPORTS / active SMALLCAP_RUN)")
+                    help="run directory (default: the active SMALLCAP_RUN reports directory)")
     ap.add_argument("--no-rank", action="store_true", help="skip the rank.py RANKING rebuild")
     ap.add_argument("--verdict-date", help="YYYY-MM-DD for a legacy report without a persisted decision date")
     ap.add_argument("--allow-missing", action="store_true",
@@ -703,9 +703,9 @@ def main() -> int:
         _selftest()
         return 0
 
-    # P-C: standardize run-dir resolution so a run-relative prefix is never doubled. REPORTS
-    # already carries SMALLCAP_RUN; an explicit --input may double it across invocation styles.
-    reports_dir = prove_output_path(collapse_run_path(Path(args.input) if args.input else REPORTS))
+    # P-C: standardize run-dir resolution so a run-relative prefix is never doubled. The active
+    # reports directory already carries SMALLCAP_RUN; an explicit --input may double it across invocation styles.
+    reports_dir = prove_output_path(collapse_run_path(Path(args.input) if args.input else active_reports_dir()))
     # Verify the final file too, before repair can mutate any existing artifacts.
     prove_output_path(reports_dir / "deepdive_verdicts.json")
     prepare_stage_output(reports_dir / "finalization.json")

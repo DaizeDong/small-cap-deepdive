@@ -37,9 +37,9 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# Import shared spine: UA, REPORTS, http_get, today, slug, CFG
+# Import shared spine: UA, report_path, http_get, today, slug, CFG
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import UA, REPORTS, http_get, today, slug as _slug, CFG
+from _common import UA, report_path, http_get, today, slug as _slug, CFG
 from _event_insider import parse_cluster_page
 from _deepdive_concepts import _get_sec_tickers
 from filter_by_sic import (StageRows, stage_work, rows_completion,
@@ -344,7 +344,7 @@ def discover_insider_clusters(
 
 def _write(candidates: list[dict], mode: str) -> Path:
     date = today()
-    out = prepare_stage_output(REPORTS / f"candidates_event_{mode}_{date}.json")
+    out = prepare_stage_output(report_path(f"candidates_event_{mode}_{date}.json"))
     out.write_text(
         json.dumps(candidates, ensure_ascii=False, indent=2), encoding="utf-8"
     )

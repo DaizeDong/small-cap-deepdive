@@ -165,26 +165,15 @@ def reports_dir() -> Path:
     return destination
 
 
-class _LazyReports(os.PathLike):
-    """Compatibility path for existing writers; every final child is proved."""
-    def __fspath__(self):
-        return str(reports_dir())
-
-    def __str__(self):
-        return str(reports_dir())
-
-    def __truediv__(self, name):
-        base = reports_dir()
-        path = prove_output_path(base/name)
-        if not path.is_relative_to(base):
-            raise ValueError('default report path escapes the active reports directory')
-        return prepare_output(path)
-
-    def __getattr__(self, name):
-        return getattr(reports_dir(), name)
+def report_path(name) -> Path:
+    """A proved, prepared output path directly under the active reports directory."""
+    base = reports_dir()
+    path = prove_output_path(base/name)
+    if not path.is_relative_to(base):
+        raise ValueError('default report path escapes the active reports directory')
+    return prepare_output(path)
 
 
-REPORTS = _LazyReports()
 _EDGAR_CACHE_PATHS = None
 
 
@@ -193,16 +182,16 @@ def init_edgar() -> None:
     identity = CFG['sec_user_agent']
     cache = _companion_root() / 'data' / 'edgar-cache'
     defaults = {
-        'EDGAR_LOCAL_DATA_DIR': (cache, {Path.home() / '.edgar', Path.home() / '.cache' / 'edgar'}),
-        'EDGAR_CACHE_DIR': (cache / 'derived', {Path.home() / '.edgar_cache'}),
-        'EDGAR_TEST_DIR': (cache / 'tests', {Path.home() / '.edgar_test'}),
+        'EDGAR_LOCAL_DATA_DIR': cache,
+        'EDGAR_CACHE_DIR': cache / 'derived',
+        'EDGAR_TEST_DIR': cache / 'tests',
     }
     paths = {}
-    for name, (default, retired) in defaults.items():
+    for name, default in defaults.items():
         selected = Path(os.environ[name]).expanduser() if os.environ.get(name) else default
         if not selected.is_absolute():
             raise ConfigNotInitialized(name + ' must select an absolute PRIVATE cache path')
-        paths[name] = prove_output_path(default if selected in retired else selected)
+        paths[name] = prove_output_path(selected)
     if 'edgar' in sys.modules and _EDGAR_CACHE_PATHS != paths:
         raise ConfigNotInitialized(
             'EDGAR was loaded before this private cache was selected. '

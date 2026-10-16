@@ -12,7 +12,7 @@ output.
 ## Prerequisites
 
 You must have a prior theme run's deep-dive report files in the configured PRIVATE companion.
-The default REPORTS directory combines that companion's output directory with the active
+The default reports directory combines that companion's output directory with the active
 `SMALLCAP_RUN`, if set. Report files use the name `report_<ticker>.md`.
 
 ```
@@ -35,7 +35,7 @@ or the network. Filesystem aliases and destinations outside a Git worktree are r
 | Flag | Default | Description |
 |---|---|---|
 | `--slug <s>` | (none) | Filter to `report_<slug>_*.md` files; falls back to all `report_*.md` if none match |
-| `--input <dir>` | REPORTS from config | Initialized absolute path to the reports directory in the PRIVATE companion |
+| `--input <dir>` | the active reports directory | Initialized absolute path to the reports directory in the PRIVATE companion |
 | `--output <name>` | `RANKING.md` | Fresh ranking basename within that run; the artifact and its receipt must not already exist |
 
 **AVOID/kill-flag sink logic:** Candidates rated AVOID or with kill-flag count ≥ 2 are

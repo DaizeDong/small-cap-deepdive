@@ -21,7 +21,7 @@ import pandas as pd
 
 # Import from _common
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import UA, REPORTS, slug as _slug, http_get, today, CFG, resolve_mktcap, band_for
+from _common import UA, report_path, slug as _slug, http_get, today, CFG, resolve_mktcap, band_for
 # P8 SIC reverse-recall (the recall FLOOR): enumerate a theme's dedicated SIC and UNION
 # with FTS so a true small-cap FTS missed (low keyword density / top-1000 cap) is recalled.
 from filter_by_sic import (theme_sics, sic_reverse_recall, union_recall, StageRows,
@@ -544,7 +544,7 @@ def main():
 
     date = today()
     slug = args.out_slug or _slug(phrases[0])
-    out = prepare_stage_output(REPORTS / f"universe_{slug}_{date}.csv")
+    out = prepare_stage_output(report_path(f"universe_{slug}_{date}.csv"))
     df.sort_values("mktcap", na_position="last").to_csv(out, index=False)
     enrichment = [stage_work("market_data", str(row["cik"]), status=(
         "complete" if all(pd.notna(row.get(col)) for col in

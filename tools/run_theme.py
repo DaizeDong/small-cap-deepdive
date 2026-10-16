@@ -7,7 +7,7 @@ Stages:
   1. discover.py  — SEC FTS recall + market-cap filter → universe_<slug>_<date>.csv
   2. cheap_pass.py — mechanical health check → cheappass_<slug>_<date>.csv
   3. (inline) SIC filter: join universe for cik/sic, apply filter_by_sic.sic_ok,
-     write REPORTS/candidates_<slug>.json
+     write <reports dir>/candidates_<slug>.json
   4. Print "Next steps" handoff — LLM stages are SKILL.md-orchestrated, not auto-run.
 
 Usage:
@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import CFG, REPORTS, slug as _slug, today
+from _common import CFG, report_path, slug as _slug, today
 
 import pandas as pd
 
@@ -66,7 +66,7 @@ def stage_discover(theme_kw: str, out_slug: str, max_mcap: float,
     --watch-band-max for dual-band tagging.
     """
     py = CFG["python_cmd"]
-    uni = _fresh_output(REPORTS / f"universe_{out_slug}_{today()}.csv")
+    uni = _fresh_output(report_path(f"universe_{out_slug}_{today()}.csv"))
     tools_dir = Path(__file__).resolve().parent
     cmd = [
         py, str(tools_dir / "discover.py"),
@@ -90,7 +90,7 @@ def stage_discover(theme_kw: str, out_slug: str, max_mcap: float,
 def stage_cheap_pass(universe_csv: Path, out_slug: str, max_mcap: float | None = None) -> Path:
     """Run cheap_pass.py; return the cheappass CSV path."""
     py = CFG["python_cmd"]
-    cp = _fresh_output(REPORTS / f"cheappass_{out_slug}_{today()}.csv")
+    cp = _fresh_output(report_path(f"cheappass_{out_slug}_{today()}.csv"))
     tools_dir = Path(__file__).resolve().parent
     cmd = [
         py, str(tools_dir / "cheap_pass.py"),
@@ -226,7 +226,7 @@ def stage_sic_filter(cheappass_csv: Path, universe_csv: Path, out_slug: str, the
             "business_blurb": str(blurb_raw) if pd.notna(blurb_raw) else "",
         })
 
-    out = prepare_stage_output(REPORTS / f"candidates_{out_slug}.json")
+    out = prepare_stage_output(report_path(f"candidates_{out_slug}.json"))
     out.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
     completion = stage_completion("sic_filter", len(records),
                                   work=[stage_work("sic_filter", str(row["ticker"])) for _, row in cdf.iterrows()],

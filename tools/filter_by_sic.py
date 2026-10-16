@@ -51,7 +51,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import CFG, REPORTS, http_get, slug, prepare_output
+from _common import CFG, reports_dir, http_get, slug, prepare_output
 
 
 def stage_completion(stage, row_count, *, work=(), upstream=(), reasons=()):
@@ -480,7 +480,7 @@ def sic_reverse_recall(theme: str, forms: str = "10-K", mapping=None,
 # wrote that sidecar to a FIXED, cross-theme path (e.g. candidates_railcar_leasing.json),
 # so a machinery run dir ended up with a stale 63-name railcar-leasing sidecar that
 # finalize_run would have falsely demanded reports for. The fix: the sidecar MUST be
-# (a) written into the ACTIVE run/batch dir (REPORTS, the SMALLCAP_RUN subdir when set),
+# (a) written into the ACTIVE run/batch dir (reports_dir(), the SMALLCAP_RUN subdir when set),
 # and (b) namespaced by the ACTIVE theme slug, never a fixed cross-theme filename. Two
 # concurrent themes therefore write distinct files in distinct run dirs and never collide.
 # ---------------------------------------------------------------------------
@@ -488,7 +488,7 @@ def sic_reverse_recall(theme: str, forms: str = "10-K", mapping=None,
 def sic_floor_sidecar_path(theme_slug: str, run_dir: Path | None = None) -> Path:
     """Path for a theme's SIC-floor sidecar — under the active run dir, slug-namespaced.
 
-    `run_dir` defaults to _common.REPORTS (the active SMALLCAP_RUN batch dir, or the
+    `run_dir` defaults to _common.reports_dir() (the active SMALLCAP_RUN batch dir, or the
     flat output dir when no run is active). The filename is ALWAYS derived from the
     ACTIVE theme's slug — `_sic_floor_<slug>.json` — so a machinery run can never be
     handed a fixed `candidates_railcar_leasing.json`. The `_sic_floor_` prefix also
@@ -496,7 +496,7 @@ def sic_floor_sidecar_path(theme_slug: str, run_dir: Path | None = None) -> Path
     diagnostic, not a deep-dive demand list).
     """
     if run_dir is None:
-        run_dir = REPORTS
+        run_dir = reports_dir()
     return Path(run_dir) / f"_sic_floor_{slug(theme_slug)}.json"
 
 

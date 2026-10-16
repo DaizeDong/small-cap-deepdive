@@ -43,7 +43,7 @@ from pathlib import Path
 
 # sys.path shim so this script can be run directly from tools/
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import CFG, REPORTS, init_edgar, today, reports_dir, prove_output_path, prepare_output
+from _common import CFG, init_edgar, today, reports_dir, report_path, prove_output_path, prepare_output
 
 # Valuation model primitives extracted to a sibling module (pure mechanical move).
 # Re-exported here so any consumer importing them from `valuation` keeps working.
@@ -880,7 +880,7 @@ def main():
     diagnostic = ap.add_mutually_exclusive_group()
     diagnostic.add_argument("--selftest", action="store_true", help="Run synthetic valuation assertions")
     diagnostic.add_argument("--live-diagnostic", action="store_true",
-                            help="Explicit live issuer diagnostic; may fetch data and write private REPORTS")
+                            help="Explicit live issuer diagnostic; may fetch data and write private reports")
     args = ap.parse_args()
 
     if args.selftest:
@@ -1001,7 +1001,7 @@ def _print_valuation_summary(block: dict) -> None:
 # Selftest
 # ---------------------------------------------------------------------------
 def _live_diagnostic():
-    """Explicit live diagnostic: may fetch issuer data and write private REPORTS."""
+    """Explicit live diagnostic: may fetch issuer data and write private reports."""
     init_edgar()
     cfg = _val_cfg()
 
@@ -1011,7 +1011,7 @@ def _live_diagnostic():
         Requires Phase 2 fields (ebit, equity series) AND goodwill/intangibles in derived
         (added in Phase 2 fix round). If the cached file is missing any of these, pulls fresh.
         """
-        candidates = sorted(REPORTS.glob(f"deepdive_{ticker}_*.json"), reverse=True)
+        candidates = sorted(reports_dir().glob(f"deepdive_{ticker}_*.json"), reverse=True)
         if candidates:
             dd = json.loads(candidates[0].read_text(encoding="utf-8"))
             # Require Phase 2 fields AND goodwill/intangibles keys in derived
@@ -1025,7 +1025,7 @@ def _live_diagnostic():
         print(f"  Pulling fresh deepdive for {ticker}...", file=sys.stderr)
         import deepdive_data as dd_mod
         data = dd_mod.pull(ticker, cik)
-        out = REPORTS / f"deepdive_{ticker}_{today()}.json"
+        out = report_path(f"deepdive_{ticker}_{today()}.json")
         out.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         return data
 
@@ -1103,7 +1103,7 @@ def _live_diagnostic():
     _print_valuation_summary(block_wlfc)
 
     # Write WLFC valuation to disk
-    out_wlfc = REPORTS / f"valuation_WLFC_{today()}.json"
+    out_wlfc = report_path(f"valuation_WLFC_{today()}.json")
     out_wlfc.write_text(json.dumps(block_wlfc, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # --- LNN ---
@@ -1122,7 +1122,7 @@ def _live_diagnostic():
     _print_valuation_summary(block_lnn)
 
     # Write LNN valuation to disk
-    out_lnn = REPORTS / f"valuation_LNN_{today()}.json"
+    out_lnn = report_path(f"valuation_LNN_{today()}.json")
     out_lnn.write_text(json.dumps(block_lnn, indent=2, ensure_ascii=False), encoding="utf-8")
 
 

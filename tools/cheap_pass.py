@@ -35,7 +35,7 @@ import pandas as pd
 # Import _common exports
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import (
-    init_edgar, REPORTS, slug, today, CFG, http_get,
+    init_edgar, report_path, reports_dir, slug, today, CFG, http_get,
     resolve_mktcap, band_for,  # P5, mktcap fallback + band tagging (resolve ceiling here)
 )
 from _common import edgar_company as Company
@@ -739,7 +739,7 @@ def main():
     event_binding = None
     if upstream.get("stage") in {"event_spinoffs", "event_insider_clusters"}:
         from _event_admission import artifact_binding, write_event_admission
-        if Path(REPORTS).resolve() != uni_path.resolve().parent:
+        if reports_dir().resolve() != uni_path.resolve().parent:
             ap.error("Event screening must write to the discovery run directory")
         event_binding = artifact_binding(uni_path)
     cand = uni.copy() if is_json else uni[uni["smallcap_candidate"] == True].copy()
@@ -805,7 +805,7 @@ def main():
 
     date = today()
     tag = f"{args.out_slug}_" if args.out_slug else ""
-    out = prepare_stage_output(REPORTS / f"cheappass_{tag}{date}.csv")
+    out = prepare_stage_output(report_path(f"cheappass_{tag}{date}.csv"))
     df.to_csv(out, index=False)
     reasons = ["limit_truncated"] if len(cand) < selected_count else []
     completion = stage_completion("cheap_pass", len(df), work=work,

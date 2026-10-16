@@ -29,7 +29,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pandas as pd
-from _common import REPORTS, today
+from _common import reports_dir as active_reports_dir, today
 from _output_paths import prove_output_path
 from filter_by_sic import (stage_completion, stage_work, read_stage_receipt,
                            write_stage_receipt, prepare_stage_output, stage_receipt_path)
@@ -223,10 +223,9 @@ def ranking_input_artifacts(reports_dir, report_files=None):
 
 
 def load_hard_data(ticker: str, reports_dir=None, *, _inputs=None) -> dict:
-    # reports_dir defaults to REPORTS, but MUST honor --input so finalize_run's
-    # `rank.py --input <run>` finds the run's deepdive JSONs (previously it always
-    # globbed REPORTS, so an --input run had no hard data -> missing 'killflags' column).
-    base = Path(reports_dir if reports_dir is not None else REPORTS)
+    # reports_dir defaults to the active reports directory, but MUST honor --input so
+    # finalize_run's `rank.py --input <run>` finds the run's deepdive JSONs.
+    base = Path(reports_dir if reports_dir is not None else active_reports_dir())
     path = (_inputs["hard_data"].get(ticker) if _inputs is not None
             else _hard_data_file(ticker, base))
     if path is None:
@@ -283,7 +282,7 @@ def compute_funnel_stats(reports_dir=None, *, _inputs=None) -> dict:
     Counts that can't be derived are None so the template can omit that stage rather than print a
     contradictory number.
     """
-    base = Path(reports_dir if reports_dir is not None else REPORTS)
+    base = Path(reports_dir if reports_dir is not None else active_reports_dir())
     reports = glob.glob(str(base / "report_*.md"))
     # v0.3.1 #13: count ONLY per-ticker deepdive_<TICKER>_<DATE>.json files; the run dir also
     # contains deepdive_verdicts/queue/targets.json sidecars that a bare glob would over-count by
@@ -532,7 +531,7 @@ def main():
     )
     ap.add_argument(
         "--input", default="",
-        help="Optional path to the reports directory (default: REPORTS from config).",
+        help="Optional path to the reports directory (default: the active reports directory).",
     )
     ap.add_argument("--output", default="RANKING.md",
                     help="New ranking basename in the run directory; existing outputs are preserved.")
@@ -544,7 +543,7 @@ def main():
         _selftest()
         return
 
-    reports_dir = prove_output_path(Path(args.input) if args.input else REPORTS)
+    reports_dir = prove_output_path(Path(args.input) if args.input else active_reports_dir())
     try:
         output_path = prove_output_path(_run_artifact(reports_dir, args.output))
         inputs = _collect_ranking_inputs(reports_dir, _report_files(reports_dir, args.slug))

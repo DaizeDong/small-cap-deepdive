@@ -37,7 +37,7 @@ from pathlib import Path
 
 # sys.path shim so this script can be run directly from tools/
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import init_edgar, UA, REPORTS, today, CFG, http_get
+from _common import init_edgar, UA, reports_dir, today, CFG, http_get
 from _common import edgar_company as Company
 from filter_by_sic import (stage_completion, stage_work, stage_receipt_path,
                            prepare_stage_output, write_stage_receipt, read_stage_receipt)
@@ -2917,7 +2917,7 @@ def main():
             path, completion = run_batch(Path(args.candidates))
         else:
             row = _validated_rows([{"ticker": args.ticker, "cik": args.cik, "band": "unknown"}], bound=False)[0]
-            path = _fresh(_data_path(REPORTS, row, today()))
+            path = _fresh(_data_path(reports_dir(), row, today()))
             upstream = stage_completion("single_deepdive_input", 1, reasons=["unbound_single_input"])
             init_error = None
             try:

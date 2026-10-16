@@ -63,7 +63,7 @@ from typing import Any
 
 # Add tools dir to path for _common import
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import CFG, REPORTS, today, _companion_root
+from _common import CFG, today, _companion_root
 from _output_paths import prove_output_path, prepare_output
 
 # v0.3.3 refactor, the scoring MATH and the P8 recall-floor audit were extracted into sibling

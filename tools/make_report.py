@@ -45,7 +45,7 @@ import sys
 # Add tools dir to path for _common import
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import REPORTS, today, reports_dir, prepare_output
+from _common import today, reports_dir, prepare_output
 
 # Sentinel used in the fenced rating block for fields the agent must finalize.
 TBD = "TBD"
