@@ -104,8 +104,9 @@ def repair_nested_run_tree(reports_dir: Path) -> list[Path]:
     If reports_dir contains a nested `reports/smallcap/<run>/` subtree (the path-doubling
     artifact), move every file from the deepest nested leaf up into reports_dir (without
     clobbering an existing same-named file) and remove the now-empty nested skeleton.
-    Directory links and nested repositories are preserved without traversal. The
-    caller must prove the canonical output directory PRIVATE before invoking repair.
+    Directory links and nested repositories are preserved without traversal.
+    reports_dir must already have passed the companion path checks
+    (_output_paths.prove_output_path); PRIVATE publication is enforced at commit time.
     Returns the list of files relocated. No-op (empty list) when no nested tree exists.
     """
     moved: list[Path] = []
