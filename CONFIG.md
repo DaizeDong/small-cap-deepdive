@@ -130,15 +130,6 @@ The imported scorecard is derived, but its compatibility and any unique
 interpretation or restoration notes need review before retirement. Storage
 inventory does not validate historical rows or prove regeneration.
 
-An external migration can require a temporary recovery hold inside the shared
-PRIVATE companion. The contract separately declares one exact database snapshot
-and one recovery note, each capped at 1 MiB, while cutover and delta validation
-are pending. They are neither a live database nor a small-cap verdict ledger.
-No additional snapshots or notes inherit this hold. Once migration validation
-closes, the external source owner must decide retirement and retain any
-necessary final recovery conclusions. The snapshot's payload and live migration
-procedure are governed by that owner rather than this skill's metric schemas.
-
 ### Exact report closure and budget review
 
 Before releasing a historical report path, record the selected final report,

@@ -5,6 +5,7 @@ All notable changes to this project are documented here (Keep a Changelog style)
 ## [Unreleased]
 
 ### Removed
+- The two `external-migration-*` storage declarations for the retired trend database snapshot and its recovery note, and the CONFIG.md hold paragraph. The companion no longer carries `trend-pulse/`.
 - The `SMALL_CAP_DEEPDIVE_CONFIG_DIR` alias. `SMALL_CAP_DEEPDIVE_CONFIG` names the companion root everywhere the docs, setup hints and doctor used the old spelling.
 - The guards and style submodules, the gate workflows (pii-guard, dash-guard, doc-contract, load-budget) and fleet-sync. `.githooks` forwards to the local fleet-guards and fleet-style checkouts named by `git config fleet.guards` and `fleet.style` and blocks when either is unset or missing; commits also run the dash check on added lines. `tools/_common.py` resolves the companion through the installed `fleet_guards.runtime.companion_resolver` (`pip install -e "$(git config --get fleet.guards)"`).
 - The pytest suite (`tests/`, `pytest.ini`). Confirmed-working features keep no tests; the tool `--selftest` commands remain.

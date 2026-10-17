@@ -160,34 +160,6 @@
       }
     },
     {
-      "artifact_id": "external-migration-database-recovery",
-      "path_pattern": "trend-pulse/pre-cutover-online-backup/history.db",
-      "purpose": "One transitional recovery snapshot for an external database migration awaiting cutover and delta verification.",
-      "schema": "SQLite online-backup snapshot governed by its external source owner; not the small-cap verdict schema.",
-      "producer": "Reviewed external database migration preparation.",
-      "consumer_or_final_deliverable": "External source owner's pending cutover, delta validation and rollback review; never a live database or small-cap ledger.",
-      "rebuild_or_restore": "Restore this exact PRIVATE snapshot and its migration receipt while rollback remains required; verify the source owner's cutover and delta procedure before using it.",
-      "max_bytes": 1048576,
-      "retention_rule": {
-        "class": "core",
-        "rule": "Keep only during pending cutover and delta verification. After migration validation closes, the external source owner must decide retirement. No live reads or writes, no additional snapshots, and no retention inferred from small-cap ledger rules."
-      }
-    },
-    {
-      "artifact_id": "external-migration-recovery-instructions",
-      "path_pattern": "trend-pulse/STORAGE.md",
-      "purpose": "One transitional ownership and recovery note accompanying the external database migration snapshot.",
-      "schema": "Markdown migration instructions governed by the external source owner.",
-      "producer": "Reviewed external database migration preparation.",
-      "consumer_or_final_deliverable": "External source owner's pending cutover, delta validation and rollback review; not runtime configuration for this skill.",
-      "rebuild_or_restore": "Restore the note with the exact PRIVATE snapshot and its reviewed migration receipt until restoration obligations close.",
-      "max_bytes": 1048576,
-      "retention_rule": {
-        "class": "core",
-        "rule": "Keep only during pending cutover and delta verification. After migration validation closes, the external source owner must decide retirement or preserve necessary final recovery conclusions. No additional note copies or automatic extension to other files."
-      }
-    },
-    {
       "artifact_id": "config-staging",
       "path_pattern": ".config-*.tmp",
       "purpose": "Atomic configuration or verdict transaction staging and coordination.",
