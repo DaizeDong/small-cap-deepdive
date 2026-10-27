@@ -130,6 +130,11 @@ Note the config lives **outside** the repo. That is deliberate: `sec_user_agent`
 and email, and this is a public repo. There is no in-repo config location any more, and the tools
 refuse to create one.
 
+There is no EDGAR bulk download to run. `edgartools` fetches each filing from SEC the first time
+a tool asks for it and keeps an HTTP cache in the companion at `data/edgar-cache/`, which the
+companion's `.gitignore` excludes. On a new machine the cache starts empty and refills on the
+first run. `EDGAR_LOCAL_DATA_DIR` (an absolute path) moves it elsewhere.
+
 To use the skill from Claude Code via a junction (Windows) or symlink instead of `/plugin install`:
 
 ```powershell

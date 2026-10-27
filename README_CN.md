@@ -115,6 +115,10 @@ python scripts/init_config.py
 注意 config 位于**仓库之外**，这是刻意的：`sec_user_agent` 是你的真实姓名和邮箱，而这是一个公开仓库。
 仓内已不存在任何 config 位置，工具也会拒绝在仓内创建。
 
+EDGAR 数据不需要预先批量下载。`edgartools` 在工具第一次用到某份文件时从 SEC 取回，
+HTTP 缓存放在伴生仓的 `data/edgar-cache/`，伴生仓的 `.gitignore` 已排除它。换到新机器时缓存是空的，
+第一次运行会自动补齐；要换位置就设 `EDGAR_LOCAL_DATA_DIR`（绝对路径）。
+
 若不走 `/plugin install`，也可建立 junction/symlink 部署为 Claude Code skill：
 
 ```powershell
