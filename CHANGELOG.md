@@ -4,6 +4,9 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ## [Unreleased]
 
+### Changed
+- `track_forward.py --record` appends to this machine's lane `data/metrics/verdicts.jsonl.d/<CLAUDE_MACHINE_ID>.jsonl` (for example `node-a.jsonl`) instead of rewriting `verdicts.jsonl`; an unset id fails. Readers merge the full ledger with every lane. `--score`, `--backfill`, `--adjudicate` and `--scorecard` refuse on the secondary machine (`CLAUDE_MACHINE_ROLE=secondary`); on the primary their rewrite folds the lanes into `verdicts.jsonl` and deletes each lane it read whose size has not changed. `tools/machine_role.py` reads the role and id from the process environment and `HKCU\Environment`.
+
 ### Removed
 - The two `external-migration-*` storage declarations for the retired trend database snapshot and its recovery note, and the CONFIG.md hold paragraph. The companion no longer carries `trend-pulse/`.
 - The `SMALL_CAP_DEEPDIVE_CONFIG_DIR` alias. `SMALL_CAP_DEEPDIVE_CONFIG` names the companion root everywhere the docs, setup hints and doctor used the old spelling.

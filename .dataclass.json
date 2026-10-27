@@ -12,6 +12,7 @@
   "_readme_diagrams": "docs/diagrams/ Graphviz sources, PNGs and render.py are TOOL documentation, not real-run output.",
   "data": [
     "metrics/verdicts.jsonl",
+    "metrics/verdicts.jsonl.d/",
     "metrics/scorecard.md",
     "reports/"
   ],
@@ -96,7 +97,7 @@
     "metrics/verdicts.jsonl.example",
     "metrics/scorecard.md.example"
   ],
-  "_data_home": "<companion>/data/ of the PRIVATE small-cap-deepdive-config companion beside this repository (override with $SMALL_CAP_DEEPDIVE_CONFIG or $SMALL_CAP_DEEPDIVE_DATA_DIR); no home-directory location",
+  "_data_home": "<companion>/data/ of the PRIVATE small-cap-deepdive-config companion beside this repository (override with $SMALL_CAP_DEEPDIVE_CONFIG or $SMALL_CAP_DEEPDIVE_DATA_DIR); no home-directory location. New verdicts go to metrics/verdicts.jsonl.d/<CLAUDE_MACHINE_ID>.jsonl (for example node-a.jsonl), one lane per machine, folded into metrics/verdicts.jsonl on the primary.",
   "tool": [
     "docs/diagrams/workflow-en.dot",
     "docs/diagrams/workflow-cn.dot",

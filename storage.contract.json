@@ -56,6 +56,19 @@
       }
     },
     {
+      "artifact_id": "verdict-lanes",
+      "path_pattern": "data/metrics/verdicts.jsonl.d/*.jsonl",
+      "purpose": "New verdicts recorded on each machine, one <CLAUDE_MACHINE_ID>.jsonl lane per machine, waiting to be folded into the full ledger",
+      "schema": "reference/track-forward.md and metrics/verdicts.jsonl.example",
+      "producer": "tools/track_forward.py --record (any machine)",
+      "consumer_or_final_deliverable": "tools/track_forward.py on the primary folds lanes into data/metrics/verdicts.jsonl on --score, --backfill or --adjudicate",
+      "rebuild_or_restore": "Restore exact lane records; a lane is deleted only after the primary folded it in and its size had not changed",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Do not delete a lane by hand. The primary deletes a lane only after every row it read is in the full ledger and the lane is the same size it read."
+      }
+    },
+    {
       "artifact_id": "scorecard",
       "path_pattern": "data/metrics/scorecard.md",
       "purpose": "Derived calibration display",

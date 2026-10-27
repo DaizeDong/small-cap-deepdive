@@ -38,6 +38,10 @@ Usage (REPORTS_ROOT is the resolved absolute private path):
     python tools/track_forward.py --selftest
 
 Output: _metrics_dir()/verdicts.jsonl and _metrics_dir()/scorecard.md.
+--record appends to this machine's lane, _metrics_dir()/verdicts.jsonl.d/<CLAUDE_MACHINE_ID>.jsonl
+(an unset id fails). Readers merge the full ledger with every lane. --score, --backfill,
+--adjudicate and --scorecard run only on the primary machine: a rewrite folds the lanes into
+verdicts.jsonl and deletes each lane it read whose size has not changed since.
 _metrics_dir() uses the same companion root as configuration and reports, then
 selects its data/metrics child. SMALL_CAP_DEEPDIVE_DATA_DIR must select that
 companion data/ child. These are versioned companion DATA, never paths inside this tool repo.
@@ -99,7 +103,19 @@ def _metrics_dir() -> Path:
 
 
 def _verdicts_file() -> Path:
+    """The full ledger. Only the primary machine rewrites it (--score, --backfill, --adjudicate)."""
     return _metrics_dir() / "verdicts.jsonl"
+
+
+def _verdict_lanes_dir() -> Path:
+    """New verdicts land here first, one `<CLAUDE_MACHINE_ID>.jsonl` lane per machine, so two
+    machines never append to the same file. The primary folds them into the full ledger."""
+    return _metrics_dir() / "verdicts.jsonl.d"
+
+
+def _own_lane() -> Path:
+    from machine_role import machine_id
+    return _verdict_lanes_dir() / f"{machine_id()}.jsonl"
 
 
 def _scorecard_file() -> Path:
@@ -344,23 +360,19 @@ def _entry_quote_problem(row: dict, price_key: str, quote_key: str, ticker: str)
 
 
 class _VerdictSnapshot(list):
-    """List-compatible ledger rows bound to the bytes and path originally read."""
+    """List-compatible ledger rows bound to the bytes and path originally read.
 
-    def __init__(self, rows, source_path, source_bytes):
+    `lanes` maps each per-machine lane file that was read to its size at read time, so the
+    primary can delete exactly the lanes it folded in and keep any that grew meanwhile."""
+
+    def __init__(self, rows, source_path, source_bytes, lanes=None):
         super().__init__(rows)
         self.source_path = source_path
         self.source_bytes = source_bytes
+        self.lanes = dict(lanes or {})
 
 
-def _load_verdicts() -> list[dict]:
-    try:
-        path = _verdicts_file().resolve()
-    except ConfigNotInitialized:
-        return []
-    try:
-        content = path.read_bytes()
-    except FileNotFoundError:
-        return _VerdictSnapshot([], path, None)
+def _parse_ledger(content: bytes, label: str) -> list[dict]:
     rows = []
     for number, line in enumerate(content.decode("utf-8").splitlines(), 1):
         line = line.strip()
@@ -368,11 +380,37 @@ def _load_verdicts() -> list[dict]:
             try:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid ledger JSON at line {number}; repair before rewriting") from exc
+                raise ValueError(f"Invalid ledger JSON in {label} at line {number}; repair before rewriting") from exc
             if not isinstance(row, dict):
-                raise ValueError(f"Invalid ledger record at line {number}: expected an object")
+                raise ValueError(f"Invalid ledger record in {label} at line {number}: expected an object")
             rows.append(row)
-    return _VerdictSnapshot(rows, path, content)
+    return rows
+
+
+def _load_verdicts() -> list[dict]:
+    """The full ledger plus every machine's lane. A lane row whose (ticker, verdict_date) is
+    already in the full ledger is a copy the primary has folded in; the full ledger's row wins."""
+    try:
+        path = _verdicts_file().resolve()
+        lanes_dir = _verdict_lanes_dir().resolve()
+    except ConfigNotInitialized:
+        return []
+    try:
+        content = path.read_bytes()
+    except FileNotFoundError:
+        content = None
+    rows = _parse_ledger(content, path.name) if content is not None else []
+    seen = {(row.get("ticker"), row.get("verdict_date")) for row in rows}
+    lanes = {}
+    for lane in sorted(lanes_dir.glob("*.jsonl")) if lanes_dir.is_dir() else []:
+        lane_bytes = lane.read_bytes()
+        lanes[lane] = len(lane_bytes)
+        for row in _parse_ledger(lane_bytes, f"{lanes_dir.name}/{lane.name}"):
+            key = (row.get("ticker"), row.get("verdict_date"))
+            if key not in seen:
+                seen.add(key)
+                rows.append(row)
+    return _VerdictSnapshot(rows, path, content, lanes)
 
 
 @contextmanager
@@ -403,7 +441,13 @@ def _save_verdicts(rows: list[dict]) -> None:
     Quote retrieval happens before this short transaction. If any writer has
     changed the loaded bytes, reject the stale result and preserve the newer ledger.
     Reload and retry the command to score or backfill the current set of rows.
+
+    Primary machine only. The rewrite folds the lanes the snapshot read into the full ledger,
+    then deletes each of those lane files whose size has not changed since it was read; a lane
+    that grew keeps its new rows (its folded rows are dropped as duplicates on the next load).
     """
+    from machine_role import refuse_on_secondary
+    refuse_on_secondary()
     content = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
     target = prepare_output(_verdicts_file())
     with _ledger_lock(target):
@@ -411,14 +455,24 @@ def _save_verdicts(rows: list[dict]) -> None:
             current = target.read_bytes()
         except FileNotFoundError:
             current = None
+        lanes = {}
         if isinstance(rows, _VerdictSnapshot):
             if rows.source_path != target or rows.source_bytes != current:
                 raise RuntimeError("Ledger changed during quote retrieval; reload and retry. No rows were overwritten.")
+            lanes = rows.lanes
         elif current is not None:
             raise RuntimeError("An existing ledger requires a loaded snapshot; reload before rewriting.")
         previous = [json.loads(line) for line in (current or b"").decode("utf-8").splitlines() if line.strip()]
+        for lane in lanes:
+            previous += [json.loads(line) for line in lane.read_bytes().decode("utf-8").splitlines() if line.strip()]
         _validate_adjudication_writes(previous, rows)
         _replace_verdicts(target, content)
+        for lane, size in lanes.items():
+            try:
+                if lane.stat().st_size == size:
+                    lane.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _validate_adjudication_writes(previous, rows):
@@ -454,9 +508,11 @@ def _replace_verdicts(target, content):
 
 
 def _append_verdict(row: dict) -> bool:
-    """Atomically deduplicate and append; return whether a new row was recorded."""
+    """Deduplicate against the full ledger and every lane, then append to this machine's lane
+    (an unset CLAUDE_MACHINE_ID raises); return whether a new row was recorded."""
     _require_adjudication_receipt(row)
     target = prepare_output(_verdicts_file())
+    lane = prepare_output(_own_lane())
     with _ledger_lock(target):
         rows = _load_verdicts()
         if not isinstance(rows, _VerdictSnapshot) or rows.source_path != target:
@@ -464,9 +520,13 @@ def _append_verdict(row: dict) -> bool:
         key = (row["ticker"], row["verdict_date"])
         if any((existing["ticker"], existing["verdict_date"]) == key for existing in rows):
             return False
-        rows.append(row)
-        content = "\n".join(json.dumps(item, ensure_ascii=False) for item in rows) + "\n"
-        _replace_verdicts(target, content)
+        try:
+            existing = lane.read_bytes().decode("utf-8")
+        except FileNotFoundError:
+            existing = ""
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        _replace_verdicts(lane, existing + json.dumps(row, ensure_ascii=False) + "\n")
         return True
 
 
@@ -824,7 +884,7 @@ def cmd_record(args) -> None:
               f"entry={price_str} | {DEFAULT_BENCHMARK}={bm_str} | horizon={row['horizon_months']}m")
 
     print(f"\nRecorded {added} new verdict(s). {warned} duplicate(s) skipped.")
-    print(f"Verdicts file: {_verdicts_file()}")
+    print(f"Lane: {_own_lane()} (the primary folds lanes into {_verdicts_file().name} on --score)")
 
 
 # ---------------------------------------------------------------------------
@@ -1060,7 +1120,9 @@ def cmd_score(args) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_scorecard(args) -> None:
-    """--scorecard: aggregate scored verdicts and write metrics/scorecard.md."""
+    """--scorecard: aggregate scored verdicts and write metrics/scorecard.md (primary only)."""
+    from machine_role import refuse_on_secondary
+    refuse_on_secondary()
     destination = prove_output_path(_scorecard_file())
     rows = _load_verdicts()
     today_str = _today()
@@ -2097,6 +2159,11 @@ def main() -> int | None:
     if args.selftest:
         _selftest()
         return
+
+    if args.adjudicate or args.score or args.backfill:
+        # These rewrite the full ledger; refuse before any quote retrieval on the secondary.
+        from machine_role import refuse_on_secondary
+        refuse_on_secondary()
 
     if args.adjudicate:
         cmd_adjudicate(args)
