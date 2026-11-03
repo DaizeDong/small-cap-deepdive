@@ -20,9 +20,10 @@ not touch `verdicts.jsonl`: it appends to this machine's lane
 `<private data dir>/metrics/verdicts.jsonl.d/<CLAUDE_MACHINE_ID>.jsonl` (for example `node-a.jsonl`;
 an unset id fails), so two machines never write the same file. Every reader merges the full
 ledger with all lanes, and the full ledger's row wins for a repeated (ticker, verdict_date).
-`--score`, `--backfill`, `--adjudicate` and `--scorecard` run only on the primary machine (the
-secondary prints `secondary machine: do this on the primary`); their rewrite folds the lanes
-into `verdicts.jsonl` and deletes each lane it read whose size has not changed since. Bare
+`--score`, `--backfill`, `--adjudicate` and `--scorecard` run on either machine; their rewrite
+folds the lanes into `verdicts.jsonl` and deletes each lane it read whose size has not changed
+since. If both machines rewrite on the same day, the nightly sync reports the conflict and a
+person merges it. Bare
 `metrics/...` paths below refer to this private directory. The public source contains only
 generated `verdicts.jsonl.example` and `scorecard.md.example` schemas.
 

@@ -40,7 +40,7 @@ Usage (REPORTS_ROOT is the resolved absolute private path):
 Output: _metrics_dir()/verdicts.jsonl and _metrics_dir()/scorecard.md.
 --record appends to this machine's lane, _metrics_dir()/verdicts.jsonl.d/<CLAUDE_MACHINE_ID>.jsonl
 (an unset id fails). Readers merge the full ledger with every lane. --score, --backfill,
---adjudicate and --scorecard run only on the primary machine: a rewrite folds the lanes into
+--adjudicate and --scorecard run on either machine: a rewrite folds the lanes into
 verdicts.jsonl and deletes each lane it read whose size has not changed since.
 _metrics_dir() uses the same companion root as configuration and reports, then
 selects its data/metrics child. SMALL_CAP_DEEPDIVE_DATA_DIR must select that
@@ -103,13 +103,13 @@ def _metrics_dir() -> Path:
 
 
 def _verdicts_file() -> Path:
-    """The full ledger. Only the primary machine rewrites it (--score, --backfill, --adjudicate)."""
+    """The full ledger. --score, --backfill and --adjudicate rewrite it, on either machine."""
     return _metrics_dir() / "verdicts.jsonl"
 
 
 def _verdict_lanes_dir() -> Path:
     """New verdicts land here first, one `<CLAUDE_MACHINE_ID>.jsonl` lane per machine, so two
-    machines never append to the same file. The primary folds them into the full ledger."""
+    machines never append to the same file. A full-ledger rewrite folds them in."""
     return _metrics_dir() / "verdicts.jsonl.d"
 
 
@@ -363,7 +363,7 @@ class _VerdictSnapshot(list):
     """List-compatible ledger rows bound to the bytes and path originally read.
 
     `lanes` maps each per-machine lane file that was read to its size at read time, so the
-    primary can delete exactly the lanes it folded in and keep any that grew meanwhile."""
+    rewrite can delete exactly the lanes it folded in and keep any that grew meanwhile."""
 
     def __init__(self, rows, source_path, source_bytes, lanes=None):
         super().__init__(rows)
@@ -389,7 +389,7 @@ def _parse_ledger(content: bytes, label: str) -> list[dict]:
 
 def _load_verdicts() -> list[dict]:
     """The full ledger plus every machine's lane. A lane row whose (ticker, verdict_date) is
-    already in the full ledger is a copy the primary has folded in; the full ledger's row wins."""
+    already in the full ledger is a copy a rewrite has folded in; the full ledger's row wins."""
     try:
         path = _verdicts_file().resolve()
         lanes_dir = _verdict_lanes_dir().resolve()
@@ -442,12 +442,11 @@ def _save_verdicts(rows: list[dict]) -> None:
     changed the loaded bytes, reject the stale result and preserve the newer ledger.
     Reload and retry the command to score or backfill the current set of rows.
 
-    Primary machine only. The rewrite folds the lanes the snapshot read into the full ledger,
+    Either machine may run it. The rewrite folds the lanes the snapshot read into the full ledger,
     then deletes each of those lane files whose size has not changed since it was read; a lane
     that grew keeps its new rows (its folded rows are dropped as duplicates on the next load).
+    If both machines rewrite on the same day, the nightly sync reports the conflict for a person to merge.
     """
-    from machine_role import refuse_on_secondary
-    refuse_on_secondary()
     content = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
     target = prepare_output(_verdicts_file())
     with _ledger_lock(target):
@@ -884,7 +883,7 @@ def cmd_record(args) -> None:
               f"entry={price_str} | {DEFAULT_BENCHMARK}={bm_str} | horizon={row['horizon_months']}m")
 
     print(f"\nRecorded {added} new verdict(s). {warned} duplicate(s) skipped.")
-    print(f"Lane: {_own_lane()} (the primary folds lanes into {_verdicts_file().name} on --score)")
+    print(f"Lane: {_own_lane()} (lanes are folded into {_verdicts_file().name} on --score)")
 
 
 # ---------------------------------------------------------------------------
@@ -1120,9 +1119,7 @@ def cmd_score(args) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_scorecard(args) -> None:
-    """--scorecard: aggregate scored verdicts and write metrics/scorecard.md (primary only)."""
-    from machine_role import refuse_on_secondary
-    refuse_on_secondary()
+    """--scorecard: aggregate scored verdicts and write metrics/scorecard.md."""
     destination = prove_output_path(_scorecard_file())
     rows = _load_verdicts()
     today_str = _today()
@@ -2159,11 +2156,6 @@ def main() -> int | None:
     if args.selftest:
         _selftest()
         return
-
-    if args.adjudicate or args.score or args.backfill:
-        # These rewrite the full ledger; refuse before any quote retrieval on the secondary.
-        from machine_role import refuse_on_secondary
-        refuse_on_secondary()
 
     if args.adjudicate:
         cmd_adjudicate(args)
